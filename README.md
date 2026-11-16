@@ -35,3 +35,16 @@
   * Панель **«Докупить по списку»** при открытии торговца — скупает нужные реагенты (уголь, плавень, нитки, колбы, специи) в 1 клик.
 * **Мгновенное переключение языка `RU` / `EN`** прямо в шапке окна без `/reload`.
 
+---
+
+## License & Data Attribution
+
+**TradeFlow** is licensed under the **GNU General Public License v3.0 or later (`GPL-3.0-or-later`)**. See [LICENSE](LICENSE) for full terms.
+
+The static profession tables in `Data/` (`Recipes.lua`, `Thresholds.lua`, `Trainer.lua`, `Vendor.lua`, `Sources.lua`) are derived from the following open-source projects and databases:
+* **[SkillUp Forever](https://github.com/cjber/skillup-forever)** by `cjber` (`GPL-3.0-or-later`) — WoW Forever (`1.60.1.70938`) recipe, threshold, trainer, vendor, and source tables.
+* **[wago.tools](https://wago.tools)** DB2 tables (`wow_classic_beta 1.60.1.70938` / `wow_classic_era 1.15.9.70576`).
+* **[CMaNGOS classic-db](https://github.com/cmangos/classic-db)** (`GPL-3.0`) — trainer fees, rank quests, limited vendor stock, and scroll drop tables.
+* **[LibPeriodicTable-3.1](https://www.curseforge.com/wow/addons/libperiodictable-3-1)** (`LGPL-2.1`) — vendor reagent item IDs.
+
+
