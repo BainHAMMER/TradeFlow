@@ -92,6 +92,9 @@ ns.Locales.en = {
 	["VENDOR_BAR_TITLE"] = "TradeFlow: queued vendor reagents (%d items for %s)",
 	["VENDOR_BUY_BTN"] = "Buy Missing List",
 	["VENDOR_BOUGHT_MSG"] = "Bought from vendor: %s x%d",
+	["BANK_BAR_TITLE"] = "TradeFlow: queued mats in bank (%d items)",
+	["BANK_WITHDRAW_BTN"] = "Withdraw Mats",
+	["BANK_WITHDRAWN_MSG"] = "Withdrawn from bank: %s x%d",
 
 	-- Ranks
 	["RANK_75"] = "Apprentice (75)",

@@ -7,6 +7,7 @@ local L = ns.L
 -------------------------------------------------------------------------------
 local lastSyncedSignature = nil
 local vendorBar = nil
+local bankBar = nil
 
 function ns:GetAuctionatorListName()
 	return "TradeFlow: " .. self:CharKey()
@@ -375,6 +376,9 @@ for _, ev in ipairs({
 	"MERCHANT_UPDATE",
 	"MERCHANT_CLOSED",
 	"BAG_UPDATE_DELAYED",
+	"BANKFRAME_OPENED",
+	"BANKFRAME_CLOSED",
+	"PLAYERBANKSLOTS_CHANGED",
 }) do
 	pcall(merchantEventFrame.RegisterEvent, merchantEventFrame, ev)
 end
@@ -386,8 +390,232 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 		if ns.RefreshQueueAndShoppingView then
 			ns:RefreshQueueAndShoppingView()
 		end
+	elseif event == "BANKFRAME_CLOSED" then
+		if bankBar then
+			bankBar:Hide()
+		end
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
+		end
+	elseif event == "BANKFRAME_OPENED" or event == "PLAYERBANKSLOTS_CHANGED" then
+		ns:RefreshBankBar()
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
+		end
 	else
 		ns:OnMerchantShow()
+		if BankFrame and BankFrame:IsShown() then
+			ns:RefreshBankBar()
+		end
 	end
 end)
+
+-------------------------------------------------------------------------------
+-- Панель и кнопка «Забрать материалы» в окне банка (BANKFRAME_OPENED)
+-------------------------------------------------------------------------------
+local function CollectBankMatches()
+	if not (BankFrame and BankFrame:IsShown()) then
+		return {}
+	end
+	local shopping = ns:GetShoppingList()
+	local needByItem = {}
+	for _, item in ipairs(shopping) do
+		if item.missing > 0 and item.inBank > 0 then
+			needByItem[item.itemID] = math.min(item.missing, item.inBank)
+		end
+	end
+	if not next(needByItem) then
+		return {}
+	end
+
+	local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
+	if not GetNumSlots then
+		return {}
+	end
+
+	local maxBag = NUM_BAG_SLOTS or 4
+	local bankContainers = { -1 }
+	for b = maxBag + 1, maxBag + (NUM_BANKBAGSLOTS or 7) do
+		bankContainers[#bankContainers + 1] = b
+	end
+
+	local matchesByItem = {}
+	local order = {}
+	for _, bag in ipairs(bankContainers) do
+		local slots = GetNumSlots(bag) or 0
+		for slot = 1, slots do
+			local itemID = GetID and GetID(bag, slot)
+			local need = itemID and needByItem[itemID]
+			if need and need > 0 then
+				local count = 1
+				if C_Container and C_Container.GetContainerItemInfo then
+					local info = C_Container.GetContainerItemInfo(bag, slot)
+					count = (info and info.stackCount) or 1
+				elseif GetInfo then
+					local _, c = GetInfo(bag, slot)
+					count = c or 1
+				end
+				if not matchesByItem[itemID] then
+					matchesByItem[itemID] = { itemID = itemID, need = need, totalTake = 0, slots = {} }
+					order[#order + 1] = matchesByItem[itemID]
+				end
+				local entry = matchesByItem[itemID]
+				local rem = entry.need - entry.totalTake
+				if rem > 0 then
+					local take = math.min(rem, count)
+					entry.slots[#entry.slots + 1] = { bag = bag, slot = slot, count = count, take = take }
+					entry.totalTake = entry.totalTake + take
+				end
+			end
+		end
+	end
+	return order
+end
+
+function ns:GetBankShoppingMatches()
+	return CollectBankMatches()
+end
+
+local function FindFreePlayerBagSlot()
+	local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+	local GetFree = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+	local maxBag = NUM_BAG_SLOTS or 4
+	for bag = 0, maxBag do
+		local free = GetFree and GetFree(bag)
+		if not free or free > 0 then
+			local slots = GetNumSlots and GetNumSlots(bag) or 0
+			for slot = 1, slots do
+				if not (GetID and GetID(bag, slot)) then
+					return bag, slot
+				end
+			end
+		end
+	end
+	return nil, nil
+end
+
+function ns:WithdrawBankShoppingList()
+	local matches = CollectBankMatches()
+	if #matches == 0 then
+		return
+	end
+	local UseItem = (C_Container and C_Container.UseContainerItem) or UseContainerItem
+	local SplitItem = (C_Container and C_Container.SplitContainerItem) or SplitContainerItem
+	local PickupItem = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
+	if not UseItem then
+		return
+	end
+	if ClearCursor then
+		ClearCursor()
+	end
+
+	for _, m in ipairs(matches) do
+		local moved = 0
+		for _, s in ipairs(m.slots) do
+			if s.take >= s.count then
+				pcall(UseItem, s.bag, s.slot)
+				moved = moved + s.count
+			elseif SplitItem and PickupItem then
+				local dstBag, dstSlot = FindFreePlayerBagSlot()
+				if dstBag and dstSlot then
+					pcall(SplitItem, s.bag, s.slot, s.take)
+					pcall(PickupItem, dstBag, dstSlot)
+					moved = moved + s.take
+				else
+					pcall(UseItem, s.bag, s.slot)
+					moved = moved + s.count
+				end
+			else
+				pcall(UseItem, s.bag, s.slot)
+				moved = moved + s.count
+			end
+		end
+		if moved > 0 then
+			local name = self:GetItemDisplay(m.itemID)
+			self:Print(string.format(L["BANK_WITHDRAWN_MSG"], name, moved))
+		end
+	end
+
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.25, function()
+			ns:ScanBagsNow()
+			ns:RefreshBankBar()
+			if ns.RefreshQueueAndShoppingView then
+				ns:RefreshQueueAndShoppingView()
+			end
+		end)
+	end
+end
+
+function ns:RefreshBankBar()
+	if not (BankFrame and BankFrame:IsShown()) then
+		if bankBar then
+			bankBar:Hide()
+		end
+		return
+	end
+
+	local matches = CollectBankMatches()
+	if #matches == 0 then
+		if bankBar then
+			bankBar:Hide()
+		end
+		return
+	end
+
+	if not bankBar then
+		bankBar = CreateFrame("Frame", "TradeFlowBankBar", BankFrame, "BackdropTemplate")
+		bankBar:SetHeight(38)
+		bankBar:SetPoint("TOPLEFT", BankFrame, "BOTTOMLEFT", 0, -2)
+		bankBar:SetPoint("TOPRIGHT", BankFrame, "BOTTOMRIGHT", 0, -2)
+		bankBar:SetFrameStrata("DIALOG")
+		bankBar:SetToplevel(true)
+		bankBar:SetClampedToScreen(true)
+		bankBar:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true, tileSize = 16, edgeSize = 12,
+			insets = { left = 3, right = 3, top = 3, bottom = 3 },
+		})
+		bankBar:SetBackdropColor(0.08, 0.07, 0.05, 0.96)
+		bankBar:SetBackdropBorderColor(0.45, 0.72, 0.95, 1)
+
+		bankBar.label = bankBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		bankBar.label:SetPoint("LEFT", 10, 0)
+		bankBar.label:SetPoint("RIGHT", -155, 0)
+		bankBar.label:SetJustifyH("LEFT")
+		bankBar.label:SetWordWrap(false)
+
+		bankBar.btn = CreateFrame("Button", nil, bankBar, "UIPanelButtonTemplate")
+		bankBar.btn:SetSize(145, 24)
+		bankBar.btn:SetPoint("RIGHT", -8, 0)
+		bankBar.btn:SetScript("OnClick", function()
+			ns:WithdrawBankShoppingList()
+		end)
+		bankBar.btn:SetScript("OnEnter", function(self)
+			local curMatches = CollectBankMatches()
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:AddLine(L["BANK_WITHDRAW_BTN"], 1, 0.82, 0)
+			for _, m in ipairs(curMatches) do
+				local name, _, _, _, _, hex = ns:GetItemDisplay(m.itemID)
+				GameTooltip:AddDoubleLine(
+					(hex or "|cffffffff") .. name .. "|r",
+					"x" .. m.totalTake,
+					1, 1, 1, 0.4, 0.85, 1
+				)
+			end
+			GameTooltip:Show()
+		end)
+		bankBar.btn:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+	end
+
+	bankBar.label:SetText(string.format(L["BANK_BAR_TITLE"], #matches))
+	bankBar.btn:SetText(L["BANK_WITHDRAW_BTN"])
+	bankBar:Show()
+end
 

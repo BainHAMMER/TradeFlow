@@ -207,6 +207,18 @@ function ns:CreateQueueAndShoppingView(parent)
 	buyVendorBtn:Hide()
 	f.buyVendorBtn = buyVendorBtn
 
+	local withdrawBankBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	withdrawBankBtn:SetSize(145, 24)
+	withdrawBankBtn:SetPoint("RIGHT", syncAtrBtn, "LEFT", -4, 0)
+	withdrawBankBtn:SetText(L["BANK_WITHDRAW_BTN"])
+	withdrawBankBtn:SetScript("OnClick", function()
+		if ns.WithdrawBankShoppingList then
+			ns:WithdrawBankShoppingList()
+		end
+	end)
+	withdrawBankBtn:Hide()
+	f.withdrawBankBtn = withdrawBankBtn
+
 	self.queueView = f
 	return f
 end
@@ -328,6 +340,8 @@ function ns:RefreshQueueAndShoppingView()
 	local isQueue = (f.activeMode == "queue")
 	local vendorMatches = (self.GetMerchantShoppingMatches and self:GetMerchantShoppingMatches()) or {}
 	local hasVendorMatches = (#vendorMatches > 0)
+	local bankMatches = (self.GetBankShoppingMatches and self:GetBankShoppingMatches()) or {}
+	local hasBankMatches = (#bankMatches > 0)
 
 	f.processBtn:SetShown(isQueue)
 	f.clearBtn:SetShown(isQueue)
@@ -343,6 +357,16 @@ function ns:RefreshQueueAndShoppingView()
 			f.buyVendorBtn:SetPoint("RIGHT", f.syncAtrBtn, "LEFT", -4, 0)
 		end
 		f.buyVendorBtn:SetShown(hasVendorMatches)
+	end
+
+	if f.withdrawBankBtn then
+		f.withdrawBankBtn:ClearAllPoints()
+		if isQueue then
+			f.withdrawBankBtn:SetPoint("BOTTOMRIGHT", -8, 5)
+		else
+			f.withdrawBankBtn:SetPoint("RIGHT", f.syncAtrBtn, "LEFT", -4, 0)
+		end
+		f.withdrawBankBtn:SetShown(hasBankMatches and not hasVendorMatches)
 	end
 
 	if isQueue then

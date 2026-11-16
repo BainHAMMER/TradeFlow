@@ -92,6 +92,9 @@ ns.Locales.ru = {
 	["VENDOR_BAR_TITLE"] = "TradeFlow: реагенты по очереди (%d поз. на %s)",
 	["VENDOR_BUY_BTN"] = "Докупить у торговца",
 	["VENDOR_BOUGHT_MSG"] = "Куплено у торговца: %s x%d",
+	["BANK_BAR_TITLE"] = "TradeFlow: материалы для очереди (%d поз.)",
+	["BANK_WITHDRAW_BTN"] = "Забрать материалы",
+	["BANK_WITHDRAWN_MSG"] = "Забрано из банка: %s x%d",
 
 	-- Ранги
 	["RANK_75"] = "Ученик (75)",
