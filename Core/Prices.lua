@@ -38,8 +38,7 @@ function ns:GetItemDisenchantInfo(itemID)
 	if self.db and self.db.options and self.db.options.includeDisenchant == false then
 		return nil
 	end
-	local ench = self.playerProfessions and self.playerProfessions[333]
-	if not (ench and itemID and itemID > 0 and C_Item and C_Item.GetItemInfo) then
+	if not (itemID and itemID > 0 and C_Item and C_Item.GetItemInfo) then
 		return nil
 	end
 	local _, _, quality, iLevel, _, _, _, _, _, _, _, classID = C_Item.GetItemInfo(itemID)
@@ -50,7 +49,6 @@ function ns:GetItemDisenchantInfo(itemID)
 		return nil
 	end
 
-	local enchRank = ench.rank or 1
 	local yields = {}
 	local reqSkill = 1
 
@@ -63,9 +61,6 @@ function ns:GetItemDisenchantInfo(itemID)
 			end
 		end
 		reqSkill = row[2]
-		if enchRank < reqSkill then
-			return nil
-		end
 		local isWeapon = (classID == 2)
 		local hasShard = row[7] ~= nil
 		local dustChance = isWeapon and 0.20 or (hasShard and 0.75 or 0.80)
@@ -84,9 +79,6 @@ function ns:GetItemDisenchantInfo(itemID)
 			end
 		end
 		reqSkill = row[2]
-		if enchRank < reqSkill then
-			return nil
-		end
 		if iLevel >= 56 then
 			yields[#yields + 1] = { itemID = row[3], chance = 0.995, avg = 1 }
 			yields[#yields + 1] = { itemID = 20725,  chance = 0.005, avg = 1 }
@@ -95,9 +87,6 @@ function ns:GetItemDisenchantInfo(itemID)
 		end
 	elseif quality == 4 then
 		reqSkill = (iLevel >= 56) and 225 or 175
-		if enchRank < reqSkill then
-			return nil
-		end
 		if iLevel >= 56 then
 			yields[#yields + 1] = { itemID = 20725, chance = 1.0, avg = 1.5 }
 		else
