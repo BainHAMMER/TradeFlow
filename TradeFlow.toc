@@ -1,0 +1,35 @@
+## Interface: 16001
+## Title: TradeFlow
+## Notes: Fast crafting queue (DAG) & profession leveling calculator with real in-game item display and Auctionator integration.
+## Notes-ruRU: Быстрая умная очередь крафта (DAG) и калькулятор прокачки профессий с отображением реальных предметов по ID и интеграцией с Auctionator.
+## Author: bainh
+## Version: 1.0.0
+## Category: Professions
+## Category-ruRU: Профессии
+## X-License: GPL-3.0-or-later
+## SavedVariables: TradeFlowDB
+## OptionalDeps: Auctionator, TradeSkillMaster, Syndicator
+## IconTexture: Interface\Icons\Trade_BlackSmithing
+## AddonCompartmentFunc: TradeFlow_OnAddonCompartmentClick
+
+Locales\Locale.lua
+Locales\ruRU.lua
+Locales\enUS.lua
+
+Data\Thresholds.lua
+Data\Vendor.lua
+Data\Trainer.lua
+Data\Sources.lua
+Data\Recipes.lua
+
+Core\Core.lua
+Core\Inventory.lua
+Core\Prices.lua
+Core\Planner.lua
+Core\Queue.lua
+
+UI\VendorAuction.lua
+UI\RouteView.lua
+UI\QueueView.lua
+UI\MainFrame.lua
+
