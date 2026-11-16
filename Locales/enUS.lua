@@ -76,6 +76,7 @@ ns.Locales.en = {
 	["QUEUE_STATUS_READY"] = "|cff40ff40Ready (%d)|r",
 	["QUEUE_STATUS_PARTIAL"] = "|cffffd100%d of %d ready|r",
 	["QUEUE_STATUS_WAIT"] = "|cffff8040Waiting for mats|r",
+	["QUEUE_STATUS_UNLEARNED"] = "|cffff5555Unlearned|r",
 	["QUEUE_STATUS_OTHER_PROF"] = "|cff66ccffProf: %s|r",
 	["QUEUE_SUBCRAFT_BADGE"] = "|cffaaaaaa[sub]|r ",
 

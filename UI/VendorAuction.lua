@@ -413,6 +413,14 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 		if ns.RefreshQueueAndShoppingView then
 			ns:RefreshQueueAndShoppingView()
 		end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.1, function()
+				ns:RefreshTrainerBar()
+				if ns.RefreshQueueAndShoppingView then
+					ns:RefreshQueueAndShoppingView()
+				end
+			end)
+		end
 	elseif event == "BANKFRAME_OPENED" or event == "PLAYERBANKSLOTS_CHANGED" then
 		ns:RefreshBankBar()
 		if ns.RefreshQueueAndShoppingView then
@@ -657,12 +665,21 @@ local function CollectTrainerMatches()
 	local queue = ns:GetQueue()
 	local needLearn = {}
 	local needByName = {}
+	local needByOutItem = {}
 	for _, step in ipairs(queue) do
 		if step.recipeID and not ns:IsRecipeLearned(step.recipeID) and not needLearn[step.recipeID] then
 			needLearn[step.recipeID] = true
-			local rName = ns:GetRecipeDisplay(step.recipeID)
+			local rName, _, outItemID = ns:GetRecipeDisplay(step.recipeID)
 			if rName then
-				needByName[rName] = step.recipeID
+				needByName[rName:lower()] = step.recipeID
+			end
+			local spName = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(step.recipeID))
+				or (GetSpellInfo and GetSpellInfo(step.recipeID))
+			if spName then
+				needByName[spName:lower()] = step.recipeID
+			end
+			if outItemID and outItemID > 0 then
+				needByOutItem[outItemID] = step.recipeID
 			end
 		end
 	end
@@ -678,8 +695,15 @@ local function CollectTrainerMatches()
 		if category == "available" then
 			local link = GetTrainerServiceItemLink and GetTrainerServiceItemLink(i)
 			local spellID = link and tonumber(link:match("spell:(%d+)") or link:match("enchant:(%d+)"))
-			if not spellID and name and needByName[name] then
-				spellID = needByName[name]
+			if not spellID and link then
+				local itemID = tonumber(link:match("item:(%d+)"))
+				if itemID and needByOutItem[itemID] then
+					spellID = needByOutItem[itemID]
+				end
+			end
+			if not spellID and name then
+				local clean = name:gsub("^.-:%s*", ""):lower()
+				spellID = needByName[name:lower()] or needByName[clean]
 			end
 			if spellID and needLearn[spellID] then
 				local cost = (GetTrainerServiceCost and GetTrainerServiceCost(i)) or 0

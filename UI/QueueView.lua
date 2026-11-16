@@ -284,6 +284,8 @@ function ns:RenderQueueOrShoppingRows()
 					statusStr = string.format(L["QUEUE_STATUS_PARTIAL"], readyCrafts, step.count)
 				elseif state == "other_prof" then
 					statusStr = string.format(L["QUEUE_STATUS_OTHER_PROF"], self:GetProfessionName(stepSL))
+				elseif state == "unlearned" then
+					statusStr = L["QUEUE_STATUS_UNLEARNED"]
 				else
 					statusStr = L["QUEUE_STATUS_WAIT"]
 				end

@@ -76,6 +76,7 @@ ns.Locales.ru = {
 	["QUEUE_STATUS_READY"] = "|cff40ff40Готово (%d)|r",
 	["QUEUE_STATUS_PARTIAL"] = "|cffffd100Доступно %d из %d|r",
 	["QUEUE_STATUS_WAIT"] = "|cffff8040Не хватает реагентов|r",
+	["QUEUE_STATUS_UNLEARNED"] = "|cffff5555Не изучено|r",
 	["QUEUE_STATUS_OTHER_PROF"] = "|cff66ccffПрофессия: %s|r",
 	["QUEUE_SUBCRAFT_BADGE"] = "|cffaaaaaa[этап]|r ",
 

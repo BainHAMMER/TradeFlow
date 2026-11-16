@@ -214,13 +214,13 @@ function ns:QueueClear()
 	self:OnQueueUpdated()
 end
 
--- Статус конкретного шага очереди: readyCrafts, state ("ready" | "partial" | "other_prof" | "wait")
+-- Статус конкретного шага очереди: readyCrafts, state ("ready" | "partial" | "other_prof" | "unlearned" | "wait")
 function ns:GetQueueStepStatus(step)
 	if not step then
 		return 0, "wait"
 	end
 	if not self:IsRecipeLearned(step.recipeID) then
-		return 0, "wait"
+		return 0, "unlearned"
 	end
 	local rec = self:GetRecipeRecord(step.recipeID)
 	if not rec then
