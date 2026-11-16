@@ -102,11 +102,11 @@ function ns:CreateRouteView(parent)
 
 	-- Отдельные поля справа: 1) Затраты (реагенты + тренер) и 2) Расчётный возврат (вендор / аукцион)
 	f.summaryText = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	f.summaryText:SetPoint("TOPRIGHT", 0, -4)
+	f.summaryText:SetPoint("TOPRIGHT", -6, -4)
 	f.summaryText:SetJustifyH("RIGHT")
 
 	f.returnText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	f.returnText:SetPoint("TOPRIGHT", 0, -22)
+	f.returnText:SetPoint("TOPRIGHT", -6, -22)
 	f.returnText:SetJustifyH("RIGHT")
 
 	-- Список шагов маршрута
@@ -157,18 +157,6 @@ function ns:CreateRouteView(parent)
 		row.icon:SetPoint("LEFT", 4, 0)
 		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
-		row.title = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
-		row.title:SetPoint("RIGHT", -135, 0)
-		row.title:SetJustifyH("LEFT")
-		row.title:SetWordWrap(false)
-
-		row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
-		row.sub:SetPoint("RIGHT", -135, 0)
-		row.sub:SetJustifyH("LEFT")
-		row.sub:SetWordWrap(false)
-
 		row.skipBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 		row.skipBtn:SetSize(20, 20)
 		row.skipBtn:SetPoint("RIGHT", -4, 0)
@@ -205,6 +193,18 @@ function ns:CreateRouteView(parent)
 		row.ret = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		row.ret:SetPoint("BOTTOMRIGHT", row.queueBtn, "BOTTOMLEFT", -6, -1)
 		row.ret:SetJustifyH("RIGHT")
+
+		row.title = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
+		row.title:SetPoint("RIGHT", row.cost, "LEFT", -8, 0)
+		row.title:SetJustifyH("LEFT")
+		row.title:SetWordWrap(false)
+
+		row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
+		row.sub:SetPoint("RIGHT", row.ret, "LEFT", -8, 0)
+		row.sub:SetJustifyH("LEFT")
+		row.sub:SetWordWrap(false)
 
 		row:SetScript("OnClick", function(self)
 			local st = self.stepData
