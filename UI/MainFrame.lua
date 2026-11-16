@@ -744,14 +744,8 @@ function ns:CreateDetailsView(parent)
 		if not rID then
 			return
 		end
-		if ns.currentSkillLine and ns:GetActiveClientSkillLine() ~= ns.currentSkillLine then
-			ns:SwitchToProfession(ns.currentSkillLine)
-			return
-		end
-		if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
-			local count = math.max(1, tonumber(qtyBox:GetText()) or 1)
-			C_TradeSkillUI.CraftRecipe(rID, count)
-		end
+		local count = math.max(1, tonumber(qtyBox:GetText()) or 1)
+		ns:ExecuteCraftRecipe(rID, count)
 	end)
 	d.craftNowBtn = craftNowBtn
 

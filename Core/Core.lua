@@ -184,7 +184,7 @@ function ns:GetRecipeDisplay(recipeID)
 
 	if outItemID and outItemID > 0 then
 		local itemName, itemIcon, quality, itemLink, loaded, hex = self:GetItemDisplay(outItemID)
-		return spellName or (loaded and itemName) or string.format(L["SPELL_LOADING"], recipeID),
+		return (loaded and itemName) or spellName or string.format(L["SPELL_LOADING"], recipeID),
 			(itemIcon and itemIcon ~= "Interface\\Icons\\INV_Misc_QuestionMark") and itemIcon or spellIcon or "Interface\\Icons\\Trade_BlackSmithing",
 			outItemID,
 			quality,
@@ -393,6 +393,7 @@ function ns:ScanPlayerProfessions()
 				if norm and self.PROF_SPELLS[norm] then
 					found[norm] = {
 						skillLine = norm,
+						professionID = skillLine,
 						name = name or self:GetProfessionName(norm),
 						rank = rank or 1,
 						maxRank = maxRank or 75,
@@ -491,11 +492,13 @@ function ns:ScanActiveTradeSkill()
 	end
 
 	self.currentSkillLine = skillLine
+	local prevProf = self.playerProfessions[skillLine]
 	self.playerProfessions[skillLine] = {
 		skillLine = skillLine,
+		professionID = (rawID and rawID > 0 and rawID) or (prevProf and prevProf.professionID) or skillLine,
 		name = rawName or self:GetProfessionName(skillLine),
-		rank = rank > 0 and rank or ((self.playerProfessions[skillLine] and self.playerProfessions[skillLine].rank) or 1),
-		maxRank = maxRank > 0 and maxRank or ((self.playerProfessions[skillLine] and self.playerProfessions[skillLine].maxRank) or 75),
+		rank = rank > 0 and rank or ((prevProf and prevProf.rank) or 1),
+		maxRank = maxRank > 0 and maxRank or ((prevProf and prevProf.maxRank) or 75),
 		icon = self.PROF_ICONS[skillLine],
 		spellID = self.PROF_SPELLS[skillLine],
 	}
@@ -615,27 +618,107 @@ function ns:GetActiveClientSkillLine()
 	if not C_TradeSkillUI then
 		return nil
 	end
+	local frameShown = (ProfessionsFrame and ProfessionsFrame:IsShown()) or (TradeSkillFrame and TradeSkillFrame:IsShown())
+	if not frameShown then
+		return nil
+	end
 	local baseInfo = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
 	local childInfo = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
 	local rawID = (childInfo and childInfo.parentProfessionID) or (baseInfo and baseInfo.professionID)
 	local rawName = (childInfo and childInfo.parentProfessionName) or (baseInfo and baseInfo.professionName)
-	return ns.NormalizeSkillLine(rawID, rawName)
+	local norm = ns.NormalizeSkillLine(rawID, rawName)
+	if norm and self.PROF_SPELLS[norm] then
+		return norm
+	end
+	if C_TradeSkillUI.GetAllRecipeIDs then
+		local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
+		if ok and type(ids) == "table" then
+			for _, id in ipairs(ids) do
+				local r = self.RecipeData and self.RecipeData[id]
+				if r and r.skillLine then
+					return r.skillLine
+				end
+			end
+		end
+	end
+	return nil
 end
 
-function ns:SwitchToProfession(skillLine)
-	if not skillLine then
-		return
+function ns:IsClientRecipeReady(recipeID)
+	if not recipeID or not C_TradeSkillUI then
+		return false
 	end
-	self.currentSkillLine = skillLine
-	self.bypassIntercept = false
-	self:SuppressBlizzardFrame()
+	local frameShown = (ProfessionsFrame and ProfessionsFrame:IsShown()) or (TradeSkillFrame and TradeSkillFrame:IsShown())
+	if not frameShown then
+		return false
+	end
+	if C_TradeSkillUI.IsTradeSkillReady then
+		local ok, ready = pcall(C_TradeSkillUI.IsTradeSkillReady)
+		if ok and ready == false then
+			return false
+		end
+	end
+	local rec = self:GetRecipeRecord(recipeID)
+	local activeSL = self:GetActiveClientSkillLine()
+	if rec and rec.skillLine and activeSL and rec.skillLine ~= activeSL then
+		return false
+	end
+	if C_TradeSkillUI.GetRecipeInfo then
+		local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+		return ok and type(info) == "table"
+	end
+	return activeSL ~= nil
+end
 
-	-- Если эта профессия уже открыта в клиенте, не вызываем CastSpellByName повторно (иначе игра закроет её)
-	local activeClientSL = self:GetActiveClientSkillLine()
-	if activeClientSL ~= skillLine or not (ProfessionsFrame and ProfessionsFrame:IsShown()) then
-		-- Для Горного дела (186) окно крафта открывается заклинанием Выплавка металлов (2656)
-		local spellID = (skillLine == 186 and 2656) or self.PROF_SPELLS[skillLine]
-		local profInfo = self.playerProfessions[skillLine]
+function ns:FindFirstLearnedRecipe(skillLine)
+	local list = self.RecipesBySkill and self.RecipesBySkill[skillLine]
+	if list then
+		for _, rID in ipairs(list) do
+			if self:IsRecipeLearned(rID) then
+				return rID
+			end
+		end
+		return list[1]
+	end
+	return nil
+end
+
+function ns:OpenClientTradeSkill(skillLine, recipeID)
+	if not skillLine or (InCombatLockdown and InCombatLockdown()) then
+		return false
+	end
+	self:SuppressBlizzardFrame()
+	local profInfo = self.playerProfessions[skillLine]
+	local opened = false
+
+	-- 1. C_TradeSkillUI.OpenTradeSkill с родным professionID Forever или классическим skillLine
+	if C_TradeSkillUI and C_TradeSkillUI.OpenTradeSkill then
+		if profInfo and profInfo.professionID then
+			local ok, res = pcall(C_TradeSkillUI.OpenTradeSkill, profInfo.professionID)
+			if ok and res then
+				opened = true
+			end
+		end
+		if not opened and (not profInfo or profInfo.professionID ~= skillLine) then
+			local ok, res = pcall(C_TradeSkillUI.OpenTradeSkill, skillLine)
+			if ok and res then
+				opened = true
+			end
+		end
+	end
+
+	-- 2. C_TradeSkillUI.OpenRecipe открывает окно нужной профессии напрямую по рецепту в WoW Forever
+	local targetRecipe = recipeID or self.selectedRecipeBySkill[skillLine] or self:FindFirstLearnedRecipe(skillLine)
+	if not opened and targetRecipe and C_TradeSkillUI and C_TradeSkillUI.OpenRecipe then
+		local ok = pcall(C_TradeSkillUI.OpenRecipe, targetRecipe)
+		if ok and self:GetActiveClientSkillLine() == skillLine then
+			opened = true
+		end
+	end
+
+	-- 3. Fallback через заклинание профессии (для Горного дела 186 — Выплавка металлов 2656)
+	if not opened and self:GetActiveClientSkillLine() ~= skillLine then
+		local spellID = (skillLine == 186 and 2656) or (profInfo and profInfo.spellID) or self.PROF_SPELLS[skillLine]
 		if spellID then
 			local spellName = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID))
 				or (profInfo and profInfo.name)
@@ -645,6 +728,48 @@ function ns:SwitchToProfession(skillLine)
 				pcall(CastSpellByID, spellID)
 			end
 		end
+	end
+
+	self:SuppressBlizzardFrame()
+	return self:GetActiveClientSkillLine() == skillLine
+end
+
+function ns:ExecuteCraftRecipe(recipeID, count)
+	if not recipeID or (InCombatLockdown and InCombatLockdown()) then
+		return false
+	end
+	count = math.max(1, count or 1)
+	local rec = self:GetRecipeRecord(recipeID)
+	local skillLine = (rec and rec.skillLine) or self.currentSkillLine
+
+	self.bypassIntercept = false
+	self:SuppressBlizzardFrame()
+
+	if not self:IsClientRecipeReady(recipeID) then
+		self:OpenClientTradeSkill(skillLine, recipeID)
+	end
+	if C_TradeSkillUI and C_TradeSkillUI.OpenRecipe then
+		pcall(C_TradeSkillUI.OpenRecipe, recipeID)
+	end
+	self:SuppressBlizzardFrame()
+
+	if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
+		pcall(C_TradeSkillUI.CraftRecipe, recipeID, count)
+		return true
+	end
+	return false
+end
+
+function ns:SwitchToProfession(skillLine, recipeID)
+	if not skillLine then
+		return
+	end
+	self.currentSkillLine = skillLine
+	self.bypassIntercept = false
+	self:SuppressBlizzardFrame()
+
+	if self:GetActiveClientSkillLine() ~= skillLine then
+		self:OpenClientTradeSkill(skillLine, recipeID)
 	end
 	self:SuppressBlizzardFrame()
 	if self.RefreshMainWindow then

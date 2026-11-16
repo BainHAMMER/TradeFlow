@@ -137,6 +137,8 @@ function ns:CreateQueueAndShoppingView(parent)
 			end
 			if self.recipeID and ns.SelectRecipeID then
 				ns:SelectRecipeID(self.recipeID)
+			elseif self.itemID and f.activeMode == "shopping" and MerchantFrame and MerchantFrame:IsShown() and ns.BuyVendorShoppingList then
+				ns:BuyVendorShoppingList(self.itemID)
 			end
 		end)
 		row:SetScript("OnEnter", function(self)
@@ -176,7 +178,7 @@ function ns:CreateQueueAndShoppingView(parent)
 	f.shopTotal = shopTotal
 
 	local searchAHBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	searchAHBtn:SetSize(130, 24)
+	searchAHBtn:SetSize(110, 24)
 	searchAHBtn:SetPoint("BOTTOMRIGHT", -8, 5)
 	searchAHBtn:SetText(L["BTN_SEARCH_AH"])
 	searchAHBtn:SetScript("OnClick", function()
@@ -185,13 +187,25 @@ function ns:CreateQueueAndShoppingView(parent)
 	f.searchAHBtn = searchAHBtn
 
 	local syncAtrBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	syncAtrBtn:SetSize(160, 24)
-	syncAtrBtn:SetPoint("RIGHT", searchAHBtn, "LEFT", -6, 0)
+	syncAtrBtn:SetSize(145, 24)
+	syncAtrBtn:SetPoint("RIGHT", searchAHBtn, "LEFT", -4, 0)
 	syncAtrBtn:SetText(L["BTN_SYNC_ATR"])
 	syncAtrBtn:SetScript("OnClick", function()
 		ns:SyncAuctionatorShoppingList(false)
 	end)
 	f.syncAtrBtn = syncAtrBtn
+
+	local buyVendorBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	buyVendorBtn:SetSize(145, 24)
+	buyVendorBtn:SetPoint("RIGHT", syncAtrBtn, "LEFT", -4, 0)
+	buyVendorBtn:SetText(L["VENDOR_BUY_BTN"])
+	buyVendorBtn:SetScript("OnClick", function()
+		if ns.BuyVendorShoppingList then
+			ns:BuyVendorShoppingList()
+		end
+	end)
+	buyVendorBtn:Hide()
+	f.buyVendorBtn = buyVendorBtn
 
 	self.queueView = f
 	return f
@@ -312,11 +326,24 @@ function ns:RefreshQueueAndShoppingView()
 	f.tabShop:SetText(string.format(L["TAB_SHOPPING"], #shopping))
 
 	local isQueue = (f.activeMode == "queue")
+	local vendorMatches = (self.GetMerchantShoppingMatches and self:GetMerchantShoppingMatches()) or {}
+	local hasVendorMatches = (#vendorMatches > 0)
+
 	f.processBtn:SetShown(isQueue)
 	f.clearBtn:SetShown(isQueue)
 	f.shopTotal:SetShown(not isQueue)
 	f.syncAtrBtn:SetShown(not isQueue)
 	f.searchAHBtn:SetShown(not isQueue)
+
+	if f.buyVendorBtn then
+		f.buyVendorBtn:ClearAllPoints()
+		if isQueue then
+			f.buyVendorBtn:SetPoint("BOTTOMRIGHT", -8, 5)
+		else
+			f.buyVendorBtn:SetPoint("RIGHT", f.syncAtrBtn, "LEFT", -4, 0)
+		end
+		f.buyVendorBtn:SetShown(hasVendorMatches)
+	end
 
 	if isQueue then
 		local switchProf = nil

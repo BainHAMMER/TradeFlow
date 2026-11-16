@@ -231,11 +231,10 @@ function ns:GetQueueStepStatus(step)
 		local inBags = self:GetBagCount(r.itemID)
 		maxCrafts = math.min(maxCrafts, math.floor(inBags / r.quantity))
 	end
-	if maxCrafts >= 99999 then
-		maxCrafts = 0
+	if maxCrafts >= 99999 or maxCrafts <= 0 then
+		return 0, "wait"
 	end
-	local activeClientSL = self:GetActiveClientSkillLine()
-	if step.skillLine and step.skillLine ~= activeClientSL then
+	if step.skillLine and self.currentSkillLine and step.skillLine ~= self.currentSkillLine then
 		return maxCrafts, "other_prof"
 	end
 	if maxCrafts >= step.count then
@@ -340,22 +339,14 @@ function ns:ProcessQueue()
 		return
 	end
 
-	-- 1. Ищем первый шаг в текущей открытой профессии, на который хватает реагентов в сумках
+	-- 1. Ищем первый шаг в текущей выбранной профессии, на который хватает реагентов в сумках
 	for idx, step in ipairs(queue) do
 		local readyCrafts, state = self:GetQueueStepStatus(step)
 		if (state == "ready" or state == "partial") and readyCrafts > 0 then
 			local toCraft = math.min(step.count, readyCrafts)
-			if C_TradeSkillUI and C_TradeSkillUI.GetCraftableCount then
-				local apiAvail = C_TradeSkillUI.GetCraftableCount(step.recipeID)
-				if type(apiAvail) == "number" and apiAvail > 0 then
-					toCraft = math.min(toCraft, apiAvail)
-				end
-			end
 			self.activeCastRecipeID = step.recipeID
 			self.activeCastQueueIndex = idx
-			if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
-				C_TradeSkillUI.CraftRecipe(step.recipeID, toCraft)
-			end
+			self:ExecuteCraftRecipe(step.recipeID, toCraft)
 			return
 		end
 	end
@@ -364,7 +355,7 @@ function ns:ProcessQueue()
 	for _, step in ipairs(queue) do
 		local readyCrafts, state = self:GetQueueStepStatus(step)
 		if state == "other_prof" and readyCrafts > 0 then
-			self:SwitchToProfession(step.skillLine)
+			self:SwitchToProfession(step.skillLine, step.recipeID)
 			return
 		end
 	end

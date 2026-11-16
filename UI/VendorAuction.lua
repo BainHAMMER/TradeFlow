@@ -148,12 +148,58 @@ function ns:SearchShoppingListOnAH()
 end
 
 -------------------------------------------------------------------------------
--- Панель и кнопка «Докупить по списку» у торговца (MERCHANT_SHOW)
+-- Панель и кнопка «Докупить по списку» у торговца (MERCHANT_SHOW / C_MerchantFrame)
 -------------------------------------------------------------------------------
+local function GetMerchantSlotItemID(slot)
+	if GetMerchantItemID then
+		local id = GetMerchantItemID(slot)
+		if id and id > 0 then
+			return id
+		end
+	end
+	if GetMerchantItemLink then
+		local link = GetMerchantItemLink(slot)
+		local id = link and tonumber(link:match("item:(%d+)"))
+		if id and id > 0 then
+			return id
+		end
+	end
+	return nil
+end
+
+local function GetMerchantSlotInfo(slot)
+	if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
+		local info = C_MerchantFrame.GetItemInfo(slot)
+		if info then
+			local canBuy = (info.isPurchasable ~= false) and not info.hasExtendedCost
+			return info.price or 0, math.max(1, info.stackCount or 1), info.numAvailable or -1, canBuy
+		end
+	elseif GetMerchantItemInfo then
+		local _, _, price, stackSize, numAvailable, isPurchasable, _, extendedCost = GetMerchantItemInfo(slot)
+		local canBuy = (isPurchasable ~= false) and not extendedCost
+		return price or 0, math.max(1, stackSize or 1), numAvailable or -1, canBuy
+	end
+	return nil
+end
+
 local function CollectMerchantMatches()
-	if not (MerchantFrame and MerchantFrame:IsShown() and GetMerchantNumItems and GetMerchantItemInfo) then
+	if not (MerchantFrame and MerchantFrame:IsShown() and GetMerchantNumItems) then
 		return {}, 0
 	end
+	local numMerchant = GetMerchantNumItems() or 0
+	if numMerchant <= 0 then
+		return {}, 0
+	end
+
+	-- Записываем живые цены вендора в базу при посещении торговца
+	for slot = 1, numMerchant do
+		local itemID = GetMerchantSlotItemID(slot)
+		local price, stackSize, numAvailable, canBuy = GetMerchantSlotInfo(slot)
+		if itemID and price and price > 0 and canBuy and numAvailable == -1 and ns.db and ns.db.vendorPrices then
+			ns.db.vendorPrices[itemID] = math.floor(price / math.max(1, stackSize) + 0.5)
+		end
+	end
+
 	local shopping = ns:GetShoppingList()
 	local needByItem = {}
 	for _, item in ipairs(shopping) do
@@ -167,16 +213,13 @@ local function CollectMerchantMatches()
 
 	local matches = {}
 	local totalCopper = 0
-	local numMerchant = GetMerchantNumItems() or 0
 
 	for slot = 1, numMerchant do
-		local link = GetMerchantItemLink and GetMerchantItemLink(slot)
-		local itemID = link and tonumber(link:match("item:(%d+)"))
+		local itemID = GetMerchantSlotItemID(slot)
 		local missing = itemID and needByItem[itemID]
 		if missing and missing > 0 then
-			local _, _, price, stackSize, numAvailable = GetMerchantItemInfo(slot)
-			stackSize = math.max(1, stackSize or 1)
-			if numAvailable ~= 0 then
+			local price, stackSize, numAvailable, canBuy = GetMerchantSlotInfo(slot)
+			if price and canBuy and numAvailable ~= 0 then
 				local canBuyUnits = missing
 				if numAvailable and numAvailable > 0 then
 					canBuyUnits = math.min(missing, numAvailable * stackSize)
@@ -189,9 +232,9 @@ local function CollectMerchantMatches()
 						units = canBuyUnits,
 						batches = batches,
 						stackSize = stackSize,
-						cost = batches * (price or 0),
+						cost = batches * price,
 					}
-					totalCopper = totalCopper + batches * (price or 0)
+					totalCopper = totalCopper + batches * price
 				end
 			end
 		end
@@ -200,28 +243,44 @@ local function CollectMerchantMatches()
 	return matches, totalCopper
 end
 
-function ns:BuyVendorShoppingList()
+function ns:GetMerchantShoppingMatches()
+	return CollectMerchantMatches()
+end
+
+function ns:BuyVendorShoppingList(onlyItemID)
 	local matches = CollectMerchantMatches()
 	if #matches == 0 then
 		return
 	end
 	local maxStackFn = GetMerchantItemMaxStack
 	for _, m in ipairs(matches) do
-		local remainingBatches = m.batches
-		local maxBatch = (maxStackFn and maxStackFn(m.slot)) or 20
-		maxBatch = math.max(1, maxBatch)
-		while remainingBatches > 0 do
-			local buyNow = math.min(remainingBatches, maxBatch)
-			BuyMerchantItem(m.slot, buyNow)
-			remainingBatches = remainingBatches - buyNow
+		if not onlyItemID or m.itemID == onlyItemID then
+			if m.stackSize > 1 then
+				-- Для предметов, продающихся пачками (напр. по 5 шт), BuyMerchantItem(slot) без аргумента покупает 1 пачку
+				for _ = 1, m.batches do
+					BuyMerchantItem(m.slot)
+				end
+			else
+				local remainingBatches = m.batches
+				local maxBatch = (maxStackFn and maxStackFn(m.slot)) or 20
+				maxBatch = math.max(1, maxBatch)
+				while remainingBatches > 0 do
+					local buyNow = math.min(remainingBatches, maxBatch)
+					BuyMerchantItem(m.slot, buyNow)
+					remainingBatches = remainingBatches - buyNow
+				end
+			end
+			local name = self:GetItemDisplay(m.itemID)
+			self:Print(string.format(L["VENDOR_BOUGHT_MSG"], name, m.batches * m.stackSize))
 		end
-		local name = self:GetItemDisplay(m.itemID)
-		self:Print(string.format(L["VENDOR_BOUGHT_MSG"], name, m.batches * m.stackSize))
 	end
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.3, function()
 			ns:ScanBagsNow()
 			ns:RefreshVendorBar()
+			if ns.RefreshQueueAndShoppingView then
+				ns:RefreshQueueAndShoppingView()
+			end
 		end)
 	end
 end
@@ -244,9 +303,12 @@ function ns:RefreshVendorBar()
 
 	if not vendorBar then
 		vendorBar = CreateFrame("Frame", "TradeFlowVendorBar", MerchantFrame, "BackdropTemplate")
-		vendorBar:SetHeight(36)
-		vendorBar:SetPoint("BOTTOMLEFT", MerchantFrame, "TOPLEFT", 0, 4)
-		vendorBar:SetPoint("BOTTOMRIGHT", MerchantFrame, "TOPRIGHT", 0, 4)
+		vendorBar:SetHeight(38)
+		vendorBar:SetPoint("TOPLEFT", MerchantFrame, "BOTTOMLEFT", 0, -2)
+		vendorBar:SetPoint("TOPRIGHT", MerchantFrame, "BOTTOMRIGHT", 0, -2)
+		vendorBar:SetFrameStrata("DIALOG")
+		vendorBar:SetToplevel(true)
+		vendorBar:SetClampedToScreen(true)
 		vendorBar:SetBackdrop({
 			bgFile = "Interface\\Buttons\\WHITE8X8",
 			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -254,14 +316,16 @@ function ns:RefreshVendorBar()
 			insets = { left = 3, right = 3, top = 3, bottom = 3 },
 		})
 		vendorBar:SetBackdropColor(0.08, 0.07, 0.05, 0.96)
-		vendorBar:SetBackdropBorderColor(0.78, 0.60, 0.22, 1)
+		vendorBar:SetBackdropBorderColor(0.85, 0.68, 0.22, 1)
 
 		vendorBar.label = vendorBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		vendorBar.label:SetPoint("LEFT", 10, 0)
+		vendorBar.label:SetPoint("RIGHT", -150, 0)
 		vendorBar.label:SetJustifyH("LEFT")
+		vendorBar.label:SetWordWrap(false)
 
 		vendorBar.btn = CreateFrame("Button", nil, vendorBar, "UIPanelButtonTemplate")
-		vendorBar.btn:SetSize(150, 24)
+		vendorBar.btn:SetSize(140, 24)
 		vendorBar.btn:SetPoint("RIGHT", -8, 0)
 		vendorBar.btn:SetScript("OnClick", function()
 			ns:BuyVendorShoppingList()
@@ -292,5 +356,38 @@ end
 
 function ns:OnMerchantShow()
 	self:RefreshVendorBar()
+	if self.RefreshQueueAndShoppingView then
+		self:RefreshQueueAndShoppingView()
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.15, function()
+			ns:RefreshVendorBar()
+			if ns.RefreshQueueAndShoppingView then
+				ns:RefreshQueueAndShoppingView()
+			end
+		end)
+	end
 end
+
+local merchantEventFrame = CreateFrame("Frame")
+for _, ev in ipairs({
+	"MERCHANT_SHOW",
+	"MERCHANT_UPDATE",
+	"MERCHANT_CLOSED",
+	"BAG_UPDATE_DELAYED",
+}) do
+	pcall(merchantEventFrame.RegisterEvent, merchantEventFrame, ev)
+end
+merchantEventFrame:SetScript("OnEvent", function(_, event)
+	if event == "MERCHANT_CLOSED" then
+		if vendorBar then
+			vendorBar:Hide()
+		end
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
+		end
+	else
+		ns:OnMerchantShow()
+	end
+end)
 
