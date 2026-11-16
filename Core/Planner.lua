@@ -167,7 +167,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			-- Базовые стартовые рецепты (оранжевые с 1, без свитка и тренера) тоже доступны
 			local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
 			if learned or isBasic or (includeTrainer and isTrainer) then
-				local craftCost, outVal = self:GetRecipeEconomy(recipeID)
+				local craftCost, outVal, _, breakdown = self:GetRecipeEconomy(recipeID)
 				if craftCost then
 					local rec = self:GetRecipeRecord(recipeID)
 					local vendorSell = 0
@@ -184,6 +184,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						th = th,
 						craftCost = craftCost,
 						unitReturn = unitReturn,
+						vendorDeduct = effectiveDeduct,
+						reagents = breakdown or {},
 						netCost = math.max(0, craftCost - effectiveDeduct),
 					}
 				end
@@ -196,14 +198,32 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	local totalGrossCost = 0
 	local totalReturn = 0
 	local learnedInSim = {}
-	-- Нормализуем потолок ранга к стандартным ступеням 75/150/225/300 (на случай расовых бонусов +10/+15)
+	local simPool = {}
+	local function GetSimHave(itemID)
+		if simPool[itemID] == nil then
+			simPool[itemID] = self:GetBagCount(itemID) + self:GetBankCount(itemID)
+		end
+		return simPool[itemID]
+	end
+	local function EvalBuyCost(cand)
+		local cost = 0
+		for _, b in ipairs(cand.reagents) do
+			local have = GetSimHave(b.itemID)
+			if have < b.quantity then
+				cost = cost + (b.quantity - have) * (b.unitPrice or 0)
+			end
+		end
+		return cost
+	end
+
+	-- Нормализуем потолок ранга к стандартным ступеням 75/150/225/300 (учитывая расовый бонус до +15)
 	local activeCap = 75
-	if currentCap >= 225 then
+	if currentCap > 240 then
 		activeCap = 300
-	elseif currentCap >= 150 then
+	elseif currentCap > 165 then
 		activeCap = 225
-	elseif currentCap >= 75 then
-		activeCap = ((currentCap > 95) and 150) or 75
+	elseif currentCap > 90 then
+		activeCap = 150
 	end
 	local prevRecipeID = nil
 
@@ -231,7 +251,9 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			if s >= c.reqSkill and c.th and s < c.th[4] then
 				local chance, color = ns.CalculateSkillUpChance(s, c.th)
 				if chance > 0.05 then
-					local expectedCost = c.netCost / chance
+					local buyCost = EvalBuyCost(c)
+					local effectiveNet = math.max(0, buyCost - (c.vendorDeduct or 0))
+					local expectedCost = effectiveNet / chance
 					-- Амортизируем цену обучения у тренера на ~10 очков, чтобы не учить рецепт ради 1 крафта,
 					-- и даём небольшой бонус рецепту предыдущего шага, чтобы не дробить маршрут без выгоды
 					if not c.learned and not learnedInSim[c.recipeID] and c.trainerFee > 0 then
@@ -264,6 +286,15 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			totalGrossCost = totalGrossCost + learnFee
 		end
 
+		-- Списываем израсходованные в симуляции материалы из виртуального инвентаря
+		local craftsPerPoint = 1 / bestChance
+		for _, b in ipairs(bestCand.reagents) do
+			local have = GetSimHave(b.itemID)
+			if have > 0 then
+				simPool[b.itemID] = math.max(0, have - b.quantity * craftsPerPoint)
+			end
+		end
+
 		prevRecipeID = bestCand.recipeID
 		local lastStep = steps[#steps]
 		if lastStep and lastStep.kind == "craft" and lastStep.recipeID == bestCand.recipeID then
@@ -284,22 +315,37 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				unitNetCost = bestCand.netCost,
 				unitCraftCost = bestCand.craftCost,
 				unitReturn = bestCand.unitReturn or 0,
+				vendorDeduct = bestCand.vendorDeduct or 0,
+				reagents = bestCand.reagents,
 				learnFee = learnFee,
 				reqSkill = bestCand.reqSkill,
 			}
 		end
 	end
 
-	-- Финализируем округление количества крафтов и стоимость каждого шага
+	-- Финализируем округление количества крафтов и стоимость каждого шага с учётом имеющихся материалов
+	local finalPool = {}
 	for _, st in ipairs(steps) do
 		if st.kind == "craft" then
 			st.crafts = math.max(st.points, math.ceil(st.expectedCrafts - 0.05))
 			st.avgChance = math.floor((st.chanceSum / st.points) * 100 + 0.5)
-			st.grossCost = st.crafts * st.unitCraftCost + (st.learnFee or 0)
+			local stepBuyCost = 0
+			for _, b in ipairs(st.reagents or {}) do
+				if finalPool[b.itemID] == nil then
+					finalPool[b.itemID] = self:GetBagCount(b.itemID) + self:GetBankCount(b.itemID)
+				end
+				local have = finalPool[b.itemID]
+				local need = b.quantity * st.crafts
+				local take = math.min(have, need)
+				finalPool[b.itemID] = have - take
+				stepBuyCost = stepBuyCost + (need - take) * (b.unitPrice or 0)
+			end
+			st.grossCost = stepBuyCost + (st.learnFee or 0)
 			st.returnVal = st.crafts * (st.unitReturn or 0)
-			st.stepCost = st.crafts * st.unitNetCost + (st.learnFee or 0)
-			totalCost = totalCost + (st.crafts * st.unitNetCost)
-			totalGrossCost = totalGrossCost + (st.crafts * st.unitCraftCost)
+			local stepNet = math.max(0, stepBuyCost - st.crafts * (st.vendorDeduct or 0))
+			st.stepCost = stepNet + (st.learnFee or 0)
+			totalCost = totalCost + stepNet
+			totalGrossCost = totalGrossCost + stepBuyCost
 			totalReturn = totalReturn + st.returnVal
 		end
 	end

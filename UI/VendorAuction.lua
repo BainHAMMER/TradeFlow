@@ -822,3 +822,11 @@ function ns:RefreshTrainerBar()
 	trainerBar:Show()
 end
 
+if hooksecurefunc and ClassTrainerFrame_Update then
+	hooksecurefunc("ClassTrainerFrame_Update", function()
+		if ns.RefreshTrainerBar then
+			ns:RefreshTrainerBar()
+		end
+	end)
+end
+
