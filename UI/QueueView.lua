@@ -4,7 +4,7 @@ local L = ns.L
 -------------------------------------------------------------------------------
 -- Нижняя правая панель: вкладки «Очередь крафта» и «Список покупок»
 -------------------------------------------------------------------------------
-local ROW_H = 30
+local ROW_H = 25
 local VISIBLE_ROWS = 6
 
 function ns.CreateTabButton(parent, width, height, text)
@@ -129,7 +129,7 @@ function ns:CreateQueueAndShoppingView(parent)
 		row.hl:SetColorTexture(1, 0.82, 0.2, 0.14)
 
 		row.icon = row:CreateTexture(nil, "ARTWORK")
-		row.icon:SetSize(24, 24)
+		row.icon:SetSize(21, 21)
 		row.icon:SetPoint("LEFT", 4, 0)
 		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 

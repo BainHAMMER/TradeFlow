@@ -645,7 +645,7 @@ function ns:CreateMainFrame()
 	local topRight = CreateFrame("Frame", nil, f, "BackdropTemplate")
 	topRight:SetPoint("TOPLEFT", leftPane, "TOPRIGHT", 8, 0)
 	topRight:SetPoint("TOPRIGHT", -12, -54)
-	topRight:SetHeight(312)
+	topRight:SetHeight(342)
 	StylePanel(topRight, 0.07, 0.065, 0.055, 0.95)
 	f.topRight = topRight
 
@@ -741,9 +741,9 @@ function ns:CreateDetailsView(parent)
 	d.reagentRows = {}
 	for i = 1, 6 do
 		local rRow = CreateFrame("Button", nil, d)
-		rRow:SetHeight(22)
-		rRow:SetPoint("TOPLEFT", 8, -68 - (i - 1) * 22)
-		rRow:SetPoint("TOPRIGHT", -200, -68 - (i - 1) * 22)
+		rRow:SetHeight(19)
+		rRow:SetPoint("TOPLEFT", 8, -66 - (i - 1) * 19)
+		rRow:SetPoint("TOPRIGHT", -242, -66 - (i - 1) * 19)
 
 		rRow.hl = rRow:CreateTexture(nil, "HIGHLIGHT")
 		rRow.hl:SetAllPoints()
@@ -794,7 +794,7 @@ function ns:CreateDetailsView(parent)
 
 	-- Блок экономики справа от реагентов
 	local econBox = CreateFrame("Frame", nil, d, "BackdropTemplate")
-	econBox:SetSize(185, 130)
+	econBox:SetSize(226, 122)
 	econBox:SetPoint("TOPRIGHT", -8, -66)
 	StylePanel(econBox, 0.05, 0.05, 0.05, 0.85)
 
@@ -802,20 +802,22 @@ function ns:CreateDetailsView(parent)
 	-- которому считается прибыль, ярко, остальные серым), чистая прибыль, цена за +1. Заполняет UpdateEconBox.
 	d.econRows = {}
 	for i = 1, 6 do
-		local yOff = -9 - (i - 1) * 19
-		local l = econBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		l:SetPoint("TOPLEFT", 8, yOff)
-		l:SetJustifyH("LEFT")
+		local yOff = -8 - (i - 1) * 18
 		local v = econBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		v:SetPoint("TOPRIGHT", -8, yOff)
 		v:SetJustifyH("RIGHT")
+		local l = econBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		l:SetPoint("TOPLEFT", 8, yOff)
+		l:SetPoint("RIGHT", v, "LEFT", -6, 0)
+		l:SetJustifyH("LEFT")
+		l:SetWordWrap(false)
 		d.econRows[i] = { label = l, value = v }
 	end
 
 	-- Галочка авто-разворачивания промежуточных крафтов
 	local cbSub = CreateFrame("CheckButton", nil, d, "UICheckButtonTemplate")
 	cbSub:SetSize(20, 20)
-	cbSub:SetPoint("BOTTOMLEFT", 8, 32)
+	cbSub:SetPoint("BOTTOMLEFT", 8, 30)
 	cbSub.text = cbSub:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	cbSub.text:SetPoint("LEFT", cbSub, "RIGHT", 2, 0)
 	cbSub.text:SetText(L["AUTO_SUBCRAFTS"])
@@ -873,16 +875,16 @@ function ns:CreateDetailsView(parent)
 	-- шансом и ценой на аукционе, ниже средняя выручка с одной вещи. Место по высоте задаёт UpdateDisenchantBlock.
 	local DE_BLOCK_ROWS = 3
 	local deBlock = CreateFrame("Frame", nil, d)
-	deBlock:SetHeight(14 + DE_BLOCK_ROWS * 20 + 18)
+	deBlock:SetHeight(14 + DE_BLOCK_ROWS * 16 + 16)
 	deBlock.header = deBlock:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	deBlock.header:SetPoint("TOPLEFT", 2, 0)
 	deBlock.header:SetJustifyH("LEFT")
 	deBlock.rows = {}
 	for i = 1, DE_BLOCK_ROWS do
 		local r = CreateFrame("Button", nil, deBlock)
-		r:SetHeight(20)
-		r:SetPoint("TOPLEFT", 0, -14 - (i - 1) * 20)
-		r:SetPoint("TOPRIGHT", 0, -14 - (i - 1) * 20)
+		r:SetHeight(16)
+		r:SetPoint("TOPLEFT", 0, -14 - (i - 1) * 16)
+		r:SetPoint("TOPRIGHT", 0, -14 - (i - 1) * 16)
 
 		r.hl = r:CreateTexture(nil, "HIGHLIGHT")
 		r.hl:SetAllPoints()
@@ -1276,10 +1278,10 @@ function ns:UpdateDisenchantBlock(d, outItemID, numReagents)
 		return
 	end
 
-	local top = -68 - (numReagents or 0) * 22 - 6
+	local top = -66 - (numReagents or 0) * 19 - 4
 	b:ClearAllPoints()
 	b:SetPoint("TOPLEFT", d, "TOPLEFT", 8, top)
-	b:SetPoint("TOPRIGHT", d, "TOPRIGHT", -200, top)
+	b:SetPoint("TOPRIGHT", d, "TOPRIGHT", -242, top)
 	b.header:SetText(string.format(L["DE_BLOCK_HEADER"], reqEnch or 1))
 
 	local shown = 0
@@ -1314,7 +1316,8 @@ function ns:UpdateDisenchantBlock(d, outItemID, numReagents)
 		r.chanceText:SetPoint("RIGHT", r, "RIGHT", -(4 + math.ceil(priceW) + 8), 0)
 	end
 
-	local totalTop = -14 - shown * 20 - 3
+	local totalTop = -14 - shown * 16 - 2
+	b:SetHeight(14 + shown * 16 + 16)
 	b.totalLabel:ClearAllPoints()
 	b.totalLabel:SetPoint("TOPLEFT", b, "TOPLEFT", 25, totalTop)
 	b.totalLabel:SetText(L["DE_AVG_LABEL"])
