@@ -268,7 +268,7 @@ function ns:AddDisenchantTooltipLines(tooltip, deNet, yields, reqEnch)
 		local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
 		local p = self:GetAuctionPrice(y.itemID)
 		tooltip:AddDoubleLine(
-			string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
+			string.format("  %s%s|r %s", yHex or "|cffffffff", yName, ns.FormatDisenchantCount(y)),
 			string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
 			0.85, 0.85, 0.85, 0.8, 0.8, 0.8
 		)

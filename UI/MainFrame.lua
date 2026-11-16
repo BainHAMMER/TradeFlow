@@ -870,29 +870,72 @@ function ns:CreateDetailsView(parent)
 	sourceBtn:Hide()
 	d.sourceBtn = sourceBtn
 
-	-- Строка распыления (если включено в настройках и предмет распыляется)
-	local deBtn = CreateFrame("Button", nil, d)
-	deBtn:SetHeight(18)
-	deBtn:SetPoint("TOPLEFT", 8, -203)
-	deBtn:SetPoint("TOPRIGHT", -8, -203)
-	deBtn.bg = deBtn:CreateTexture(nil, "BACKGROUND")
-	deBtn.bg:SetAllPoints()
-	deBtn.bg:SetColorTexture(0.18, 0.10, 0.28, 0.35)
-	deBtn.text = deBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	deBtn.text:SetPoint("LEFT", 6, 0)
-	deBtn.text:SetPoint("RIGHT", -6, 0)
-	deBtn.text:SetJustifyH("LEFT")
-	deBtn.text:SetWordWrap(false)
-	deBtn:SetScript("OnEnter", function(self)
-		if self.yields and #self.yields > 0 and ns.AddDisenchantTooltipLines then
-			GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-			ns:AddDisenchantTooltipLines(GameTooltip, self.deNet, self.yields, self.reqEnch)
-			GameTooltip:Show()
-		end
-	end)
-	deBtn:SetScript("OnLeave", GameTooltip_Hide)
-	deBtn:Hide()
-	d.deBtn = deBtn
+	-- Блок распыления под реагентами (рецепт изучен, распыл включён и вещь распыляется): материалы с количеством,
+	-- шансом и ценой на аукционе, ниже средняя выручка с одной вещи. Место по высоте задаёт UpdateDisenchantBlock.
+	local DE_BLOCK_ROWS = 3
+	local deBlock = CreateFrame("Frame", nil, d)
+	deBlock:SetHeight(14 + DE_BLOCK_ROWS * 20 + 18)
+	deBlock.header = deBlock:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	deBlock.header:SetPoint("TOPLEFT", 2, 0)
+	deBlock.header:SetJustifyH("LEFT")
+	deBlock.rows = {}
+	for i = 1, DE_BLOCK_ROWS do
+		local r = CreateFrame("Button", nil, deBlock)
+		r:SetHeight(20)
+		r:SetPoint("TOPLEFT", 0, -14 - (i - 1) * 20)
+		r:SetPoint("TOPRIGHT", 0, -14 - (i - 1) * 20)
+
+		r.hl = r:CreateTexture(nil, "HIGHLIGHT")
+		r.hl:SetAllPoints()
+		r.hl:SetColorTexture(1, 0.82, 0.2, 0.14)
+
+		r.icon = r:CreateTexture(nil, "ARTWORK")
+		r.icon:SetSize(16, 16)
+		r.icon:SetPoint("LEFT", 3, 0)
+		r.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+
+		r.priceText = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		r.priceText:SetPoint("RIGHT", -4, 0)
+		r.priceText:SetJustifyH("RIGHT")
+
+		r.chanceText = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		r.chanceText:SetPoint("RIGHT", -90, 0)
+		r.chanceText:SetWidth(44)
+		r.chanceText:SetJustifyH("RIGHT")
+
+		r.countText = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		r.countText:SetPoint("RIGHT", r.chanceText, "LEFT", -6, 0)
+		r.countText:SetWidth(40)
+		r.countText:SetJustifyH("RIGHT")
+		r.countText:SetTextColor(0.6, 0.6, 0.6)
+
+		r.nameText = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		r.nameText:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
+		r.nameText:SetPoint("RIGHT", r.countText, "LEFT", -6, 0)
+		r.nameText:SetHeight(16)
+		r.nameText:SetJustifyH("LEFT")
+		r.nameText:SetWordWrap(false)
+		if r.nameText.SetMaxLines then r.nameText:SetMaxLines(1) end
+
+		r:SetScript("OnClick", function(self)
+			if self.itemID then
+				ns:HandleItemClick(self.itemID, nil)
+			end
+		end)
+		r:SetScript("OnEnter", function(self)
+			if self.itemID then
+				ns:ShowItemTooltip(self, self.itemID)
+			end
+		end)
+		r:SetScript("OnLeave", GameTooltip_Hide)
+		deBlock.rows[i] = r
+	end
+	deBlock.totalLabel = deBlock:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	deBlock.totalLabel:SetJustifyH("LEFT")
+	deBlock.totalValue = deBlock:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	deBlock.totalValue:SetJustifyH("RIGHT")
+	deBlock:Hide()
+	d.deBlock = deBlock
 
 	-- Ввод количества и кнопки «В очередь», «В очередь все», «Создать»
 	local minusBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
@@ -996,9 +1039,8 @@ function ns:RefreshDetailsView()
 			d.tomtomBtn.itemName = nil
 			d.tomtomBtn:Hide()
 		end
-		if d.deBtn then
-			d.deBtn.yields = nil
-			d.deBtn:Hide()
+		if d.deBlock then
+			d.deBlock:Hide()
 		end
 		for i = 1, 6 do d.reagentRows[i]:Hide() end
 		d.valCraftCost:SetText("-")
@@ -1046,29 +1088,7 @@ function ns:RefreshDetailsView()
 			d.tomtomBtn.itemName = nil
 			d.tomtomBtn:Hide()
 		end
-		if d.deBtn then
-			local deNet, yields, reqEnch = outItemID and self.GetItemDisenchantInfo and self:GetItemDisenchantInfo(outItemID)
-			if yields and #yields > 0 then
-				local parts = {}
-				for _, y in ipairs(yields) do
-					local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
-					parts[#parts + 1] = string.format("%.0f%% %s%s|r", y.chance * 100, yHex or "|cffffffff", yName)
-				end
-				d.deBtn.deNet = deNet
-				d.deBtn.yields = yields
-				d.deBtn.reqEnch = reqEnch
-				d.deBtn.text:SetText(string.format(L["DE_LINE_FMT"], reqEnch or 1, deNet and ns.FormatMoney(deNet) or "-", table.concat(parts, ", ")))
-				d.deBtn:Show()
-			else
-				d.deBtn.yields = nil
-				d.deBtn:Hide()
-			end
-		end
 	else
-		if d.deBtn then
-			d.deBtn.yields = nil
-			d.deBtn:Hide()
-		end
 		local src = self.GetRecipeSourceInfo and self:GetRecipeSourceInfo(recipeID)
 		if src and src.isTrainer then
 			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
@@ -1165,6 +1185,8 @@ function ns:RefreshDetailsView()
 			rRow:Hide()
 		end
 	end
+	-- Только для изученных: у неизученных на этом месте строка источника и кнопка TomTom (y = -203)
+	self:UpdateDisenchantBlock(d, metrics.learned and outItemID or nil, math.min(#breakdown, 6))
 
 	if d.lblOutput then
 		d.lblOutput:SetText(
@@ -1179,6 +1201,67 @@ function ns:RefreshDetailsView()
 	d.valProfit:SetText(ns.FormatMoney(profit, true))
 	d.valCostSkillUp:SetText(ns.FormatMoney(metrics.costPerSkillUp))
 	d.craftNowBtn:SetEnabled(metrics.learned and (self:GetRecipeCraftCounts(recipeID) > 0))
+end
+
+-------------------------------------------------------------------------------
+-- Блок распыления в деталях: под последним реагентом, шириной как строки реагентов
+-------------------------------------------------------------------------------
+local function FormatDisenchantChance(chance)
+	local pct = chance * 100
+	if math.abs(pct - math.floor(pct + 0.5)) < 0.05 then
+		return string.format("%d%%", math.floor(pct + 0.5))
+	end
+	return string.format("%.1f%%", pct)
+end
+
+function ns:UpdateDisenchantBlock(d, outItemID, numReagents)
+	local b = d.deBlock
+	if not b then
+		return
+	end
+	local deNet, yields, reqEnch
+	if outItemID and self.GetItemDisenchantInfo then
+		deNet, yields, reqEnch = self:GetItemDisenchantInfo(outItemID)
+	end
+	if not (yields and #yields > 0) then
+		b:Hide()
+		return
+	end
+
+	local top = -68 - (numReagents or 0) * 22 - 6
+	b:ClearAllPoints()
+	b:SetPoint("TOPLEFT", d, "TOPLEFT", 8, top)
+	b:SetPoint("TOPRIGHT", d, "TOPRIGHT", -200, top)
+	b.header:SetText(string.format(L["DE_BLOCK_HEADER"], reqEnch or 1))
+
+	local shown = 0
+	for i, r in ipairs(b.rows) do
+		local y = yields[i]
+		if y then
+			shown = i
+			local yName, yIcon, _, _, _, yHex = self:GetItemDisplay(y.itemID)
+			local price = self:GetAuctionPrice(y.itemID)
+			r.itemID = y.itemID
+			r.icon:SetTexture(yIcon)
+			r.nameText:SetText((yHex or "|cffffffff") .. yName .. "|r")
+			r.countText:SetText(ns.FormatDisenchantCount(y))
+			r.chanceText:SetText(FormatDisenchantChance(y.chance))
+			r.priceText:SetText((price and price > 0) and ns.FormatMoney(price) or "|cff888888-|r")
+			r:Show()
+		else
+			r.itemID = nil
+			r:Hide()
+		end
+	end
+
+	local totalTop = -14 - shown * 20 - 3
+	b.totalLabel:ClearAllPoints()
+	b.totalLabel:SetPoint("TOPLEFT", b, "TOPLEFT", 25, totalTop)
+	b.totalLabel:SetText(L["DE_AVG_LABEL"])
+	b.totalValue:ClearAllPoints()
+	b.totalValue:SetPoint("TOPRIGHT", b, "TOPRIGHT", -4, totalTop)
+	b.totalValue:SetText(deNet and ns.FormatMoney(deNet) or "|cff888888-|r")
+	b:Show()
 end
 
 -------------------------------------------------------------------------------
