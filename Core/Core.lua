@@ -110,17 +110,48 @@ end
 -- Реальное разрешение предметов и заклинаний по ID через клиент игры
 -------------------------------------------------------------------------------
 local pendingItemRefresh = false
+local requestedItemLoads = {}
+local failedItemLoads = {}
+
+function ns:RequestItemData(itemID)
+	if not itemID or itemID <= 0 or requestedItemLoads[itemID] or failedItemLoads[itemID] then
+		return
+	end
+	requestedItemLoads[itemID] = true
+	if C_Item and C_Item.RequestLoadItemDataByID then
+		pcall(C_Item.RequestLoadItemDataByID, itemID)
+	end
+end
 
 local function ScheduleItemDataRefresh()
-	if pendingItemRefresh then
+	if pendingItemRefresh or not (ns.mainFrame and ns.mainFrame:IsShown()) then
 		return
 	end
 	pendingItemRefresh = true
 	if C_Timer and C_Timer.After then
-		C_Timer.After(0.1, function()
+		C_Timer.After(0.5, function()
 			pendingItemRefresh = false
-			if ns.RefreshVisibleUI then
+			if ns.mainFrame and ns.mainFrame:IsShown() and ns.RefreshVisibleUI then
 				ns:RefreshVisibleUI()
+			end
+		end)
+	end
+end
+
+local pendingTradeSkillRefresh = false
+local function ScheduleTradeSkillRefresh()
+	if pendingTradeSkillRefresh or not (ns.mainFrame and ns.mainFrame:IsShown()) then
+		return
+	end
+	pendingTradeSkillRefresh = true
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.15, function()
+			pendingTradeSkillRefresh = false
+			if ns.mainFrame and ns.mainFrame:IsShown() then
+				ns:ScanActiveTradeSkill()
+				if ns.RefreshVisibleUI then
+					ns:RefreshVisibleUI()
+				end
 			end
 		end)
 	end
@@ -147,9 +178,7 @@ function ns:GetItemDisplay(itemID)
 	icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
 	quality = quality or 1
 	if not name then
-		if C_Item.RequestLoadItemDataByID then
-			pcall(C_Item.RequestLoadItemDataByID, itemID)
-		end
+		self:RequestItemData(itemID)
 		return string.format(L["ITEM_LOADING"], itemID), icon, quality, itemLink, false
 	end
 	local r, g, b, hex = 1, 1, 1, "|cffffffff"
@@ -819,7 +848,7 @@ for _, ev in ipairs({
 	pcall(eventFrame.RegisterEvent, eventFrame, ev)
 end
 
-eventFrame:SetScript("OnEvent", function(_, event, arg1)
+eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
 		TradeFlowDB = TradeFlowDB or {}
 		ns.db = TradeFlowDB
@@ -880,17 +909,24 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
 			ns:SuppressBlizzardFrame()
 		end
 		if ns.mainFrame and ns.mainFrame:IsShown() then
-			ns:ScanActiveTradeSkill()
-			if ns.RefreshVisibleUI then
-				ns:RefreshVisibleUI()
-			end
+			ScheduleTradeSkillRefresh()
 		end
 	elseif event == "TRADE_SKILL_CLOSE" then
 		-- Не возвращаем ProfessionsFrame при переключении профессии, пока открыто окно TradeFlow
 		if ns.bypassIntercept then
 			ns.bypassIntercept = false
 		end
-	elseif event == "GET_ITEM_INFO_RECEIVED" or event == "ITEM_DATA_LOAD_RESULT" then
+	elseif event == "GET_ITEM_INFO_RECEIVED" then
+		if arg1 and arg2 == false then
+			failedItemLoads[arg1] = true
+			return
+		end
+		ScheduleItemDataRefresh()
+	elseif event == "ITEM_DATA_LOAD_RESULT" then
+		if arg1 and arg2 == false then
+			failedItemLoads[arg1] = true
+			return
+		end
 		ScheduleItemDataRefresh()
 	end
 end)

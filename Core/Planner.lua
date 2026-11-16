@@ -64,7 +64,7 @@ function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 		end
 	end
 
-	local craftCost = self:GetRecipeEconomy(recipeID)
+	local craftCost, _, netProfit = self:GetRecipeEconomy(recipeID)
 	local rec = self:GetRecipeRecord(recipeID)
 	local vendorReturn = 0
 	if deductVendor and rec and rec.outputItemID and rec.outputItemID > 0 then
@@ -85,6 +85,7 @@ function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 		bandColor = colorKey,
 		craftCost = craftCost,
 		netCost = netCost,
+		profit = netProfit,
 		costPerSkillUp = costPerSkillUp,
 	}
 end

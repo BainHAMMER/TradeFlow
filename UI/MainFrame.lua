@@ -108,7 +108,6 @@ function ns:BuildFilteredRecipeList()
 
 			if passFilter then
 				local name, icon, outItemID = self:GetRecipeDisplay(recipeID)
-				local _, _, profit = self:GetRecipeEconomy(recipeID)
 				entries[#entries + 1] = {
 					recipeID = recipeID,
 					name = name,
@@ -119,7 +118,7 @@ function ns:BuildFilteredRecipeList()
 					withCraft = withCraft,
 					withVendor = withVendor,
 					metrics = metrics,
-					profit = profit,
+					profit = metrics.profit,
 				}
 			end
 		end

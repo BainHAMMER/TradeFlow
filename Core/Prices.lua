@@ -6,9 +6,11 @@ local L = ns.L
 -------------------------------------------------------------------------------
 local AUCTION_CUT = 0.05
 local priceRev = 1
+local reagentPriceCache = {}
 
 function ns:InvalidatePrices()
 	priceRev = priceRev + 1
+	wipe(reagentPriceCache)
 	if self.RefreshVisibleUI then
 		self:RefreshVisibleUI()
 	end
@@ -57,8 +59,8 @@ function ns:GetItemSellPrice(itemID)
 		end
 		return sell
 	end
-	if C_Item.RequestLoadItemDataByID then
-		pcall(C_Item.RequestLoadItemDataByID, itemID)
+	if self.RequestItemData then
+		self:RequestItemData(itemID)
 	end
 	return (self.db and self.db.sellPrices and self.db.sellPrices[itemID]) or 0
 end
@@ -112,6 +114,11 @@ function ns:GetReagentBestPrice(itemID, visiting)
 	if not itemID or itemID <= 0 then
 		return nil, "unknown", nil
 	end
+	local isRoot = (visiting == nil)
+	if isRoot and reagentPriceCache[itemID] then
+		local c = reagentPriceCache[itemID]
+		return c[1], c[2], c[3]
+	end
 	visiting = visiting or {}
 
 	local vendorPrice = self:GetVendorPrice(itemID)
@@ -163,6 +170,9 @@ function ns:GetReagentBestPrice(itemID, visiting)
 		end
 	end
 
+	if isRoot then
+		reagentPriceCache[itemID] = { bestPrice, bestSource, bestRecipeID }
+	end
 	return bestPrice, bestSource, bestRecipeID
 end
 
@@ -241,6 +251,7 @@ priceFrame:SetScript("OnEvent", function(_, event)
 					local unit = math.floor(price / quantity + 0.5)
 					if ns.VendorPrices and ns.VendorPrices[itemID] then
 						ns.db.vendorPrices[itemID] = unit
+						wipe(reagentPriceCache)
 					end
 				end
 			end
