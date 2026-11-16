@@ -20,7 +20,6 @@ Locales\enUS.lua
 Data\Thresholds.lua
 Data\Vendor.lua
 Data\Trainer.lua
-Data\Sources.lua
 Data\Recipes.lua
 
 Core\Core.lua

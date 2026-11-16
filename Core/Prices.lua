@@ -51,12 +51,16 @@ function ns:GetItemSellPrice(itemID)
 	end
 	local sell = select(11, C_Item.GetItemInfo(itemID))
 	if type(sell) == "number" and sell >= 0 then
+		if self.db then
+			self.db.sellPrices = self.db.sellPrices or {}
+			self.db.sellPrices[itemID] = sell
+		end
 		return sell
 	end
 	if C_Item.RequestLoadItemDataByID then
 		pcall(C_Item.RequestLoadItemDataByID, itemID)
 	end
-	return (self.ItemSellPrices and self.ItemSellPrices[itemID]) or 0
+	return (self.db and self.db.sellPrices and self.db.sellPrices[itemID]) or 0
 end
 
 -- Возвращает: copper, source ("auctionator" | "tsm"), ageDays
@@ -111,9 +115,7 @@ function ns:GetReagentBestPrice(itemID, visiting)
 	visiting = visiting or {}
 
 	local vendorPrice = self:GetVendorPrice(itemID)
-	local isUnlimitedVendor = (self.VendorPrices and self.VendorPrices[itemID] ~= nil)
-		or not (self.LimitedStock and self.LimitedStock[itemID])
-	if vendorPrice and isUnlimitedVendor then
+	if vendorPrice then
 		return vendorPrice, "vendor", nil
 	end
 

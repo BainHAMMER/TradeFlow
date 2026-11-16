@@ -163,8 +163,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local learned = self:IsRecipeLearned(recipeID)
 			local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
 			local th = self:GetRecipeThresholds(recipeID)
-			-- Базовые стартовые рецепты (оранжевые с 1, без свитка) тоже доступны
-			local isBasic = th and th[1] == 1 and not (self.RecipeScrolls and self.RecipeScrolls[recipeID])
+			-- Базовые стартовые рецепты (оранжевые с 1, без свитка и тренера) тоже доступны
+			local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
 			if learned or isBasic or (includeTrainer and isTrainer) then
 				local craftCost, outVal = self:GetRecipeEconomy(recipeID)
 				if craftCost then

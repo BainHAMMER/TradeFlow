@@ -462,8 +462,7 @@ function ns:IsRecipeLearned(recipeID)
 	if rData and rData.skillLine == 186 and self.playerProfessions[186] then
 		local miningRank = self.playerProfessions[186].rank or 1
 		local reqSkill, _, isTrainer = self:GetRecipeRequiredSkill(recipeID)
-		local th = self:GetRecipeThresholds(recipeID)
-		local isBasic = th and th[1] == 1 and not (self.RecipeScrolls and self.RecipeScrolls[recipeID])
+		local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
 		if (isBasic or isTrainer) and miningRank >= (reqSkill or 1) then
 			return true
 		end
