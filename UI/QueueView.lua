@@ -7,26 +7,80 @@ local L = ns.L
 local ROW_H = 30
 local VISIBLE_ROWS = 6
 
+function ns.CreateTabButton(parent, width, height, text)
+	local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+	btn:SetSize(width, height)
+	btn:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 16, edgeSize = 10,
+		insets = { left = 2, right = 2, top = 2, bottom = 2 },
+	})
+	btn.hl = btn:CreateTexture(nil, "HIGHLIGHT")
+	btn.hl:SetPoint("TOPLEFT", 2, -2)
+	btn.hl:SetPoint("BOTTOMRIGHT", -2, 2)
+	btn.hl:SetColorTexture(1, 0.82, 0.2, 0.12)
+
+	btn.activeBar = btn:CreateTexture(nil, "ARTWORK")
+	btn.activeBar:SetHeight(2)
+	btn.activeBar:SetPoint("BOTTOMLEFT", 3, 2)
+	btn.activeBar:SetPoint("BOTTOMRIGHT", -3, 2)
+	btn.activeBar:SetColorTexture(0.95, 0.78, 0.22, 0.95)
+	btn.activeBar:Hide()
+
+	btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	btn.label:SetPoint("LEFT", 6, 0)
+	btn.label:SetPoint("RIGHT", -6, 0)
+	btn.label:SetJustifyH("CENTER")
+	btn.label:SetWordWrap(false)
+	if text then
+		btn.label:SetText(text)
+	end
+	btn.SetText = function(self, t)
+		self.label:SetText(t)
+	end
+	return btn
+end
+
+function ns.SetTabButtonActive(btn, active)
+	if not btn then
+		return
+	end
+	if active then
+		btn:SetBackdropColor(0.22, 0.17, 0.08, 0.98)
+		btn:SetBackdropBorderColor(0.85, 0.68, 0.22, 1.0)
+		btn.label:SetTextColor(1.0, 0.86, 0.28)
+		btn.activeBar:Show()
+	else
+		btn:SetBackdropColor(0.08, 0.075, 0.065, 0.85)
+		btn:SetBackdropBorderColor(0.32, 0.27, 0.18, 0.75)
+		btn.label:SetTextColor(0.68, 0.64, 0.56)
+		btn.activeBar:Hide()
+	end
+end
+
 function ns:CreateQueueAndShoppingView(parent)
 	local f = CreateFrame("Frame", nil, parent)
 	f:SetAllPoints()
 
 	-- Кнопки переключения вкладок (Очередь крафта / Список покупок)
-	local tabQueue = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	tabQueue:SetSize(175, 22)
+	local tabQueue = ns.CreateTabButton(f, 175, 22)
 	tabQueue:SetPoint("TOPLEFT", 8, -6)
 	f.tabQueue = tabQueue
 
-	local tabShop = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	tabShop:SetSize(175, 22)
+	local tabShop = ns.CreateTabButton(f, 175, 22)
 	tabShop:SetPoint("LEFT", tabQueue, "RIGHT", 6, 0)
 	f.tabShop = tabShop
 
 	f.activeMode = "queue" -- "queue" | "shopping"
+	ns.SetTabButtonActive(tabQueue, true)
+	ns.SetTabButtonActive(tabShop, false)
 
 	local function SelectMode(mode)
 		f.activeMode = mode
 		f.offset = 0
+		ns.SetTabButtonActive(tabQueue, mode == "queue")
+		ns.SetTabButtonActive(tabShop, mode == "shopping")
 		ns:RefreshQueueAndShoppingView()
 	end
 	tabQueue:SetScript("OnClick", function() SelectMode("queue") end)
@@ -357,6 +411,8 @@ function ns:RefreshQueueAndShoppingView()
 
 	f.tabQueue:SetText(string.format(L["TAB_QUEUE"], #queue))
 	f.tabShop:SetText(string.format(L["TAB_SHOPPING"], #shopping))
+	ns.SetTabButtonActive(f.tabQueue, f.activeMode == "queue")
+	ns.SetTabButtonActive(f.tabShop, f.activeMode == "shopping")
 
 	local isQueue = (f.activeMode == "queue")
 	local vendorMatches = (self.GetMerchantShoppingMatches and self:GetMerchantShoppingMatches()) or {}

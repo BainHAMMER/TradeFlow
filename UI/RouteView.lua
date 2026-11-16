@@ -86,12 +86,11 @@ function ns:CreateRouteView(parent)
 	end
 
 	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", 0, 115)
-	f.cbVendor  = MakeCheck(L["PLANNER_DEDUCT_VENDOR"], "deductVendorInRoute", 142, 105)
 
-	-- Кнопка сброса скрытых (исключённых) рецептов — во 2-й строке после галочек
+	-- Кнопка сброса скрытых (исключённых) рецептов — во 2-й строке после галочки
 	local resetSkips = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
 	resetSkips:SetSize(96, 20)
-	resetSkips:SetPoint("TOPLEFT", 272, -26)
+	resetSkips:SetPoint("TOPLEFT", 142, -26)
 	resetSkips:SetScript("OnClick", function()
 		if ns.charDB then
 			ns.charDB.skippedRecipes = {}
@@ -335,7 +334,6 @@ function ns:RefreshRouteView()
 		f.targetBox:SetText(tostring(target))
 	end
 	f.cbTrainer:SetChecked(self.db.options.includeTrainerInRoute ~= false)
-	f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
 
 	local skipCount = 0
 	for _ in pairs((self.charDB and self.charDB.skippedRecipes) or {}) do

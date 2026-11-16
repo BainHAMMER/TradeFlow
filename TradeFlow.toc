@@ -3,13 +3,13 @@
 ## Notes: Fast crafting queue (DAG) & profession leveling calculator with real in-game item display and Auctionator integration.
 ## Notes-ruRU: Быстрая умная очередь крафта (DAG) и калькулятор прокачки профессий с отображением реальных предметов по ID и интеграцией с Auctionator.
 ## Author: BainHAMMER
-## Version: 1.0.3
+## Version: 1.0.4
 ## Category: Professions
 ## Category-ruRU: Профессии
 ## X-License: GPL-3.0-or-later
 ## X-Curse-Project-ID: 1810340
 ## SavedVariables: TradeFlowDB
-## OptionalDeps: Auctionator, TradeSkillMaster, Syndicator
+## OptionalDeps: Auctionator, TradeSkillMaster, Syndicator, QuestieDB, AtlasLootClassic, TomTom
 ## IconTexture: Interface\AddOns\TradeFlow\Media\Icon
 ## AddonCompartmentFunc: TradeFlow_OnAddonCompartmentClick
 
@@ -26,6 +26,7 @@ Core\Core.lua
 Core\Inventory.lua
 Core\Prices.lua
 Core\Planner.lua
+Core\Sources.lua
 Core\Queue.lua
 
 UI\VendorAuction.lua

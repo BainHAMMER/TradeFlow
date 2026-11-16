@@ -1,7 +1,7 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
-ns.VERSION = "1.0.3"
+ns.VERSION = "1.0.4"
 ns.ICON = "Interface\\AddOns\\TradeFlow\\Media\\Icon"
 
 -- Сопоставление skillLine <-> базовое заклинание профессии для открытия окна
@@ -549,22 +549,28 @@ function ns:ScanActiveTradeSkill()
 				end
 			end
 
-			local schematic = C_TradeSkillUI.GetRecipeSchematic and C_TradeSkillUI.GetRecipeSchematic(recipeID, false)
-			local reagents = nil
-			local outItemID = schematic and schematic.outputItemID
-			local numMade = 1
-			if schematic then
-				local qMin = schematic.quantityMin or 1
-				local qMax = schematic.quantityMax or qMin
-				numMade = (qMin + qMax) / 2
-				if schematic.reagentSlotSchematics then
-					reagents = {}
-					for _, slot in ipairs(schematic.reagentSlotSchematics) do
-						if slot.reagents and slot.reagents[1] and slot.reagents[1].itemID and (slot.quantityRequired or 0) > 0 then
-							reagents[#reagents + 1] = {
-								itemID = slot.reagents[1].itemID,
-								quantity = slot.quantityRequired,
-							}
+			local prevLive = self.liveRecipes[recipeID]
+			local reagents = prevLive and prevLive.reagents
+			local outItemID = prevLive and prevLive.outputItemID
+			local numMade = (prevLive and prevLive.numMade) or 1
+			local recipeType = prevLive and prevLive.recipeType
+			if not prevLive then
+				local schematic = C_TradeSkillUI.GetRecipeSchematic and C_TradeSkillUI.GetRecipeSchematic(recipeID, false)
+				if schematic then
+					outItemID = schematic.outputItemID
+					local qMin = schematic.quantityMin or 1
+					local qMax = schematic.quantityMax or qMin
+					numMade = (qMin + qMax) / 2
+					recipeType = schematic.recipeType
+					if schematic.reagentSlotSchematics then
+						reagents = {}
+						for _, slot in ipairs(schematic.reagentSlotSchematics) do
+							if slot.reagents and slot.reagents[1] and slot.reagents[1].itemID and (slot.quantityRequired or 0) > 0 then
+								reagents[#reagents + 1] = {
+									itemID = slot.reagents[1].itemID,
+									quantity = slot.quantityRequired,
+								}
+							end
 						end
 					end
 				end
@@ -596,7 +602,8 @@ function ns:ScanActiveTradeSkill()
 				outputItemID = outItemID,
 				numMade = numMade,
 				reagents = reagents,
-				recipeType = schematic and schematic.recipeType,
+				recipeType = recipeType,
+				sourceText = (type(info.sourceText) == "string" and info.sourceText ~= "") and info.sourceText or nil,
 			}
 
 			if outItemID and outItemID > 0 and self.RegisterProducedItem then
@@ -625,6 +632,8 @@ function ns:SuppressBlizzardFrame()
 		ProfessionsFrame:HookScript("OnShow", function()
 			if not ns.bypassIntercept then
 				ns:SuppressBlizzardFrame()
+			elseif ns.EnsureBlizzardReturnButton then
+				ns:EnsureBlizzardReturnButton()
 			end
 		end)
 		ProfessionsFrame:HookScript("OnHide", function()
@@ -820,22 +829,54 @@ function ns:SwitchToProfession(skillLine, recipeID)
 	end
 end
 
+function ns:EnsureBlizzardReturnButton()
+	if not ProfessionsFrame then
+		return
+	end
+	if not self.blizzReturnBtn then
+		local btn = CreateFrame("Button", "TradeFlowReturnButton", ProfessionsFrame, "UIPanelButtonTemplate")
+		btn:SetSize(92, 20)
+		btn:SetText(L["ADDON_TITLE"] or "TradeFlow")
+		local closeBtn = ProfessionsFrame.CloseButton or _G.ProfessionsFrameCloseButton
+		if closeBtn then
+			btn:SetPoint("RIGHT", closeBtn, "LEFT", -6, 0)
+		else
+			btn:SetPoint("TOPRIGHT", ProfessionsFrame, "TOPRIGHT", -30, -2)
+		end
+		btn:SetFrameStrata(ProfessionsFrame:GetFrameStrata())
+		btn:SetFrameLevel(((closeBtn and closeBtn:GetFrameLevel()) or ProfessionsFrame:GetFrameLevel()) + 5)
+		btn:SetScript("OnClick", function()
+			ns.bypassIntercept = false
+			ns:SuppressBlizzardFrame()
+			local sl = ns:GetActiveClientSkillLine() or ns.currentSkillLine
+			if sl then
+				ns.currentSkillLine = sl
+			end
+			ns:ScanActiveTradeSkill()
+			if ns.ShowMainWindow then
+				ns:ShowMainWindow()
+			end
+		end)
+		self.blizzReturnBtn = btn
+	end
+	self.blizzReturnBtn:Show()
+end
+
 function ns:OpenBlizzardProfessions()
 	self.bypassIntercept = true
 	if self.HideMainWindow then
 		self:HideMainWindow()
 	end
 	self:RestoreBlizzardFrame()
-	local activeClientSL = self:GetActiveClientSkillLine()
-	if not activeClientSL and self.currentSkillLine then
-		local spellID = (self.currentSkillLine == 186 and 2656) or self.PROF_SPELLS[self.currentSkillLine]
-		local spellName = spellID and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
-		if spellName and CastSpellByName then
-			pcall(CastSpellByName, spellName)
-		end
-	end
 	if ProfessionsFrame then
-		ShowUIPanel(ProfessionsFrame)
+		self:EnsureBlizzardReturnButton()
+		if not ProfessionsFrame:IsShown() then
+			if self.currentSkillLine and C_TradeSkillUI and C_TradeSkillUI.OpenTradeSkill then
+				pcall(C_TradeSkillUI.OpenTradeSkill, self.currentSkillLine)
+			elseif not InCombatLockdown() then
+				ShowUIPanel(ProfessionsFrame)
+			end
+		end
 	end
 end
 
@@ -914,6 +955,13 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		local ok = ns:ScanActiveTradeSkill()
 		if ok and not ns.bypassIntercept then
 			ns:SuppressBlizzardFrame()
+			if C_Timer and C_Timer.After then
+				C_Timer.After(0, function()
+					if not ns.bypassIntercept and ProfessionsFrame and ProfessionsFrame:IsShown() then
+						ns:SuppressBlizzardFrame()
+					end
+				end)
+			end
 			if ns.ShowMainWindow then
 				ns:ShowMainWindow()
 			end

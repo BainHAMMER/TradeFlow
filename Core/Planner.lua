@@ -38,7 +38,12 @@ end
 function ns:GetRecipeRequiredSkill(recipeID)
 	local th = self:GetRecipeThresholds(recipeID)
 	local fee, trainerSkill, isTrainer = self:GetTrainerFee(recipeID)
-	local req = (trainerSkill and trainerSkill > 0 and trainerSkill) or (th and th[1]) or 1
+	local scroll = self.RecipeScrolls and self.RecipeScrolls[recipeID]
+	local scrollSkill = scroll and scroll[2]
+	local req = (trainerSkill and trainerSkill > 0 and trainerSkill)
+		or (scrollSkill and scrollSkill > 0 and scrollSkill)
+		or (th and th[1])
+		or 1
 	return req, fee, isTrainer
 end
 
@@ -76,7 +81,8 @@ function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 	return {
 		recipeID = recipeID,
 		learned = learned,
-		isTrainer = isTrainer or (live and not live.learned) or false,
+		isTrainer = isTrainer or false,
+		scrollItemID = (self.RecipeScrolls and self.RecipeScrolls[recipeID] and self.RecipeScrolls[recipeID][1]) or nil,
 		reqSkill = reqSkill,
 		trainerFee = trainerFee,
 		thresholds = th,

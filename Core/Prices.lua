@@ -7,10 +7,12 @@ local L = ns.L
 local AUCTION_CUT = 0.05
 local priceRev = 1
 local reagentPriceCache = {}
+local recipeEconomyCache = {}
 
 function ns:InvalidatePrices()
 	priceRev = priceRev + 1
 	wipe(reagentPriceCache)
+	wipe(recipeEconomyCache)
 	if self.RefreshVisibleUI then
 		self:RefreshVisibleUI()
 	end
@@ -178,6 +180,10 @@ end
 
 -- Экономика рецепта: craftCost, outputValue, netProfit, reagentBreakdown
 function ns:GetRecipeEconomy(recipeID)
+	local cached = recipeEconomyCache[recipeID]
+	if cached then
+		return cached[1], cached[2], cached[3], cached[4], cached[5]
+	end
 	local rec = self:GetRecipeRecord(recipeID)
 	if not rec or #rec.reagents == 0 then
 		return nil, nil, nil, {}
@@ -210,19 +216,28 @@ function ns:GetRecipeEconomy(recipeID)
 	local outputSource = nil
 
 	if rec.outputItemID and rec.outputItemID > 0 then
+		local vendorOnly = self.db and self.db.options and self.db.options.deductVendorInRoute == true
 		local vendorSell = self:GetItemSellPrice(rec.outputItemID) * (rec.numMade or 1)
-		local ahUnit = self:GetAuctionPrice(rec.outputItemID)
-		local ahNet = ahUnit and math.floor(ahUnit * (rec.numMade or 1) * (1 - AUCTION_CUT) + 0.5) or nil
-		if ahNet and ahNet > vendorSell then
-			outputValue = ahNet
-			outputSource = "ah"
-		elseif vendorSell > 0 then
-			outputValue = vendorSell
-			outputSource = "vendor"
+		if vendorOnly then
+			if vendorSell > 0 then
+				outputValue = vendorSell
+				outputSource = "vendor"
+			end
+		else
+			local ahUnit = self:GetAuctionPrice(rec.outputItemID)
+			local ahNet = ahUnit and math.floor(ahUnit * (rec.numMade or 1) * (1 - AUCTION_CUT) + 0.5) or nil
+			if ahNet and ahNet > vendorSell then
+				outputValue = ahNet
+				outputSource = "ah"
+			elseif vendorSell > 0 then
+				outputValue = vendorSell
+				outputSource = "vendor"
+			end
 		end
 	end
 
 	local netProfit = (craftCost and outputValue) and (outputValue - craftCost) or nil
+	recipeEconomyCache[recipeID] = { craftCost, outputValue, netProfit, breakdown, outputSource }
 	return craftCost, outputValue, netProfit, breakdown, outputSource
 end
 

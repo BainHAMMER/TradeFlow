@@ -79,7 +79,7 @@ function ns:BuildFilteredRecipeList()
 		local learned = self:IsRecipeLearned(recipeID)
 		local metrics = self:GetRecipeSkillMetrics(recipeID, curSkill, deductVendor)
 		-- При включённой галочке показываем неизученные рецепты (в первую очередь доступные сейчас или в ближайшие +40 очков навыка)
-		local unlearnedRelevant = showUnlearned and not learned and metrics.isTrainer and ((metrics.reqSkill or 1) <= curSkill + 40)
+		local unlearnedRelevant = showUnlearned and not learned and ((metrics.reqSkill or 1) <= curSkill + 40)
 		if learned or unlearnedRelevant then
 			local direct, withCraft, withVendor, _, withBank = self:GetRecipeCraftCounts(recipeID)
 			local canCraft = (direct > 0 or withCraft > 0 or withVendor > 0 or (withBank or 0) > 0)
@@ -111,11 +111,13 @@ function ns:BuildFilteredRecipeList()
 
 			if passFilter then
 				local name, icon, outItemID = self:GetRecipeDisplay(recipeID)
+				local live = self.liveRecipes and self.liveRecipes[recipeID]
 				entries[#entries + 1] = {
 					recipeID = recipeID,
 					name = name,
 					icon = icon,
 					outItemID = outItemID,
+					categoryName = (live and live.categoryName) or L["CAT_OTHER"],
 					learned = learned,
 					direct = direct,
 					withCraft = withCraft,
@@ -155,18 +157,57 @@ function ns:BuildFilteredRecipeList()
 		return a.recipeID < b.recipeID
 	end)
 
+	if opts.groupByCategory == true and #entries > 0 then
+		self.collapsedCategories = self.collapsedCategories or {}
+		local byCat, catOrder = {}, {}
+		for _, e in ipairs(entries) do
+			local c = e.categoryName or L["CAT_OTHER"]
+			if not byCat[c] then
+				byCat[c] = {}
+				catOrder[#catOrder + 1] = c
+			end
+			byCat[c][#byCat[c] + 1] = e
+		end
+		table.sort(catOrder, function(a, b)
+			if a == L["CAT_OTHER"] then return false end
+			if b == L["CAT_OTHER"] then return true end
+			return a < b
+		end)
+		local grouped = {}
+		for _, c in ipairs(catOrder) do
+			local list = byCat[c]
+			local collapsed = self.collapsedCategories[c] == true
+			grouped[#grouped + 1] = {
+				isHeader = true,
+				categoryName = c,
+				count = #list,
+				collapsed = collapsed,
+			}
+			if not collapsed then
+				for _, e in ipairs(list) do
+					grouped[#grouped + 1] = e
+				end
+			end
+		end
+		entries = grouped
+	end
+
 	self.filteredRecipes = entries
 	if #entries > 0 then
 		local sel = self.selectedRecipeBySkill[sl]
 		local found = false
+		local firstRecipeID = nil
 		for _, e in ipairs(entries) do
-			if e.recipeID == sel then
-				found = true
-				break
+			if not e.isHeader then
+				firstRecipeID = firstRecipeID or e.recipeID
+				if e.recipeID == sel then
+					found = true
+					break
+				end
 			end
 		end
-		if not found and not self.preserveSelectedRecipe then
-			self.selectedRecipeBySkill[sl] = entries[1].recipeID
+		if not found and firstRecipeID and not self.preserveSelectedRecipe then
+			self.selectedRecipeBySkill[sl] = firstRecipeID
 		end
 	end
 	return entries
@@ -290,8 +331,8 @@ function ns:CreateMainFrame()
 
 	-- Полоса прогресса навыка текущей профессии
 	local rankBar = CreateFrame("StatusBar", nil, header, "BackdropTemplate")
-	rankBar:SetSize(220, 18)
-	rankBar:SetPoint("CENTER", header, "CENTER", 90, 0)
+	rankBar:SetSize(195, 18)
+	rankBar:SetPoint("CENTER", header, "CENTER", -15, 0)
 	rankBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
 	rankBar:SetStatusBarColor(0.20, 0.55, 0.90, 0.9)
 	rankBar.bg = rankBar:CreateTexture(nil, "BACKGROUND")
@@ -300,6 +341,24 @@ function ns:CreateMainFrame()
 	rankBar.text = rankBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	rankBar.text:SetPoint("CENTER", 0, 0)
 	f.rankBar = rankBar
+
+	-- Глобальная галка учёта продажи торговцу (для списка рецептов, деталей и калькулятора)
+	local cbVendor = CreateFrame("CheckButton", nil, header, "UICheckButtonTemplate")
+	cbVendor:SetSize(20, 20)
+	cbVendor:SetPoint("LEFT", rankBar, "RIGHT", 12, 0)
+	cbVendor.text = cbVendor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	cbVendor.text:SetPoint("LEFT", cbVendor, "RIGHT", 2, 0)
+	cbVendor.text:SetText(L["PLANNER_DEDUCT_VENDOR"])
+	cbVendor:SetHitRectInsets(0, -115, 0, 0)
+	cbVendor:SetScript("OnClick", function(self)
+		ns.db.options.deductVendorInRoute = self:GetChecked() and true or false
+		if ns.InvalidatePrices then
+			ns:InvalidatePrices()
+		else
+			ns:RefreshMainWindow()
+		end
+	end)
+	f.cbVendor = cbVendor
 
 	local closeBtn = CreateFrame("Button", nil, header, "UIPanelCloseButton")
 	closeBtn:SetPoint("RIGHT", -2, 0)
@@ -347,7 +406,7 @@ function ns:CreateMainFrame()
 	f.leftPane = leftPane
 
 	local searchBox = CreateFrame("EditBox", nil, leftPane, "InputBoxTemplate")
-	searchBox:SetSize(250, 20)
+	searchBox:SetSize(172, 20)
 	searchBox:SetPoint("TOPLEFT", 14, -10)
 	searchBox:SetAutoFocus(false)
 	searchBox:SetText(self.searchQuery or "")
@@ -385,28 +444,81 @@ function ns:CreateMainFrame()
 		local cur = (ns.db and ns.db.options and ns.db.options.sortMode) or "difficulty"
 		for _, m in ipairs(SORT_MODES) do
 			if m.key == cur then
-				sortBtn:SetText(L[m.labelKey])
+				sortBtn:SetText(L[m.labelKey] .. " v")
 				return
 			end
 		end
-		sortBtn:SetText(L["SORT_DIFFICULTY"])
+		sortBtn:SetText(L["SORT_DIFFICULTY"] .. " v")
 	end
-	sortBtn:SetScript("OnClick", function()
+
+	local sortMenu = CreateFrame("Frame", nil, leftPane, "BackdropTemplate")
+	sortMenu:SetSize(156, #SORT_MODES * 22 + 8)
+	sortMenu:SetPoint("TOPLEFT", sortBtn, "BOTTOMLEFT", 0, -2)
+	sortMenu:SetFrameStrata("DIALOG")
+	sortMenu:SetFrameLevel(leftPane:GetFrameLevel() + 20)
+	StylePanel(sortMenu, 0.08, 0.07, 0.06, 0.98)
+	sortMenu:Hide()
+	f.sortMenu = sortMenu
+
+	local sortMenuButtons = {}
+	for i, m in ipairs(SORT_MODES) do
+		local item = CreateFrame("Button", nil, sortMenu)
+		item:SetHeight(20)
+		item:SetPoint("TOPLEFT", 5, -4 - (i - 1) * 22)
+		item:SetPoint("TOPRIGHT", -5, -4 - (i - 1) * 22)
+		item.hl = item:CreateTexture(nil, "HIGHLIGHT")
+		item.hl:SetAllPoints()
+		item.hl:SetColorTexture(1, 0.82, 0.2, 0.16)
+		item.text = item:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		item.text:SetPoint("LEFT", 6, 0)
+		item.text:SetPoint("RIGHT", -6, 0)
+		item.text:SetJustifyH("LEFT")
+		item.modeKey = m.key
+		item:SetScript("OnClick", function(self)
+			ns.db.options.sortMode = self.modeKey
+			UpdateSortButtonLabel()
+			sortMenu:Hide()
+			f.recipeOffset = 0
+			ns:RefreshRecipeList()
+		end)
+		sortMenuButtons[i] = item
+	end
+
+	local function RefreshSortMenuHighlight()
 		local cur = (ns.db and ns.db.options and ns.db.options.sortMode) or "difficulty"
-		local nextIdx = 1
-		for i, m in ipairs(SORT_MODES) do
-			if m.key == cur then
-				nextIdx = (i % #SORT_MODES) + 1
-				break
+		for idx, item in ipairs(sortMenuButtons) do
+			local label = L[SORT_MODES[idx].labelKey]
+			if item.modeKey == cur then
+				item.text:SetText("|cffffd100* " .. label .. "|r")
+			else
+				item.text:SetText("  " .. label)
 			end
 		end
-		ns.db.options.sortMode = SORT_MODES[nextIdx].key
-		UpdateSortButtonLabel()
-		f.recipeOffset = 0
-		ns:RefreshRecipeList()
+	end
+
+	sortBtn:SetScript("OnClick", function()
+		if sortMenu:IsShown() then
+			sortMenu:Hide()
+		else
+			RefreshSortMenuHighlight()
+			sortMenu:Show()
+		end
+	end)
+	f:HookScript("OnHide", function()
+		sortMenu:Hide()
 	end)
 	f.sortBtn = sortBtn
 	UpdateSortButtonLabel()
+
+	local catBtn = ns.CreateTabButton(leftPane, 74, 22, L["GROUP_BY_CATEGORY"])
+	catBtn:SetPoint("RIGHT", sortBtn, "LEFT", -4, 0)
+	catBtn:SetScript("OnClick", function()
+		ns.db.options.groupByCategory = not (ns.db.options.groupByCategory == true)
+		ns.SetTabButtonActive(catBtn, ns.db.options.groupByCategory == true)
+		f.recipeOffset = 0
+		ns:RefreshRecipeList()
+	end)
+	f.catBtn = catBtn
 
 	local function CreateFilterCheck(label, optKey, xOff, maxHitWidth)
 		local cb = CreateFrame("CheckButton", nil, leftPane, "UICheckButtonTemplate")
@@ -456,6 +568,11 @@ function ns:CreateMainFrame()
 		row.sel:SetColorTexture(0.85, 0.65, 0.15, 0.28)
 		row.sel:Hide()
 
+		row.headerBg = row:CreateTexture(nil, "BACKGROUND")
+		row.headerBg:SetAllPoints()
+		row.headerBg:SetColorTexture(0.18, 0.15, 0.08, 0.75)
+		row.headerBg:Hide()
+
 		row.hl = row:CreateTexture(nil, "HIGHLIGHT")
 		row.hl:SetAllPoints()
 		row.hl:SetColorTexture(1, 0.85, 0.3, 0.14)
@@ -482,6 +599,12 @@ function ns:CreateMainFrame()
 			if not e then
 				return
 			end
+			if e.isHeader then
+				ns.collapsedCategories = ns.collapsedCategories or {}
+				ns.collapsedCategories[e.categoryName] = not (ns.collapsedCategories[e.categoryName] == true)
+				ns:RefreshRecipeList()
+				return
+			end
 			if ns:HandleItemClick(e.outItemID, e.recipeID) then
 				return
 			end
@@ -493,12 +616,12 @@ function ns:CreateMainFrame()
 		end)
 		row:SetScript("OnDoubleClick", function(self, button)
 			local e = self.entryData
-			if e and button == "LeftButton" then
+			if e and not e.isHeader and button == "LeftButton" then
 				ns:QueueAddRecipe(e.recipeID, 1)
 			end
 		end)
 		row:SetScript("OnEnter", function(self)
-			if self.entryData then
+			if self.entryData and not self.entryData.isHeader then
 				ns:ShowRecipeTooltip(self, self.entryData.recipeID)
 			end
 		end)
@@ -517,15 +640,11 @@ function ns:CreateMainFrame()
 	StylePanel(topRight, 0.07, 0.065, 0.055, 0.95)
 	f.topRight = topRight
 
-	local tabDetailsBtn = CreateFrame("Button", nil, topRight, "UIPanelButtonTemplate")
-	tabDetailsBtn:SetSize(175, 22)
+	local tabDetailsBtn = ns.CreateTabButton(topRight, 175, 22, L["TAB_DETAILS"])
 	tabDetailsBtn:SetPoint("TOPLEFT", 8, -6)
-	tabDetailsBtn:SetText(L["TAB_DETAILS"])
 
-	local tabPlannerBtn = CreateFrame("Button", nil, topRight, "UIPanelButtonTemplate")
-	tabPlannerBtn:SetSize(185, 22)
+	local tabPlannerBtn = ns.CreateTabButton(topRight, 185, 22, L["TAB_PLANNER"])
 	tabPlannerBtn:SetPoint("LEFT", tabDetailsBtn, "RIGHT", 6, 0)
-	tabPlannerBtn:SetText(L["TAB_PLANNER"])
 
 	local topContent = CreateFrame("Frame", nil, topRight)
 	topContent:SetPoint("TOPLEFT", 4, -30)
@@ -537,6 +656,8 @@ function ns:CreateMainFrame()
 	f.topTab = "details"
 	local function SelectTopTab(tabKey)
 		f.topTab = tabKey
+		ns.SetTabButtonActive(tabDetailsBtn, tabKey == "details")
+		ns.SetTabButtonActive(tabPlannerBtn, tabKey == "planner")
 		detailsView:SetShown(tabKey == "details")
 		routeView:SetShown(tabKey == "planner")
 		if tabKey == "details" then
@@ -545,6 +666,8 @@ function ns:CreateMainFrame()
 			ns:RefreshRouteView()
 		end
 	end
+	ns.SetTabButtonActive(tabDetailsBtn, true)
+	ns.SetTabButtonActive(tabPlannerBtn, false)
 	f.SelectTopTab = SelectTopTab
 	tabDetailsBtn:SetScript("OnClick", function() SelectTopTab("details") end)
 	tabPlannerBtn:SetScript("OnClick", function() SelectTopTab("planner") end)
@@ -693,6 +816,51 @@ function ns:CreateDetailsView(parent)
 	end)
 	d.cbAutoSub = cbSub
 
+	local tomtomBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+	tomtomBtn:SetSize(66, 18)
+	tomtomBtn:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -8, 54)
+	tomtomBtn:SetText(L["WAYPOINT_BTN"])
+	tomtomBtn:SetScript("OnClick", function(self)
+		if self.waypoint then
+			ns:SetSourceWaypoint(self.waypoint, self.itemName)
+		end
+	end)
+	tomtomBtn:Hide()
+	d.tomtomBtn = tomtomBtn
+
+	-- Строка источника для неизученных рецептов (свиток + цена на аукционе / ближайший источник)
+	local sourceBtn = CreateFrame("Button", nil, d)
+	sourceBtn:SetHeight(16)
+	sourceBtn:SetPoint("BOTTOMLEFT", cbSub, "TOPLEFT", 0, 2)
+	sourceBtn:SetPoint("RIGHT", -8, 0)
+	sourceBtn.text = sourceBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	sourceBtn.text:SetAllPoints()
+	sourceBtn.text:SetJustifyH("LEFT")
+	sourceBtn.text:SetWordWrap(false)
+	if sourceBtn.text.SetMaxLines then sourceBtn.text:SetMaxLines(1) end
+	sourceBtn:SetScript("OnClick", function(self)
+		if self.itemID then
+			ns:HandleItemClick(self.itemID, nil)
+		end
+	end)
+	sourceBtn:SetScript("OnEnter", function(self)
+		if self.itemID then
+			ns:ShowItemTooltip(self, self.itemID, function(tip)
+				if self.sourceDetail and self.sourceDetail ~= "" then
+					tip:AddLine(" ")
+					tip:AddLine(self.sourceDetail, 0.85, 0.85, 0.85, true)
+				end
+			end)
+		elseif self.fullText and self.fullText ~= "" then
+			GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+			GameTooltip:SetText(self.fullText, 1, 1, 1, 1, true)
+			GameTooltip:Show()
+		end
+	end)
+	sourceBtn:SetScript("OnLeave", GameTooltip_Hide)
+	sourceBtn:Hide()
+	d.sourceBtn = sourceBtn
+
 	-- Ввод количества и кнопки «В очередь», «В очередь все», «Создать»
 	local minusBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
 	minusBtn:SetSize(24, 24)
@@ -784,6 +952,17 @@ function ns:RefreshDetailsView()
 		d.outBtn.icon:SetTexture(nil)
 		d.recipeTitle:SetText(L["NO_RECIPE_SELECTED"])
 		d.thresholdLine:SetText("")
+		if d.sourceBtn then
+			d.sourceBtn.itemID = nil
+			d.sourceBtn.sourceDetail = nil
+			d.sourceBtn.fullText = nil
+			d.sourceBtn:Hide()
+		end
+		if d.tomtomBtn then
+			d.tomtomBtn.waypoint = nil
+			d.tomtomBtn.itemName = nil
+			d.tomtomBtn:Hide()
+		end
 		for i = 1, 6 do d.reagentRows[i]:Hide() end
 		d.valCraftCost:SetText("-")
 		d.valOutput:SetText("-")
@@ -819,12 +998,87 @@ function ns:RefreshDetailsView()
 		local pct = math.floor((metrics.chance or 0) * 100 + 0.5)
 		local dc = self.DIFFICULTY_COLORS[metrics.colorKey] or self.DIFFICULTY_COLORS.grey
 		thParts[#thParts + 1] = string.format("%s %s%d%%|r", L["CHANCE_LABEL"], dc.hex, pct)
+		if d.sourceBtn then
+			d.sourceBtn.itemID = nil
+			d.sourceBtn.sourceDetail = nil
+			d.sourceBtn.fullText = nil
+			d.sourceBtn:Hide()
+		end
+		if d.tomtomBtn then
+			d.tomtomBtn.waypoint = nil
+			d.tomtomBtn.itemName = nil
+			d.tomtomBtn:Hide()
+		end
 	else
-		thParts[#thParts + 1] = "|cff809ec7" .. string.format(
-			L["RECIPE_UNLEARNED_TAG"],
-			ns.FormatMoney(metrics.trainerFee or 0),
-			metrics.reqSkill or 1
-		) .. "|r"
+		local src = self.GetRecipeSourceInfo and self:GetRecipeSourceInfo(recipeID)
+		if src and src.isTrainer then
+			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
+				L["RECIPE_UNLEARNED_TAG"],
+				ns.FormatMoney(src.trainerFee or 0),
+				src.reqSkill or 1
+			) .. "|r"
+		elseif src and src.scrollItemID then
+			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
+				L["RECIPE_UNLEARNED_SCROLL"],
+				src.reqSkill or 1
+			) .. "|r"
+		else
+			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
+				L["RECIPE_UNLEARNED_UNKNOWN"],
+				(src and src.reqSkill) or metrics.reqSkill or 1
+			) .. "|r"
+		end
+
+		if d.sourceBtn then
+			local srcParts = {}
+			local scrollDisplayName = nil
+			if src and src.scrollItemID then
+				local sName, _, _, sLink, _, sHex = self:GetItemDisplay(src.scrollItemID)
+				scrollDisplayName = sName
+				srcParts[#srcParts + 1] = sLink or ((sHex or "|cffffffff") .. sName .. "|r")
+				if src.scrollPrice and src.scrollPrice > 0 then
+					srcParts[#srcParts + 1] = "|cff88ccff(" .. string.format(L["SOURCE_AH_PRICE"], ns.FormatMoney(src.scrollPrice)) .. ")|r"
+				end
+			end
+			local summaryText = (src and src.sourceText and src.sourceText ~= "") and src.sourceText or nil
+			local detailText = (src and src.detailText and src.detailText ~= "") and src.detailText or summaryText
+			if summaryText then
+				srcParts[#srcParts + 1] = "|cffd0d0d0" .. summaryText .. "|r"
+			end
+			local wp = src and src.waypoint
+			local canTomTom = wp and self.HasTomTom and self:HasTomTom()
+			if d.tomtomBtn then
+				if canTomTom then
+					d.tomtomBtn.waypoint = wp
+					d.tomtomBtn.itemName = scrollDisplayName or name
+					d.tomtomBtn:Show()
+				else
+					d.tomtomBtn.waypoint = nil
+					d.tomtomBtn.itemName = nil
+					d.tomtomBtn:Hide()
+				end
+			end
+			if #srcParts > 0 then
+				local full = "|cffffd100" .. L["SOURCE_PREFIX"] .. "|r " .. table.concat(srcParts, " - ")
+				d.sourceBtn.itemID = src and src.scrollItemID or nil
+				d.sourceBtn.sourceDetail = detailText
+				d.sourceBtn.fullText = full
+				d.sourceBtn:ClearAllPoints()
+				d.sourceBtn:SetPoint("BOTTOMLEFT", d.cbAutoSub, "TOPLEFT", 0, 2)
+				if wp and d.tomtomBtn and d.tomtomBtn:IsShown() then
+					d.sourceBtn:SetPoint("RIGHT", d.tomtomBtn, "LEFT", -6, 0)
+				else
+					d.sourceBtn:SetPoint("RIGHT", -8, 0)
+				end
+				d.sourceBtn.text:SetText(full)
+				d.sourceBtn:Show()
+			else
+				d.sourceBtn.itemID = nil
+				d.sourceBtn.sourceDetail = nil
+				d.sourceBtn.fullText = nil
+				d.sourceBtn:Hide()
+			end
+		end
 	end
 	d.thresholdLine:SetText(table.concat(thParts, "   |   "))
 
@@ -885,20 +1139,45 @@ function ns:RenderRecipeListRows()
 		row.entryData = entry
 		if entry then
 			row:Show()
-			row.sel:SetShown(entry.recipeID == selectedID)
-			row.icon:SetTexture(entry.icon)
-
-			local dc = self.DIFFICULTY_COLORS[entry.metrics.colorKey] or self.DIFFICULTY_COLORS.grey
-			local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor, entry.withBank)
-			local trainerTag = (not entry.learned) and string.format(" |cff809ec7[%d]|r", entry.metrics.reqSkill or 1) or ""
-			row.nameText:SetText(dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
-
-			local pct = math.floor((entry.metrics.chance or 0) * 100 + 0.5)
-			if pct > 0 then
-				local costStr = entry.metrics.costPerSkillUp and ns.FormatMoney(entry.metrics.costPerSkillUp) or ""
-				row.rightText:SetText(string.format("%s%d%%|r  %s", dc.hex, pct, costStr))
+			if entry.isHeader then
+				row.sel:Hide()
+				row.headerBg:Show()
+				row.icon:Hide()
+				row.nameText:ClearAllPoints()
+				row.nameText:SetPoint("LEFT", 6, 0)
+				row.nameText:SetPoint("RIGHT", row.rightText, "LEFT", -8, 0)
+				local sign = entry.collapsed and "+" or "-"
+				row.nameText:SetText(string.format("|cffffd100[%s] %s (%d)|r", sign, entry.categoryName, entry.count or 0))
+				row.rightText:SetText("")
 			else
-				row.rightText:SetText(entry.profit and ns.FormatMoney(entry.profit, true) or "")
+				row.headerBg:Hide()
+				row.sel:SetShown(entry.recipeID == selectedID)
+				row.icon:Show()
+				row.icon:SetTexture(entry.icon)
+				row.nameText:ClearAllPoints()
+				row.nameText:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+				row.nameText:SetPoint("RIGHT", row.rightText, "LEFT", -8, 0)
+
+				local dc = self.DIFFICULTY_COLORS[entry.metrics.colorKey] or self.DIFFICULTY_COLORS.grey
+				local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor, entry.withBank)
+				local trainerTag = (not entry.learned) and string.format(" |cff809ec7[%d]|r", entry.metrics.reqSkill or 1) or ""
+				row.nameText:SetText(dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
+
+				local pct = math.floor((entry.metrics.chance or 0) * 100 + 0.5)
+				local sortMode = (self.db and self.db.options and self.db.options.sortMode) or "difficulty"
+				if sortMode == "profit" then
+					local profStr = entry.profit and ns.FormatMoney(entry.profit, true) or ""
+					if pct > 0 and profStr ~= "" then
+						row.rightText:SetText(string.format("%s%d%%|r  %s", dc.hex, pct, profStr))
+					else
+						row.rightText:SetText(profStr)
+					end
+				elseif pct > 0 then
+					local costStr = entry.metrics.costPerSkillUp and ns.FormatMoney(entry.metrics.costPerSkillUp) or ""
+					row.rightText:SetText(string.format("%s%d%%|r  %s", dc.hex, pct, costStr))
+				else
+					row.rightText:SetText(entry.profit and ns.FormatMoney(entry.profit, true) or "")
+				end
 			end
 		else
 			row:Hide()
@@ -914,6 +1193,9 @@ function ns:RefreshRecipeList()
 	f.cbCraftable:SetChecked(self.db.options.filterCraftable == true)
 	f.cbSkillUp:SetChecked(self.db.options.filterSkillUp == true)
 	f.cbUnlearned:SetChecked(self.db.options.showUnlearned == true)
+	if f.catBtn then
+		ns.SetTabButtonActive(f.catBtn, self.db.options.groupByCategory == true)
+	end
 
 	local list = self:BuildFilteredRecipeList()
 	local maxOff = math.max(0, #list - RECIPE_VISIBLE_ROWS)
@@ -936,7 +1218,9 @@ function ns:RefreshRecipeList()
 	end
 	self:RenderRecipeListRows()
 	self:RefreshDetailsView()
-	self:RefreshRouteView()
+	if f.topTab == "planner" then
+		self:RefreshRouteView()
+	end
 end
 
 function ns:RefreshMainWindow()
@@ -994,6 +1278,9 @@ function ns:RefreshMainWindow()
 	f.rankBar:SetValue(rank)
 	f.rankBar.text:SetText(string.format("%s  %d / %d", profName, rank, maxRank))
 	f.langBtn:SetText(self.lang == "ru" and "RU" or "EN")
+	if f.cbVendor then
+		f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
+	end
 
 	self:RefreshRecipeList()
 	self:RefreshQueueAndShoppingView()
