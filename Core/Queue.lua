@@ -234,7 +234,11 @@ function ns:GetQueueStepStatus(step)
 	if maxCrafts >= 99999 or maxCrafts <= 0 then
 		return 0, "wait"
 	end
-	if step.skillLine and self.currentSkillLine and step.skillLine ~= self.currentSkillLine then
+	local stepSL = (rec and rec.skillLine) or step.skillLine
+	if stepSL then
+		step.skillLine = stepSL
+	end
+	if stepSL and self.currentSkillLine and stepSL ~= self.currentSkillLine then
 		return maxCrafts, "other_prof"
 	end
 	if maxCrafts >= step.count then

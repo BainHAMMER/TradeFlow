@@ -583,9 +583,10 @@ function ns:ScanActiveTradeSkill()
 				diffKey = "trivial"
 			end
 
+			local bundledSL = self.RecipeData and self.RecipeData[recipeID] and self.RecipeData[recipeID].skillLine
 			self.liveRecipes[recipeID] = {
 				recipeID = recipeID,
-				skillLine = skillLine,
+				skillLine = bundledSL or skillLine,
 				name = info.name,
 				icon = info.icon,
 				categoryID = catID,

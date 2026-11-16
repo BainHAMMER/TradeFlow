@@ -257,6 +257,11 @@ function ns:RenderQueueOrShoppingRows()
 				local prefix = step.isSubcraft and L["QUEUE_SUBCRAFT_BADGE"] or ""
 				row.title:SetText(string.format("%s%s%s|r |cffffd100x%d|r", prefix, hex or "|cffffffff", name, step.count or 1))
 
+				local rec = self:GetRecipeRecord(step.recipeID)
+				local stepSL = (rec and rec.skillLine) or step.skillLine
+				if stepSL then
+					step.skillLine = stepSL
+				end
 				local readyCrafts, state = self:GetQueueStepStatus(step)
 				local statusStr
 				if state == "ready" then
@@ -264,12 +269,12 @@ function ns:RenderQueueOrShoppingRows()
 				elseif state == "partial" then
 					statusStr = string.format(L["QUEUE_STATUS_PARTIAL"], readyCrafts, step.count)
 				elseif state == "other_prof" then
-					statusStr = string.format(L["QUEUE_STATUS_OTHER_PROF"], self:GetProfessionName(step.skillLine))
+					statusStr = string.format(L["QUEUE_STATUS_OTHER_PROF"], self:GetProfessionName(stepSL))
 				else
 					statusStr = L["QUEUE_STATUS_WAIT"]
 				end
 				row.sub:SetText(statusStr)
-				row.rightText:SetText(self:GetProfessionName(step.skillLine))
+				row.rightText:SetText(self:GetProfessionName(stepSL))
 			else
 				row:Hide()
 			end
