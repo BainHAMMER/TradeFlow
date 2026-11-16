@@ -1,0 +1,10 @@
+package-as: TradeFlow
+enable-nolib-creation: no
+
+ignore:
+  - .github
+  - .gitignore
+  - .pkgmeta
+  - PLAN.md
+  - README.md
+  - Media/Logo.png
