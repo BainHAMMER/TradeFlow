@@ -184,8 +184,13 @@ function ns:SelectRecipeID(recipeID)
 		self.selectedRecipeBySkill[self.currentSkillLine] = recipeID
 	end
 	if self.mainFrame and self.mainFrame:IsShown() then
+		if self.mainFrame.SelectTopTab and self.mainFrame.topTab ~= "details" then
+			self.mainFrame.SelectTopTab("details")
+		end
 		self.preserveSelectedRecipe = true
+		self.scrollToSelectedRecipe = true
 		self:RefreshMainWindow()
+		self.scrollToSelectedRecipe = false
 		self.preserveSelectedRecipe = false
 	end
 end
@@ -540,6 +545,7 @@ function ns:CreateMainFrame()
 			ns:RefreshRouteView()
 		end
 	end
+	f.SelectTopTab = SelectTopTab
 	tabDetailsBtn:SetScript("OnClick", function() SelectTopTab("details") end)
 	tabPlannerBtn:SetScript("OnClick", function() SelectTopTab("planner") end)
 
@@ -911,6 +917,20 @@ function ns:RefreshRecipeList()
 
 	local list = self:BuildFilteredRecipeList()
 	local maxOff = math.max(0, #list - RECIPE_VISIBLE_ROWS)
+	if self.scrollToSelectedRecipe then
+		local sl = self.currentSkillLine
+		local sel = sl and self.selectedRecipeBySkill[sl]
+		if sel then
+			for idx, e in ipairs(list) do
+				if e.recipeID == sel then
+					if idx <= f.recipeOffset or idx > f.recipeOffset + RECIPE_VISIBLE_ROWS then
+						f.recipeOffset = math.max(0, math.min(maxOff, idx - math.floor(RECIPE_VISIBLE_ROWS / 2)))
+					end
+					break
+				end
+			end
+		end
+	end
 	if f.recipeOffset > maxOff then
 		f.recipeOffset = maxOff
 	end

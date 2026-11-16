@@ -8,6 +8,7 @@ local L = ns.L
 local lastSyncedSignature = nil
 local vendorBar = nil
 local bankBar = nil
+local trainerBar = nil
 
 function ns:GetAuctionatorListName()
 	return "TradeFlow: " .. self:CharKey()
@@ -379,6 +380,9 @@ for _, ev in ipairs({
 	"BANKFRAME_OPENED",
 	"BANKFRAME_CLOSED",
 	"PLAYERBANKSLOTS_CHANGED",
+	"TRAINER_SHOW",
+	"TRAINER_UPDATE",
+	"TRAINER_CLOSED",
 }) do
 	pcall(merchantEventFrame.RegisterEvent, merchantEventFrame, ev)
 end
@@ -394,6 +398,18 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 		if bankBar then
 			bankBar:Hide()
 		end
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
+		end
+	elseif event == "TRAINER_CLOSED" then
+		if trainerBar then
+			trainerBar:Hide()
+		end
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
+		end
+	elseif event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then
+		ns:RefreshTrainerBar()
 		if ns.RefreshQueueAndShoppingView then
 			ns:RefreshQueueAndShoppingView()
 		end
@@ -617,5 +633,161 @@ function ns:RefreshBankBar()
 	bankBar.label:SetText(string.format(L["BANK_BAR_TITLE"], #matches))
 	bankBar.btn:SetText(L["BANK_WITHDRAW_BTN"])
 	bankBar:Show()
+end
+
+-------------------------------------------------------------------------------
+-- Панель и кнопка «Изучить из очереди» у тренера (TRAINER_SHOW)
+-------------------------------------------------------------------------------
+local function GetActiveTrainerFrame()
+	if ClassTrainerFrame and ClassTrainerFrame:IsShown() then
+		return ClassTrainerFrame
+	end
+	if TrainerFrame and TrainerFrame:IsShown() then
+		return TrainerFrame
+	end
+	return nil
+end
+
+local function CollectTrainerMatches()
+	local tf = GetActiveTrainerFrame()
+	if not (tf and GetNumTrainerServices and GetTrainerServiceInfo) then
+		return {}, 0
+	end
+
+	local queue = ns:GetQueue()
+	local needLearn = {}
+	local needByName = {}
+	for _, step in ipairs(queue) do
+		if step.recipeID and not ns:IsRecipeLearned(step.recipeID) and not needLearn[step.recipeID] then
+			needLearn[step.recipeID] = true
+			local rName = ns:GetRecipeDisplay(step.recipeID)
+			if rName then
+				needByName[rName] = step.recipeID
+			end
+		end
+	end
+	if not next(needLearn) then
+		return {}, 0
+	end
+
+	local matches = {}
+	local totalCopper = 0
+	local num = GetNumTrainerServices() or 0
+	for i = 1, num do
+		local name, _, category = GetTrainerServiceInfo(i)
+		if category == "available" then
+			local link = GetTrainerServiceItemLink and GetTrainerServiceItemLink(i)
+			local spellID = link and tonumber(link:match("spell:(%d+)") or link:match("enchant:(%d+)"))
+			if not spellID and name and needByName[name] then
+				spellID = needByName[name]
+			end
+			if spellID and needLearn[spellID] then
+				local cost = (GetTrainerServiceCost and GetTrainerServiceCost(i)) or 0
+				matches[#matches + 1] = {
+					index = i,
+					recipeID = spellID,
+					name = name or ns:GetRecipeDisplay(spellID),
+					cost = cost,
+				}
+				totalCopper = totalCopper + cost
+			end
+		end
+	end
+	return matches, totalCopper
+end
+
+function ns:GetTrainerQueueMatches()
+	return CollectTrainerMatches()
+end
+
+function ns:LearnQueuedTrainerRecipes()
+	local matches = CollectTrainerMatches()
+	if #matches == 0 or not BuyTrainerService then
+		return
+	end
+	-- Покупаем с конца списка, чтобы скрытие выученных строк не сдвигало индексы оставшихся
+	for i = #matches, 1, -1 do
+		local m = matches[i]
+		pcall(BuyTrainerService, m.index)
+		self:Print(string.format(L["TRAINER_LEARNED_MSG"], m.name or tostring(m.recipeID)))
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.25, function()
+			if ns.ScanPlayerProfessions then
+				ns:ScanPlayerProfessions()
+			end
+			ns:RefreshTrainerBar()
+			if ns.RefreshVisibleUI then
+				ns:RefreshVisibleUI()
+			end
+		end)
+	end
+end
+
+function ns:RefreshTrainerBar()
+	local tf = GetActiveTrainerFrame()
+	if not tf then
+		if trainerBar then
+			trainerBar:Hide()
+		end
+		return
+	end
+
+	local matches, totalCopper = CollectTrainerMatches()
+	if #matches == 0 then
+		if trainerBar then
+			trainerBar:Hide()
+		end
+		return
+	end
+
+	if not trainerBar then
+		trainerBar = CreateFrame("Frame", "TradeFlowTrainerBar", tf, "BackdropTemplate")
+		trainerBar:SetHeight(38)
+		trainerBar:SetFrameStrata("DIALOG")
+		trainerBar:SetToplevel(true)
+		trainerBar:SetClampedToScreen(true)
+		trainerBar:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true, tileSize = 16, edgeSize = 12,
+			insets = { left = 3, right = 3, top = 3, bottom = 3 },
+		})
+		trainerBar:SetBackdropColor(0.08, 0.07, 0.05, 0.96)
+		trainerBar:SetBackdropBorderColor(0.95, 0.78, 0.28, 1)
+
+		trainerBar.label = trainerBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		trainerBar.label:SetPoint("LEFT", 10, 0)
+		trainerBar.label:SetPoint("RIGHT", -165, 0)
+		trainerBar.label:SetJustifyH("LEFT")
+		trainerBar.label:SetWordWrap(false)
+
+		trainerBar.btn = CreateFrame("Button", nil, trainerBar, "UIPanelButtonTemplate")
+		trainerBar.btn:SetSize(155, 24)
+		trainerBar.btn:SetPoint("RIGHT", -8, 0)
+		trainerBar.btn:SetScript("OnClick", function()
+			ns:LearnQueuedTrainerRecipes()
+		end)
+		trainerBar.btn:SetScript("OnEnter", function(self)
+			local curMatches = CollectTrainerMatches()
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:AddLine(L["TRAINER_LEARN_BTN"], 1, 0.82, 0)
+			for _, m in ipairs(curMatches) do
+				GameTooltip:AddDoubleLine(m.name or ("#" .. m.recipeID), ns.FormatMoney(m.cost), 1, 1, 1, 1, 1, 1)
+			end
+			GameTooltip:Show()
+		end)
+		trainerBar.btn:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+	end
+
+	trainerBar:SetParent(tf)
+	trainerBar:ClearAllPoints()
+	trainerBar:SetPoint("TOPLEFT", tf, "BOTTOMLEFT", 0, -2)
+	trainerBar:SetPoint("TOPRIGHT", tf, "BOTTOMRIGHT", 0, -2)
+	trainerBar.label:SetText(string.format(L["TRAINER_BAR_TITLE"], #matches, ns.FormatMoney(totalCopper)))
+	trainerBar.btn:SetText(L["TRAINER_LEARN_BTN"])
+	trainerBar:Show()
 end
 

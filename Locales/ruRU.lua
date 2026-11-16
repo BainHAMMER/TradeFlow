@@ -95,6 +95,9 @@ ns.Locales.ru = {
 	["BANK_BAR_TITLE"] = "TradeFlow: материалы для очереди (%d поз.)",
 	["BANK_WITHDRAW_BTN"] = "Забрать материалы",
 	["BANK_WITHDRAWN_MSG"] = "Забрано из банка: %s x%d",
+	["TRAINER_BAR_TITLE"] = "TradeFlow: рецепты из очереди (%d поз. на %s)",
+	["TRAINER_LEARN_BTN"] = "Изучить из очереди",
+	["TRAINER_LEARNED_MSG"] = "Изучено у тренера: %s",
 
 	-- Ранги
 	["RANK_75"] = "Ученик (75)",

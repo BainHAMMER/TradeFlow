@@ -129,11 +129,13 @@ function ns:CreateQueueAndShoppingView(parent)
 		row.rightText:SetJustifyH("RIGHT")
 
 		row:SetScript("OnClick", function(self)
-			if self.itemID and ns:HandleItemClick(self.itemID, self.recipeID) then
-				return
-			end
-			if self.recipeID and ns:HandleItemClick(nil, self.recipeID) then
-				return
+			if IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("DRESSUP") or IsShiftKeyDown() or IsControlKeyDown()) then
+				if self.itemID and ns:HandleItemClick(self.itemID, self.recipeID) then
+					return
+				end
+				if self.recipeID and ns:HandleItemClick(nil, self.recipeID) then
+					return
+				end
 			end
 			if self.recipeID and ns.SelectRecipeID then
 				ns:SelectRecipeID(self.recipeID)
@@ -218,6 +220,18 @@ function ns:CreateQueueAndShoppingView(parent)
 	end)
 	withdrawBankBtn:Hide()
 	f.withdrawBankBtn = withdrawBankBtn
+
+	local learnTrainerBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	learnTrainerBtn:SetSize(155, 24)
+	learnTrainerBtn:SetPoint("BOTTOMRIGHT", -8, 5)
+	learnTrainerBtn:SetText(L["TRAINER_LEARN_BTN"])
+	learnTrainerBtn:SetScript("OnClick", function()
+		if ns.LearnQueuedTrainerRecipes then
+			ns:LearnQueuedTrainerRecipes()
+		end
+	end)
+	learnTrainerBtn:Hide()
+	f.learnTrainerBtn = learnTrainerBtn
 
 	self.queueView = f
 	return f
@@ -347,6 +361,8 @@ function ns:RefreshQueueAndShoppingView()
 	local hasVendorMatches = (#vendorMatches > 0)
 	local bankMatches = (self.GetBankShoppingMatches and self:GetBankShoppingMatches()) or {}
 	local hasBankMatches = (#bankMatches > 0)
+	local trainerMatches = (self.GetTrainerQueueMatches and self:GetTrainerQueueMatches()) or {}
+	local hasTrainerMatches = (#trainerMatches > 0)
 
 	f.processBtn:SetShown(isQueue)
 	f.clearBtn:SetShown(isQueue)
@@ -372,6 +388,16 @@ function ns:RefreshQueueAndShoppingView()
 			f.withdrawBankBtn:SetPoint("RIGHT", f.syncAtrBtn, "LEFT", -4, 0)
 		end
 		f.withdrawBankBtn:SetShown(hasBankMatches and not hasVendorMatches)
+	end
+
+	if f.learnTrainerBtn then
+		f.learnTrainerBtn:ClearAllPoints()
+		if isQueue then
+			f.learnTrainerBtn:SetPoint("BOTTOMRIGHT", -8, 5)
+		else
+			f.learnTrainerBtn:SetPoint("RIGHT", f.syncAtrBtn, "LEFT", -4, 0)
+		end
+		f.learnTrainerBtn:SetShown(hasTrainerMatches and not hasVendorMatches and not hasBankMatches)
 	end
 
 	if isQueue then

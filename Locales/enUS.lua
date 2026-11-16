@@ -95,6 +95,9 @@ ns.Locales.en = {
 	["BANK_BAR_TITLE"] = "TradeFlow: queued mats in bank (%d items)",
 	["BANK_WITHDRAW_BTN"] = "Withdraw Mats",
 	["BANK_WITHDRAWN_MSG"] = "Withdrawn from bank: %s x%d",
+	["TRAINER_BAR_TITLE"] = "TradeFlow: queued recipes at trainer (%d for %s)",
+	["TRAINER_LEARN_BTN"] = "Learn Queued",
+	["TRAINER_LEARNED_MSG"] = "Learned from trainer: %s",
 
 	-- Ranks
 	["RANK_75"] = "Apprentice (75)",
