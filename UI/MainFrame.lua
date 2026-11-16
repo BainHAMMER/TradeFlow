@@ -821,7 +821,9 @@ function ns:RefreshDetailsView()
 			rRow.subRecipeID = b.subRecipeID
 			local iName, iIcon, _, _, _, iHex = self:GetItemDisplay(b.itemID)
 			local have = self:GetBagCount(b.itemID)
+			local inBank = self.GetBankCount and self:GetBankCount(b.itemID) or 0
 			local countColor = (have >= b.quantity) and "|cff40ff40" or "|cffff5555"
+			local bankTag = (inBank > 0) and (" |cff66ccff(Б:" .. inBank .. ")|r") or ""
 			local srcTag = (b.source == "vendor" and L["SOURCE_VENDOR"])
 				or (b.source == "craft" and ("|cff66ccff" .. L["SOURCE_CRAFT"] .. "|r"))
 				or (b.source == "ah" and L["SOURCE_AH"])
@@ -829,7 +831,7 @@ function ns:RefreshDetailsView()
 
 			rRow.icon:SetTexture(iIcon)
 			rRow.nameText:SetText((iHex or "|cffffffff") .. iName .. "|r |cff999999(" .. srcTag .. ")|r")
-			rRow.countText:SetText(string.format("%s%d/%d|r  %s", countColor, have, b.quantity, ns.FormatMoney(b.lineCost)))
+			rRow.countText:SetText(string.format("%s%d/%d|r%s  %s", countColor, have, b.quantity, bankTag, ns.FormatMoney(b.lineCost)))
 		else
 			rRow:Hide()
 		end
