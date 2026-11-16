@@ -41,7 +41,7 @@ local function FormatCraftCounts(direct, withCraft, withVendor, withBank)
 		parts[#parts + 1] = "|cffffd100" .. withVendor .. "|r"
 	end
 	if (withBank or 0) > math.max(direct, withCraft, withVendor) then
-		parts[#parts + 1] = "|cffc080ffБ:" .. withBank .. "|r"
+		parts[#parts + 1] = "|cffc080ff" .. L["BANK_SHORT"] .. withBank .. "|r"
 	end
 	if #parts == 0 then
 		return ""
@@ -831,7 +831,7 @@ function ns:RefreshDetailsView()
 			local have = self:GetBagCount(b.itemID)
 			local inBank = self.GetBankCount and self:GetBankCount(b.itemID) or 0
 			local countColor = (have >= b.quantity) and "|cff40ff40" or "|cffff5555"
-			local bankTag = (inBank > 0) and (" |cff66ccff(Б:" .. inBank .. ")|r") or ""
+			local bankTag = (inBank > 0) and (" |cff66ccff(" .. L["BANK_SHORT"] .. inBank .. ")|r") or ""
 			local srcTag = (b.source == "vendor" and L["SOURCE_VENDOR"])
 				or (b.source == "craft" and ("|cff66ccff" .. L["SOURCE_CRAFT"] .. "|r"))
 				or (b.source == "ah" and L["SOURCE_AH"])

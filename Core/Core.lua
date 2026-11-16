@@ -852,7 +852,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
 		TradeFlowDB = TradeFlowDB or {}
 		ns.db = TradeFlowDB
-		ns.db.lang = ns.db.lang or ns.DefaultLanguage()
+		if ns.db.lang ~= "ru" and ns.db.lang ~= "en" then
+			ns.db.lang = ns.DefaultLanguage()
+		end
 		ns.lang = ns.db.lang
 		ns.db.options = ns.db.options or {
 			autoSubcrafts = true,

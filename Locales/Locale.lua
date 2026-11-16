@@ -12,11 +12,11 @@ ns.Locales = {
 }
 
 function ns.DefaultLanguage()
-	local loc = GetLocale and GetLocale() or "ruRU"
+	local loc = GetLocale and GetLocale() or "enUS"
 	if loc == "ruRU" then
 		return "ru"
 	end
-	return "ru" -- По умолчанию русский, с возможностью переключения в 1 клик
+	return "en"
 end
 
 ns.lang = ns.DefaultLanguage()

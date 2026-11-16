@@ -40,6 +40,7 @@ ns.Locales.en = {
 	["SOURCE_CRAFT"] = "Craft",
 	["SOURCE_BAG"] = "In bags",
 	["SOURCE_UNKNOWN"] = "Unpriced",
+	["BANK_SHORT"] = "B:",
 	["BTN_QUEUE_ADD"] = "Queue",
 	["BTN_QUEUE_ALL"] = "Queue All",
 	["BTN_CRAFT_NOW"] = "Craft",
