@@ -374,14 +374,16 @@ function ns:RefreshQueueAndShoppingView()
 		local canCraftAny = false
 		for _, step in ipairs(queue) do
 			local ready, state = self:GetQueueStepStatus(step)
-			if (state == "ready" or state == "partial") and ready > 0 then
-				canCraftAny = true
+			if ready > 0 then
+				if state == "other_prof" then
+					switchProf = step.skillLine
+				elseif state == "ready" or state == "partial" then
+					canCraftAny = true
+				end
 				break
-			elseif state == "other_prof" and ready > 0 and not switchProf then
-				switchProf = step.skillLine
 			end
 		end
-		if not canCraftAny and switchProf then
+		if switchProf then
 			f.processBtn:SetText(string.format(L["QUEUE_SWITCH_PROF"], self:GetProfessionName(switchProf)))
 			f.processBtn:SetEnabled(true)
 		else

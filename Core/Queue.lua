@@ -339,24 +339,21 @@ function ns:ProcessQueue()
 		return
 	end
 
-	-- 1. Ищем первый шаг в текущей выбранной профессии, на который хватает реагентов в сумках
+	-- Идём строго по порядку очереди: выполняем первый шаг, для которого в сумках есть реагенты
+	-- (или переключаемся на его профессию, если он в смежной профессии)
 	for idx, step in ipairs(queue) do
 		local readyCrafts, state = self:GetQueueStepStatus(step)
-		if (state == "ready" or state == "partial") and readyCrafts > 0 then
-			local toCraft = math.min(step.count, readyCrafts)
-			self.activeCastRecipeID = step.recipeID
-			self.activeCastQueueIndex = idx
-			self:ExecuteCraftRecipe(step.recipeID, toCraft)
-			return
-		end
-	end
-
-	-- 2. Если в текущей профе ничего не готово, проверяем, не требует ли шаг переключения на вторую профу
-	for _, step in ipairs(queue) do
-		local readyCrafts, state = self:GetQueueStepStatus(step)
-		if state == "other_prof" and readyCrafts > 0 then
-			self:SwitchToProfession(step.skillLine, step.recipeID)
-			return
+		if readyCrafts > 0 then
+			if state == "other_prof" then
+				self:SwitchToProfession(step.skillLine, step.recipeID)
+				return
+			elseif state == "ready" or state == "partial" then
+				local toCraft = math.min(step.count, readyCrafts)
+				self.activeCastRecipeID = step.recipeID
+				self.activeCastQueueIndex = idx
+				self:ExecuteCraftRecipe(step.recipeID, toCraft)
+				return
+			end
 		end
 	end
 end
