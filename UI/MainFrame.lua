@@ -28,8 +28,8 @@ local function StylePanel(frame, bgR, bgG, bgB, bgA)
 	frame:SetBackdropBorderColor(0.55, 0.44, 0.22, 0.95)
 end
 
--- Форматирование счётчика крафтов рецепта: [в сумках / +крафт / +вендор]
-local function FormatCraftCounts(direct, withCraft, withVendor)
+-- Форматирование счётчика крафтов рецепта: [в сумках / +крафт / +вендор / Б:банк]
+local function FormatCraftCounts(direct, withCraft, withVendor, withBank)
 	local parts = {}
 	if direct > 0 then
 		parts[#parts + 1] = "|cff40ff40" .. direct .. "|r"
@@ -39,6 +39,9 @@ local function FormatCraftCounts(direct, withCraft, withVendor)
 	end
 	if withVendor > math.max(direct, withCraft) then
 		parts[#parts + 1] = "|cffffd100" .. withVendor .. "|r"
+	end
+	if (withBank or 0) > math.max(direct, withCraft, withVendor) then
+		parts[#parts + 1] = "|cffc080ffБ:" .. withBank .. "|r"
 	end
 	if #parts == 0 then
 		return ""
@@ -78,8 +81,8 @@ function ns:BuildFilteredRecipeList()
 		-- При включённой галочке показываем неизученные рецепты (в первую очередь доступные сейчас или в ближайшие +40 очков навыка)
 		local unlearnedRelevant = showUnlearned and not learned and metrics.isTrainer and ((metrics.reqSkill or 1) <= curSkill + 40)
 		if learned or unlearnedRelevant then
-			local direct, withCraft, withVendor = self:GetRecipeCraftCounts(recipeID)
-			local canCraft = (direct > 0 or withCraft > 0 or withVendor > 0)
+			local direct, withCraft, withVendor, _, withBank = self:GetRecipeCraftCounts(recipeID)
+			local canCraft = (direct > 0 or withCraft > 0 or withVendor > 0 or (withBank or 0) > 0)
 			local givesSkill = (metrics.chance and metrics.chance > 0)
 
 			local passFilter = true
@@ -117,6 +120,7 @@ function ns:BuildFilteredRecipeList()
 					direct = direct,
 					withCraft = withCraft,
 					withVendor = withVendor,
+					withBank = withBank,
 					metrics = metrics,
 					profit = metrics.profit,
 				}
@@ -873,7 +877,7 @@ function ns:RenderRecipeListRows()
 			row.icon:SetTexture(entry.icon)
 
 			local dc = self.DIFFICULTY_COLORS[entry.metrics.colorKey] or self.DIFFICULTY_COLORS.grey
-			local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor)
+			local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor, entry.withBank)
 			local trainerTag = (not entry.learned) and string.format(" |cff809ec7[%d]|r", entry.metrics.reqSkill or 1) or ""
 			row.nameText:SetText(dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
 

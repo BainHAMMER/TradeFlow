@@ -238,23 +238,24 @@ function ns:GetAltCounts(itemID)
 	return total, byAlt
 end
 
--- Сколько единиц промежуточного реагента можно докрафтить из сумок (рекурсивно, без циклов)
+-- Сколько единиц промежуточного реагента можно докрафтить из сумок / с банком (рекурсивно, без циклов)
 function ns:GetCraftableReagentCount(itemID, visiting)
 	if not itemID or itemID <= 0 then
-		return 0, 0
+		return 0, 0, 0
 	end
 	visiting = visiting or {}
 	if visiting[itemID] then
-		return 0, 0
+		return 0, 0, 0
 	end
 	local producers = self.ItemProducedBy[itemID]
 	if not producers or #producers == 0 then
-		return 0, 0
+		return 0, 0, 0
 	end
 
 	visiting[itemID] = true
 	local bestBagMade = 0
 	local bestVendorMade = 0
+	local bestBankMade = 0
 
 	for _, childRecipeID in ipairs(producers) do
 		if self:IsRecipeLearned(childRecipeID) then
@@ -262,10 +263,13 @@ function ns:GetCraftableReagentCount(itemID, visiting)
 			if rec and #rec.reagents > 0 then
 				local maxCraftsBag = 99999
 				local maxCraftsVendor = 99999
+				local maxCraftsBank = 99999
 				for _, r in ipairs(rec.reagents) do
 					local inBags = self:GetBagCount(r.itemID)
-					local subCraftBag, subCraftVendor = self:GetCraftableReagentCount(r.itemID, visiting)
+					local inBank = self:GetBankCount(r.itemID)
+					local subCraftBag, subCraftVendor, subCraftBank = self:GetCraftableReagentCount(r.itemID, visiting)
 					maxCraftsBag = math.min(maxCraftsBag, math.floor((inBags + subCraftBag) / r.quantity))
+					maxCraftsBank = math.min(maxCraftsBank, math.floor((inBags + inBank + subCraftBank) / r.quantity))
 					if self:IsVendorItem(r.itemID) then
 						-- Вендорский реагент не ограничивает счётчик "с вендором"
 					else
@@ -278,18 +282,21 @@ function ns:GetCraftableReagentCount(itemID, visiting)
 				if maxCraftsVendor < 99999 then
 					bestVendorMade = math.max(bestVendorMade, maxCraftsVendor * rec.numMade)
 				end
+				if maxCraftsBank < 99999 then
+					bestBankMade = math.max(bestBankMade, maxCraftsBank * rec.numMade)
+				end
 			end
 		end
 	end
 
 	visiting[itemID] = nil
-	return bestBagMade, bestVendorMade
+	return bestBagMade, bestVendorMade, bestBankMade
 end
 
--- Возвращает: direct, withCraft, withVendor, withAlts (количество КРАФТОВ рецепта)
+-- Возвращает: direct, withCraft, withVendor, withAlts, withBank (количество КРАФТОВ рецепта)
 function ns:GetRecipeCraftCounts(recipeID)
 	if not recipeID then
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, 0
 	end
 	if craftCountCacheRev ~= self.invRev then
 		craftCountCache = {}
@@ -297,30 +304,32 @@ function ns:GetRecipeCraftCounts(recipeID)
 	end
 	local cached = craftCountCache[recipeID]
 	if cached then
-		return cached[1], cached[2], cached[3], cached[4]
+		return cached[1], cached[2], cached[3], cached[4], cached[5]
 	end
 
 	local rec = self:GetRecipeRecord(recipeID)
 	if not rec or #rec.reagents == 0 then
-		craftCountCache[recipeID] = { 0, 0, 0, 0 }
-		return 0, 0, 0, 0
+		craftCountCache[recipeID] = { 0, 0, 0, 0, 0 }
+		return 0, 0, 0, 0, 0
 	end
 
 	local direct = 99999
 	local withCraft = 99999
 	local withVendor = 99999
 	local withAlts = 99999
+	local withBank = 99999
 	local allVendor = true
 
 	for _, r in ipairs(rec.reagents) do
 		local inBags = self:GetBagCount(r.itemID)
 		local inBank = self:GetBankCount(r.itemID)
 		local altTotal = self:GetAltCounts(r.itemID)
-		local subBag, subVendor = self:GetCraftableReagentCount(r.itemID)
+		local subBag, subVendor, subBank = self:GetCraftableReagentCount(r.itemID)
 
 		direct = math.min(direct, math.floor(inBags / r.quantity))
 		withCraft = math.min(withCraft, math.floor((inBags + subBag) / r.quantity))
-		withAlts = math.min(withAlts, math.floor((inBags + inBank + altTotal + subBag) / r.quantity))
+		withBank = math.min(withBank, math.floor((inBags + inBank + subBank) / r.quantity))
+		withAlts = math.min(withAlts, math.floor((inBags + inBank + altTotal + subBank) / r.quantity))
 
 		if not self:IsVendorItem(r.itemID) then
 			allVendor = false
@@ -337,9 +346,10 @@ function ns:GetRecipeCraftCounts(recipeID)
 	if withCraft >= 99999 then withCraft = 0 end
 	if withVendor >= 99999 then withVendor = 0 end
 	if withAlts >= 99999 then withAlts = 0 end
+	if withBank >= 99999 then withBank = 0 end
 
-	craftCountCache[recipeID] = { direct, withCraft, withVendor, withAlts }
-	return direct, withCraft, withVendor, withAlts
+	craftCountCache[recipeID] = { direct, withCraft, withVendor, withAlts, withBank }
+	return direct, withCraft, withVendor, withAlts, withBank
 end
 
 -- Дебаунс событий сумок и банка (0.08 сек — мгновенный отклик без лагов Skillet)
