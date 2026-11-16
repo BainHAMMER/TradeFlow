@@ -626,6 +626,15 @@ function ns:SuppressBlizzardFrame()
 				ns:SuppressBlizzardFrame()
 			end
 		end)
+		ProfessionsFrame:HookScript("OnHide", function()
+			if not ns.bypassIntercept and not ns.isSwitchingProfession and not ns.isHidingMain then
+				if ns.mainFrame and ns.mainFrame:IsShown() and ns.HideMainWindow then
+					ns.isClosingFromBlizz = true
+					ns:HideMainWindow()
+					ns.isClosingFromBlizz = false
+				end
+			end
+		end)
 	end
 	ProfessionsFrame:SetAlpha(0)
 	if not InCombatLockdown() then
@@ -718,6 +727,7 @@ function ns:OpenClientTradeSkill(skillLine, recipeID)
 	if not skillLine or (InCombatLockdown and InCombatLockdown()) then
 		return false
 	end
+	self.isSwitchingProfession = true
 	self:SuppressBlizzardFrame()
 	local profInfo = self.playerProfessions[skillLine]
 	local opened = false
@@ -762,6 +772,7 @@ function ns:OpenClientTradeSkill(skillLine, recipeID)
 	end
 
 	self:SuppressBlizzardFrame()
+	self.isSwitchingProfession = false
 	return self:GetActiveClientSkillLine() == skillLine
 end
 
@@ -914,9 +925,13 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			ScheduleTradeSkillRefresh()
 		end
 	elseif event == "TRADE_SKILL_CLOSE" then
-		-- Не возвращаем ProfessionsFrame при переключении профессии, пока открыто окно TradeFlow
+		-- Если окно Blizzard закрыто (Esc или повторное нажатие бинда профессии K), закрываем и TradeFlow
 		if ns.bypassIntercept then
 			ns.bypassIntercept = false
+		elseif not ns.isSwitchingProfession and not ns.isHidingMain and ns.mainFrame and ns.mainFrame:IsShown() and ns.HideMainWindow then
+			ns.isClosingFromBlizz = true
+			ns:HideMainWindow()
+			ns.isClosingFromBlizz = false
 		end
 	elseif event == "GET_ITEM_INFO_RECEIVED" then
 		if arg1 and arg2 == false then

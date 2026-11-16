@@ -214,13 +214,15 @@ function ns:CreateMainFrame()
 	})
 	f:SetBackdropColor(0.05, 0.045, 0.04, 0.98)
 	f:SetScript("OnHide", function()
-		if not ns.bypassIntercept and not ns.isRebuildingFrame then
+		if not ns.bypassIntercept and not ns.isRebuildingFrame and not ns.isClosingFromBlizz then
+			ns.isHidingMain = true
 			if C_TradeSkillUI and C_TradeSkillUI.CloseTradeSkill then
 				pcall(C_TradeSkillUI.CloseTradeSkill)
 			end
 			if ProfessionsFrame and ProfessionsFrame:IsShown() and not InCombatLockdown() then
 				pcall(HideUIPanel, ProfessionsFrame)
 			end
+			ns.isHidingMain = false
 		end
 	end)
 	if not self.specialFrameRegistered then
