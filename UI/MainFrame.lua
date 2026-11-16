@@ -165,7 +165,7 @@ function ns:BuildFilteredRecipeList()
 				break
 			end
 		end
-		if not found then
+		if not found and not self.preserveSelectedRecipe then
 			self.selectedRecipeBySkill[sl] = entries[1].recipeID
 		end
 	end
@@ -184,7 +184,9 @@ function ns:SelectRecipeID(recipeID)
 		self.selectedRecipeBySkill[self.currentSkillLine] = recipeID
 	end
 	if self.mainFrame and self.mainFrame:IsShown() then
+		self.preserveSelectedRecipe = true
 		self:RefreshMainWindow()
+		self.preserveSelectedRecipe = false
 	end
 end
 
@@ -625,8 +627,10 @@ function ns:CreateDetailsView(parent)
 		if rRow.nameText.SetMaxLines then rRow.nameText:SetMaxLines(1) end
 
 		rRow:SetScript("OnClick", function(self)
-			if self.itemID and ns:HandleItemClick(self.itemID, nil) then
-				return
+			if self.itemID and IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("DRESSUP") or IsShiftKeyDown() or IsControlKeyDown()) then
+				if ns:HandleItemClick(self.itemID, nil) then
+					return
+				end
 			end
 			-- Клик по крафтовому реагенту переводит сразу к рецепту, который его производит
 			if self.subRecipeID then

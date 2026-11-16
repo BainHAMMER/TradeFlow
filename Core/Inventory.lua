@@ -264,17 +264,23 @@ function ns:GetCraftableReagentCount(itemID, visiting)
 				local maxCraftsBag = 99999
 				local maxCraftsVendor = 99999
 				local maxCraftsBank = 99999
+				local allVendorChild = true
 				for _, r in ipairs(rec.reagents) do
 					local inBags = self:GetBagCount(r.itemID)
 					local inBank = self:GetBankCount(r.itemID)
 					local subCraftBag, subCraftVendor, subCraftBank = self:GetCraftableReagentCount(r.itemID, visiting)
 					maxCraftsBag = math.min(maxCraftsBag, math.floor((inBags + subCraftBag) / r.quantity))
-					maxCraftsBank = math.min(maxCraftsBank, math.floor((inBags + inBank + subCraftBank) / r.quantity))
 					if self:IsVendorItem(r.itemID) then
-						-- Вендорский реагент не ограничивает счётчик "с вендором"
+						-- Вендорский реагент не ограничивает счётчик "с вендором" / "с банком" (если есть основные маты)
 					else
+						allVendorChild = false
 						maxCraftsVendor = math.min(maxCraftsVendor, math.floor((inBags + subCraftVendor) / r.quantity))
+						maxCraftsBank = math.min(maxCraftsBank, math.floor((inBags + inBank + subCraftBank) / r.quantity))
 					end
+				end
+				if allVendorChild then
+					maxCraftsVendor = maxCraftsBag
+					maxCraftsBank = maxCraftsBag
 				end
 				if maxCraftsBag < 99999 then
 					bestBagMade = math.max(bestBagMade, maxCraftsBag * rec.numMade)
@@ -328,12 +334,12 @@ function ns:GetRecipeCraftCounts(recipeID)
 
 		direct = math.min(direct, math.floor(inBags / r.quantity))
 		withCraft = math.min(withCraft, math.floor((inBags + subBag) / r.quantity))
-		withBank = math.min(withBank, math.floor((inBags + inBank + subBank) / r.quantity))
-		withAlts = math.min(withAlts, math.floor((inBags + inBank + altTotal + subBank) / r.quantity))
+		withAlts = math.min(withAlts, math.floor((inBags + inBank + altTotal + subBag) / r.quantity))
 
 		if not self:IsVendorItem(r.itemID) then
 			allVendor = false
 			withVendor = math.min(withVendor, math.floor((inBags + subVendor) / r.quantity))
+			withBank = math.min(withBank, math.floor((inBags + inBank + subBank) / r.quantity))
 		end
 	end
 
@@ -341,6 +347,7 @@ function ns:GetRecipeCraftCounts(recipeID)
 		-- Если рецепт состоит ТОЛЬКО из вендорских реагентов, которых сейчас нет в сумке,
 		-- не ставим искусственные 999 (чтобы не засорять список и не ставить 999 по кнопке «В очередь все»)
 		withVendor = direct
+		withBank = direct
 	end
 	if direct >= 99999 then direct = 0 end
 	if withCraft >= 99999 then withCraft = 0 end
