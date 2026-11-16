@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.5-dev
+- **Disenchanting Value (`Core\Prices.lua`, `Core\Core.lua`, `UI\MainFrame.lua`):** When Enchanting (`333`) is learned and "Sell to vendor" is unchecked, calculates expected disenchant value (`-5%` AH cut) for crafted Uncommon/Rare/Epic armor & weapons based on `iLevel` and Enchanting skill, uses it in revenue/profit if higher than AH/vendor, and displays the full disenchant breakdown in recipe tooltips.
+- **Window Strata (`UI\MainFrame.lua`):** Lowered `TradeFlowMainFrame` strata from `HIGH` to `MEDIUM` so `DressUpFrame` (`Ctrl+Click`) and other standard frames are no longer hidden behind `TradeFlow`.
+
 ## v1.0.4
 - **Recipe Sources (`Core\Sources.lua`, `Data\Recipes.lua`):** Added `RecipeScrolls` lookup for unlearned non-trainer recipes, fixing false `trainer: 0c` tags. Shows clickable scroll item link, Auctionator price, client `sourceText`, and optional `QuestieDB` / `AtlasLootClassic` vendor, quest, and drop info (sorted by closest NPC to player).
 - **TomTom Waypoints:** Added a `TomTom` button next to recipe sources when `TomTom` is loaded and coordinates are available.
@@ -13,3 +17,4 @@
 
 ## v1.0.3
 - Cleaned up unused static data, fixed `REAGENT_FROM_BANK` / `BANK_SHORT` localization, and added CurseForge automatic packaging workflow.
+

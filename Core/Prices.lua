@@ -9,6 +9,115 @@ local priceRev = 1
 local reagentPriceCache = {}
 local recipeEconomyCache = {}
 
+-- Таблица распыления Classic / WoW Forever: { maxIlvl, reqEnch, dustID, dustAvg, essID, essAvg, shardID }
+local DE_UNCOMMON_BRACKETS = {
+	{ 20,  1,   10940, 1.5, 10938, 1.5, nil   },
+	{ 25,  25,  10940, 2.5, 10939, 1.5, 10978 },
+	{ 30,  50,  11083, 1.5, 10998, 1.5, 11084 },
+	{ 35,  75,  11083, 3.5, 11082, 1.5, 11138 },
+	{ 40,  100, 11137, 1.5, 11134, 1.5, 11139 },
+	{ 45,  125, 11137, 3.5, 11135, 1.5, 11177 },
+	{ 50,  150, 11176, 1.5, 11174, 1.5, 11178 },
+	{ 55,  175, 11176, 3.5, 11175, 1.5, 14343 },
+	{ 60,  200, 16204, 1.5, 16202, 1.5, 14344 },
+	{ 999, 225, 16204, 3.5, 16203, 1.5, 14344 },
+}
+
+local DE_RARE_BRACKETS = {
+	{ 25,  25,  10978 },
+	{ 30,  50,  11084 },
+	{ 35,  75,  11138 },
+	{ 40,  100, 11139 },
+	{ 45,  125, 11177 },
+	{ 50,  150, 11178 },
+	{ 55,  175, 14343 },
+	{ 999, 200, 14344 },
+}
+
+function ns:GetItemDisenchantInfo(itemID)
+	local ench = self.playerProfessions and self.playerProfessions[333]
+	if not (ench and itemID and itemID > 0 and C_Item and C_Item.GetItemInfo) then
+		return nil
+	end
+	local _, _, quality, iLevel, _, _, _, _, _, _, _, classID = C_Item.GetItemInfo(itemID)
+	if not (quality and iLevel and iLevel > 0 and (classID == 2 or classID == 4)) then
+		return nil
+	end
+	if quality < 2 or quality > 4 then
+		return nil
+	end
+
+	local enchRank = ench.rank or 1
+	local yields = {}
+	local reqSkill = 1
+
+	if quality == 2 then
+		local row = DE_UNCOMMON_BRACKETS[#DE_UNCOMMON_BRACKETS]
+		for _, r in ipairs(DE_UNCOMMON_BRACKETS) do
+			if iLevel <= r[1] then
+				row = r
+				break
+			end
+		end
+		reqSkill = row[2]
+		if enchRank < reqSkill then
+			return nil
+		end
+		local isWeapon = (classID == 2)
+		local hasShard = row[7] ~= nil
+		local dustChance = isWeapon and 0.20 or (hasShard and 0.75 or 0.80)
+		local essChance  = isWeapon and (hasShard and 0.75 or 0.80) or (hasShard and 0.20 or 0.20)
+		yields[#yields + 1] = { itemID = row[3], chance = dustChance, avg = row[4] }
+		yields[#yields + 1] = { itemID = row[5], chance = essChance,  avg = row[6] }
+		if hasShard then
+			yields[#yields + 1] = { itemID = row[7], chance = 0.05, avg = 1 }
+		end
+	elseif quality == 3 then
+		local row = DE_RARE_BRACKETS[#DE_RARE_BRACKETS]
+		for _, r in ipairs(DE_RARE_BRACKETS) do
+			if iLevel <= r[1] then
+				row = r
+				break
+			end
+		end
+		reqSkill = row[2]
+		if enchRank < reqSkill then
+			return nil
+		end
+		if iLevel >= 56 then
+			yields[#yields + 1] = { itemID = row[3], chance = 0.995, avg = 1 }
+			yields[#yields + 1] = { itemID = 20725,  chance = 0.005, avg = 1 }
+		else
+			yields[#yields + 1] = { itemID = row[3], chance = 1.0, avg = 1 }
+		end
+	elseif quality == 4 then
+		reqSkill = (iLevel >= 56) and 225 or 175
+		if enchRank < reqSkill then
+			return nil
+		end
+		if iLevel >= 56 then
+			yields[#yields + 1] = { itemID = 20725, chance = 1.0, avg = 1.5 }
+		else
+			yields[#yields + 1] = { itemID = 11178, chance = 1.0, avg = 3 }
+		end
+	end
+
+	local expectedGross = 0
+	local pricedAny = false
+	for _, y in ipairs(yields) do
+		local p = self:GetAuctionPrice(y.itemID)
+		if p and p > 0 then
+			expectedGross = expectedGross + (p * y.chance * y.avg)
+			pricedAny = true
+		end
+	end
+	if not pricedAny then
+		return nil, yields, reqSkill
+	end
+	local expectedNet = math.floor(expectedGross * (1 - AUCTION_CUT) + 0.5)
+	return expectedNet, yields, reqSkill
+end
+
 function ns:InvalidatePrices()
 	priceRev = priceRev + 1
 	wipe(reagentPriceCache)
@@ -226,12 +335,20 @@ function ns:GetRecipeEconomy(recipeID)
 		else
 			local ahUnit = self:GetAuctionPrice(rec.outputItemID)
 			local ahNet = ahUnit and math.floor(ahUnit * (rec.numMade or 1) * (1 - AUCTION_CUT) + 0.5) or nil
+			local deNet = self:GetItemDisenchantInfo(rec.outputItemID)
+			if deNet then
+				deNet = math.floor(deNet * (rec.numMade or 1) + 0.5)
+			end
 			if ahNet and ahNet > vendorSell then
 				outputValue = ahNet
 				outputSource = "ah"
 			elseif vendorSell > 0 then
 				outputValue = vendorSell
 				outputSource = "vendor"
+			end
+			if deNet and deNet > (outputValue or 0) then
+				outputValue = deNet
+				outputSource = "disenchant"
 			end
 		end
 	end

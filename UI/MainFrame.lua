@@ -244,7 +244,7 @@ function ns:CreateMainFrame()
 	local f = CreateFrame("Frame", "TradeFlowMainFrame", UIParent, "BackdropTemplate")
 	f:SetSize(WIN_W, WIN_H)
 	f:SetPoint("CENTER")
-	f:SetFrameStrata("HIGH")
+	f:SetFrameStrata("MEDIUM")
 	f:SetToplevel(true)
 	f:SetClampedToScreen(true)
 	f:SetMovable(true)
@@ -1110,6 +1110,7 @@ function ns:RefreshDetailsView()
 	if d.lblOutput then
 		d.lblOutput:SetText(
 			(outSource == "ah" and L["OUTPUT_VALUE_AH"])
+			or (outSource == "disenchant" and L["OUTPUT_VALUE_DE"])
 			or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
 			or L["OUTPUT_VALUE"]
 		)

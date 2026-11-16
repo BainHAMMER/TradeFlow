@@ -1,7 +1,7 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
-ns.VERSION = "1.0.4"
+ns.VERSION = "1.0.5-dev"
 ns.ICON = "Interface\\AddOns\\TradeFlow\\Media\\Icon"
 
 -- Сопоставление skillLine <-> базовое заклинание профессии для открытия окна
@@ -284,12 +284,34 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 	end
 	if outVal and outVal > 0 then
 		local outLabel = (outSource == "ah" and L["OUTPUT_VALUE_AH"])
+			or (outSource == "disenchant" and L["OUTPUT_VALUE_DE"])
 			or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
 			or L["OUTPUT_VALUE"]
 		GameTooltip:AddDoubleLine(outLabel, ns.FormatMoney(outVal), 0.8, 0.8, 0.8, 1, 1, 1)
 	end
 	if profit then
 		GameTooltip:AddDoubleLine(L["NET_PROFIT"], ns.FormatMoney(profit, true), 0.8, 0.8, 0.8, 1, 1, 1)
+	end
+	local rec = self:GetRecipeRecord(recipeID)
+	if rec and rec.outputItemID and self.GetItemDisenchantInfo then
+		local deNet, yields, reqEnch = self:GetItemDisenchantInfo(rec.outputItemID)
+		if yields and #yields > 0 then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddDoubleLine(
+				string.format(L["DE_TOOLTIP_HEADER"], reqEnch or 1),
+				deNet and ns.FormatMoney(deNet) or "-",
+				0.75, 0.65, 1.0, 1, 1, 1
+			)
+			for _, y in ipairs(yields) do
+				local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
+				local p = self:GetAuctionPrice(y.itemID)
+				GameTooltip:AddDoubleLine(
+					string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
+					string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
+					0.85, 0.85, 0.85, 0.8, 0.8, 0.8
+				)
+			end
+		end
 	end
 	GameTooltip:AddLine(L["SHIFT_CLICK_HINT"], 0.55, 0.75, 1.0, true)
 	GameTooltip:Show()
