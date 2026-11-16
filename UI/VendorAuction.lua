@@ -691,10 +691,17 @@ local function CollectTrainerMatches()
 	local totalCopper = 0
 	local num = GetNumTrainerServices() or 0
 	for i = 1, num do
-		local name, _, category = GetTrainerServiceInfo(i)
+		local name, arg2, arg3 = GetTrainerServiceInfo(i)
+		local category = (type(arg2) == "string" and (arg2 == "available" or arg2 == "unavailable" or arg2 == "used" or arg2 == "header")) and arg2 or arg3
 		if category == "available" then
 			local link = GetTrainerServiceItemLink and GetTrainerServiceItemLink(i)
 			local spellID = link and tonumber(link:match("spell:(%d+)") or link:match("enchant:(%d+)"))
+			if not spellID and C_TooltipInfo and C_TooltipInfo.GetTrainerService then
+				local ok, tip = pcall(C_TooltipInfo.GetTrainerService, i)
+				if ok and tip and tip.id and needLearn[tip.id] then
+					spellID = tip.id
+				end
+			end
 			if not spellID and link then
 				local itemID = tonumber(link:match("item:(%d+)"))
 				if itemID and needByOutItem[itemID] then
