@@ -957,7 +957,7 @@ function ns:RefreshMainWindow()
 	local rank = (curProf and curProf.rank) or 1
 	local maxRank = (curProf and curProf.maxRank) or 75
 	local profName = self:GetProfessionName(self.currentSkillLine or 171)
-	f.headerIcon:SetTexture(self.PROF_ICONS[self.currentSkillLine] or self.ICON)
+	f.headerIcon:SetTexture(self.ICON)
 	f.rankBar:SetMinMaxValues(0, math.max(1, maxRank))
 	f.rankBar:SetValue(rank)
 	f.rankBar.text:SetText(string.format("%s  %d / %d", profName, rank, maxRank))

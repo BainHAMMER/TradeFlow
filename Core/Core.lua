@@ -2,7 +2,7 @@ local ADDON_NAME, ns = ...
 local L = ns.L
 
 ns.VERSION = "1.0.0"
-ns.ICON = "Interface\\Icons\\Trade_BlackSmithing"
+ns.ICON = "Interface\\AddOns\\TradeFlow\\Media\\Icon"
 
 -- Сопоставление skillLine <-> базовое заклинание профессии для открытия окна
 ns.PROF_SPELLS = {

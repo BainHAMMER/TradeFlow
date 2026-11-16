@@ -9,7 +9,7 @@
 ## X-License: GPL-3.0-or-later
 ## SavedVariables: TradeFlowDB
 ## OptionalDeps: Auctionator, TradeSkillMaster, Syndicator
-## IconTexture: Interface\Icons\Trade_BlackSmithing
+## IconTexture: Interface\AddOns\TradeFlow\Media\Icon
 ## AddonCompartmentFunc: TradeFlow_OnAddonCompartmentClick
 
 Locales\Locale.lua
