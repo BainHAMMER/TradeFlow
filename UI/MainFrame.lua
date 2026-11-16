@@ -1380,7 +1380,7 @@ end
 function ns:ToggleSettingsFrame()
 	if not self.settingsFrame then
 		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(310, 196)
+		sf:SetSize(310, 168)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1401,11 +1401,10 @@ function ns:ToggleSettingsFrame()
 		close:SetScript("OnClick", function() sf:Hide() end)
 
 		local opts = {
-			{ key = "includeDisenchant",    label = L["OPT_INCLUDE_DE"],          defaultTrue = true,  invalidatePrices = true },
-			{ key = "deductVendorInRoute",  label = L["PLANNER_DEDUCT_VENDOR"],   defaultTrue = true,  invalidatePrices = true },
-			{ key = "includeTrainerInRoute",label = L["PLANNER_INCLUDE_TRAINER"], defaultTrue = true,  invalidatePrices = false },
-			{ key = "autoSubcrafts",        label = L["AUTO_SUBCRAFTS"],          defaultTrue = true,  invalidatePrices = false },
-			{ key = "groupByCategory",      label = L["GROUP_BY_CATEGORY"],       defaultTrue = false, invalidatePrices = false },
+			{ key = "includeDisenchant",     label = L["OPT_INCLUDE_DE"],          defaultTrue = true,  invalidatePrices = true },
+			{ key = "tooltipExtraInfo",      label = L["OPT_TOOLTIP_EXTRA"],       defaultTrue = false, invalidatePrices = false },
+			{ key = "includeTrainerInRoute", label = L["PLANNER_INCLUDE_TRAINER"], defaultTrue = true,  invalidatePrices = false },
+			{ key = "groupByCategory",       label = L["GROUP_BY_CATEGORY"],       defaultTrue = false, invalidatePrices = false },
 		}
 
 		sf.checks = {}

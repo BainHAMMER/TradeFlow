@@ -39,6 +39,7 @@ ns.Locales.en = {
 	["SETTINGS_BTN"] = "Settings",
 	["SETTINGS_TITLE"] = "TradeFlow Settings",
 	["OPT_INCLUDE_DE"] = "Include disenchant value (Enchanting)",
+	["OPT_TOOLTIP_EXTRA"] = "Show economy & disenchant in tooltip",
 	["NET_PROFIT"] = "Net profit:",
 	["COST_PER_SKILLUP"] = "Cost per +1 skill:",
 	["SOURCE_VENDOR"] = "Vendor",

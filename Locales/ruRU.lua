@@ -39,6 +39,7 @@ ns.Locales.ru = {
 	["SETTINGS_BTN"] = "Настройки",
 	["SETTINGS_TITLE"] = "Настройки TradeFlow",
 	["OPT_INCLUDE_DE"] = "Учитывать распыление (Наложение чар)",
+	["OPT_TOOLTIP_EXTRA"] = "Доп. экономика и распыл в тултипе",
 	["NET_PROFIT"] = "Чистая прибыль:",
 	["COST_PER_SKILLUP"] = "Цена за +1 навык:",
 	["SOURCE_VENDOR"] = "Торговец",

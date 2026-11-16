@@ -267,49 +267,51 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 	end
 
 	local th = self:GetRecipeThresholds(recipeID)
-	if th then
-		GameTooltip:AddLine(" ")
-		GameTooltip:AddDoubleLine(
-			L["THRESHOLDS_LABEL"],
-			string.format(
-				"|cffff8040%d|r / |cffffe026%d|r / |cff40d940%d|r / |cff949494%d|r",
-				th[1] or 1, th[2] or 1, th[3] or 1, th[4] or 1
-			),
-			0.9, 0.8, 0.5, 1, 1, 1
-		)
-	end
-	local cost, outVal, profit, _, outSource = self:GetRecipeEconomy(recipeID)
-	if cost then
-		GameTooltip:AddDoubleLine(L["CRAFT_COST"], ns.FormatMoney(cost), 0.8, 0.8, 0.8, 1, 1, 1)
-	end
-	if outVal and outVal > 0 then
-		local outLabel = (outSource == "ah" and L["OUTPUT_VALUE_AH"])
-			or (outSource == "disenchant" and L["OUTPUT_VALUE_DE"])
-			or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
-			or L["OUTPUT_VALUE"]
-		GameTooltip:AddDoubleLine(outLabel, ns.FormatMoney(outVal), 0.8, 0.8, 0.8, 1, 1, 1)
-	end
-	if profit then
-		GameTooltip:AddDoubleLine(L["NET_PROFIT"], ns.FormatMoney(profit, true), 0.8, 0.8, 0.8, 1, 1, 1)
-	end
-	local rec = self:GetRecipeRecord(recipeID)
-	if rec and rec.outputItemID and self.GetItemDisenchantInfo then
-		local deNet, yields, reqEnch = self:GetItemDisenchantInfo(rec.outputItemID)
-		if yields and #yields > 0 then
+	if self.db and self.db.options and self.db.options.tooltipExtraInfo == true then
+		if th then
 			GameTooltip:AddLine(" ")
 			GameTooltip:AddDoubleLine(
-				string.format(L["DE_TOOLTIP_HEADER"], reqEnch or 1),
-				deNet and ns.FormatMoney(deNet) or "-",
-				0.75, 0.65, 1.0, 1, 1, 1
+				L["THRESHOLDS_LABEL"],
+				string.format(
+					"|cffff8040%d|r / |cffffe026%d|r / |cff40d940%d|r / |cff949494%d|r",
+					th[1] or 1, th[2] or 1, th[3] or 1, th[4] or 1
+				),
+				0.9, 0.8, 0.5, 1, 1, 1
 			)
-			for _, y in ipairs(yields) do
-				local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
-				local p = self:GetAuctionPrice(y.itemID)
+		end
+		local cost, outVal, profit, _, outSource = self:GetRecipeEconomy(recipeID)
+		if cost then
+			GameTooltip:AddDoubleLine(L["CRAFT_COST"], ns.FormatMoney(cost), 0.8, 0.8, 0.8, 1, 1, 1)
+		end
+		if outVal and outVal > 0 then
+			local outLabel = (outSource == "ah" and L["OUTPUT_VALUE_AH"])
+				or (outSource == "disenchant" and L["OUTPUT_VALUE_DE"])
+				or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
+				or L["OUTPUT_VALUE"]
+			GameTooltip:AddDoubleLine(outLabel, ns.FormatMoney(outVal), 0.8, 0.8, 0.8, 1, 1, 1)
+		end
+		if profit then
+			GameTooltip:AddDoubleLine(L["NET_PROFIT"], ns.FormatMoney(profit, true), 0.8, 0.8, 0.8, 1, 1, 1)
+		end
+		local rec = self:GetRecipeRecord(recipeID)
+		if rec and rec.outputItemID and self.GetItemDisenchantInfo then
+			local deNet, yields, reqEnch = self:GetItemDisenchantInfo(rec.outputItemID)
+			if yields and #yields > 0 then
+				GameTooltip:AddLine(" ")
 				GameTooltip:AddDoubleLine(
-					string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
-					string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
-					0.85, 0.85, 0.85, 0.8, 0.8, 0.8
+					string.format(L["DE_TOOLTIP_HEADER"], reqEnch or 1),
+					deNet and ns.FormatMoney(deNet) or "-",
+					0.75, 0.65, 1.0, 1, 1, 1
 				)
+				for _, y in ipairs(yields) do
+					local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
+					local p = self:GetAuctionPrice(y.itemID)
+					GameTooltip:AddDoubleLine(
+						string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
+						string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
+						0.85, 0.85, 0.85, 0.8, 0.8, 0.8
+					)
+				end
 			end
 		end
 	end
@@ -936,6 +938,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			includeTrainerInRoute = true,
 			deductVendorInRoute = true,
 			includeDisenchant = true,
+			tooltipExtraInfo = false,
 			filterCraftable = false,
 			filterSkillUp = false,
 			showUnlearned = false,
