@@ -798,20 +798,19 @@ function ns:CreateDetailsView(parent)
 	econBox:SetPoint("TOPRIGHT", -8, -66)
 	StylePanel(econBox, 0.05, 0.05, 0.05, 0.85)
 
-	local function EconLine(yOff, label)
+	-- Строки «подпись — сумма» в одну линию: себестоимость, выручка по каждому источнику (тот, по
+	-- которому считается прибыль, ярко, остальные серым), чистая прибыль, цена за +1. Заполняет UpdateEconBox.
+	d.econRows = {}
+	for i = 1, 6 do
+		local yOff = -9 - (i - 1) * 19
 		local l = econBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		l:SetPoint("TOPLEFT", 8, yOff)
-		l:SetText(label)
+		l:SetJustifyH("LEFT")
 		local v = econBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		v:SetPoint("TOPRIGHT", -8, yOff - 14)
+		v:SetPoint("TOPRIGHT", -8, yOff)
 		v:SetJustifyH("RIGHT")
-		return v, l
+		d.econRows[i] = { label = l, value = v }
 	end
-
-	d.valCraftCost                  = EconLine(-8,  L["CRAFT_COST"])
-	d.valOutput, d.lblOutput        = EconLine(-38, L["OUTPUT_VALUE"])
-	d.valProfit                     = EconLine(-68, L["NET_PROFIT"])
-	d.valCostSkillUp                = EconLine(-98, L["COST_PER_SKILLUP"])
 
 	-- Галочка авто-разворачивания промежуточных крафтов
 	local cbSub = CreateFrame("CheckButton", nil, d, "UICheckButtonTemplate")
@@ -899,19 +898,19 @@ function ns:CreateDetailsView(parent)
 		r.priceText:SetJustifyH("RIGHT")
 
 		r.chanceText = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		r.chanceText:SetPoint("RIGHT", -90, 0)
-		r.chanceText:SetWidth(44)
+		r.chanceText:SetPoint("RIGHT", -44, 0)
+		r.chanceText:SetWidth(28)
 		r.chanceText:SetJustifyH("RIGHT")
 
 		r.countText = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		r.countText:SetPoint("RIGHT", r.chanceText, "LEFT", -6, 0)
-		r.countText:SetWidth(40)
+		r.countText:SetPoint("RIGHT", r.chanceText, "LEFT", -4, 0)
+		r.countText:SetWidth(26)
 		r.countText:SetJustifyH("RIGHT")
 		r.countText:SetTextColor(0.6, 0.6, 0.6)
 
 		r.nameText = r:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		r.nameText:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
-		r.nameText:SetPoint("RIGHT", r.countText, "LEFT", -6, 0)
+		r.nameText:SetPoint("RIGHT", r.countText, "LEFT", -4, 0)
 		r.nameText:SetHeight(16)
 		r.nameText:SetJustifyH("LEFT")
 		r.nameText:SetWordWrap(false)
@@ -1043,10 +1042,7 @@ function ns:RefreshDetailsView()
 			d.deBlock:Hide()
 		end
 		for i = 1, 6 do d.reagentRows[i]:Hide() end
-		d.valCraftCost:SetText("-")
-		d.valOutput:SetText("-")
-		d.valProfit:SetText("-")
-		d.valCostSkillUp:SetText("-")
+		self:UpdateEconBox(d, nil)
 		d.craftNowBtn:SetEnabled(false)
 		return
 	end
@@ -1056,7 +1052,7 @@ function ns:RefreshDetailsView()
 	local rec = self:GetRecipeRecord(recipeID)
 	local name, icon, outItemID, _, _, hex = self:GetRecipeDisplay(recipeID)
 	local metrics = self:GetRecipeSkillMetrics(recipeID, curSkill, self.db.options.deductVendorInRoute ~= false)
-	local craftCost, outVal, profit, breakdown, outSource = self:GetRecipeEconomy(recipeID)
+	local craftCost, _, profit, breakdown, outSource, alts = self:GetRecipeEconomy(recipeID)
 
 	d.outBtn.recipeID = recipeID
 	d.outBtn.itemID = outItemID
@@ -1188,19 +1184,71 @@ function ns:RefreshDetailsView()
 	-- Только для изученных: у неизученных на этом месте строка источника и кнопка TomTom (y = -203)
 	self:UpdateDisenchantBlock(d, metrics.learned and outItemID or nil, math.min(#breakdown, 6))
 
-	if d.lblOutput then
-		d.lblOutput:SetText(
-			(outSource == "ah" and L["OUTPUT_VALUE_AH"])
-			or (outSource == "disenchant" and L["OUTPUT_VALUE_DE"])
-			or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
-			or L["OUTPUT_VALUE"]
-		)
-	end
-	d.valCraftCost:SetText(ns.FormatMoney(craftCost))
-	d.valOutput:SetText(ns.FormatMoney(outVal))
-	d.valProfit:SetText(ns.FormatMoney(profit, true))
-	d.valCostSkillUp:SetText(ns.FormatMoney(metrics.costPerSkillUp))
+	self:UpdateEconBox(d, {
+		craftCost = craftCost,
+		outSource = outSource,
+		alts = alts,
+		profit = profit,
+		costPerSkillUp = metrics.costPerSkillUp,
+	})
 	d.craftNowBtn:SetEnabled(metrics.learned and (self:GetRecipeCraftCounts(recipeID) > 0))
+end
+
+-------------------------------------------------------------------------------
+-- Блок экономики в деталях. e = nil — рецепт не выбран (прочерки)
+-------------------------------------------------------------------------------
+local OUTPUT_LABEL_KEYS = { vendor = "OUTPUT_VALUE_VENDOR", ah = "OUTPUT_VALUE_AH", disenchant = "OUTPUT_VALUE_DE" }
+local DASH = "|cff888888-|r"
+
+function ns:UpdateEconBox(d, e)
+	local rows = d.econRows
+	if not rows then
+		return
+	end
+	local lines = {}
+	local function Add(label, text, dim)
+		lines[#lines + 1] = { label, text, dim }
+	end
+	if e then
+		Add(L["CRAFT_COST"], ns.FormatMoney(e.craftCost))
+		local anyOutput = false
+		for _, src in ipairs(ns.OUTPUT_SOURCES) do
+			local v = e.alts and e.alts[src]
+			if v then
+				anyOutput = true
+				Add(L[OUTPUT_LABEL_KEYS[src]], ns.FormatMoney(v), src ~= e.outSource)
+			end
+		end
+		if not anyOutput then
+			Add(L["OUTPUT_VALUE"], DASH)
+		end
+		Add(L["NET_PROFIT"], ns.FormatMoney(e.profit, true))
+		Add(L["COST_PER_SKILLUP"], ns.FormatMoney(e.costPerSkillUp))
+	else
+		Add(L["CRAFT_COST"], DASH)
+		Add(L["OUTPUT_VALUE"], DASH)
+		Add(L["NET_PROFIT"], DASH)
+		Add(L["COST_PER_SKILLUP"], DASH)
+	end
+	for i, row in ipairs(rows) do
+		local ln = lines[i]
+		if ln then
+			row.label:SetText(ln[1])
+			row.value:SetText(ln[2])
+			if ln[3] then
+				row.label:SetTextColor(0.5, 0.5, 0.5)
+				row.value:SetTextColor(0.5, 0.5, 0.5)
+			else
+				row.label:SetTextColor(1, 1, 1)
+				row.value:SetTextColor(1, 0.82, 0)
+			end
+			row.label:Show()
+			row.value:Show()
+		else
+			row.label:Hide()
+			row.value:Hide()
+		end
+	end
 end
 
 -------------------------------------------------------------------------------

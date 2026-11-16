@@ -340,11 +340,27 @@ function ns:GetReagentBestPrice(itemID, visiting)
 	return bestPrice, bestSource, bestRecipeID
 end
 
--- Экономика рецепта: craftCost, outputValue, netProfit, reagentBreakdown
+-- Выручка, которую вычитаем из цены за +1 навык и в калькуляторе прокачки (alts — 6-е значение
+-- GetRecipeEconomy): продажа торговцу, если отмечена «Продажа торговцу», или распыление, если оно
+-- включено в настройках, — что больше. Перепродажа на аукционе в прокачку не входит, как и раньше.
+function ns.GetSkillUpReturn(alts, deductVendor)
+	local vendor = (deductVendor and alts and alts.vendor) or 0
+	local de = (alts and alts.disenchant) or 0
+	if de > vendor then
+		return de, "disenchant"
+	end
+	return vendor, (vendor > 0) and "vendor" or nil
+end
+
+local OUTPUT_SOURCES = { "vendor", "ah", "disenchant" }
+ns.OUTPUT_SOURCES = OUTPUT_SOURCES
+
+-- Экономика рецепта: craftCost, outputValue, netProfit, reagentBreakdown, outputSource,
+-- alts — выручка по каждому источнику { vendor, ah, disenchant } (только те, что есть)
 function ns:GetRecipeEconomy(recipeID)
 	local cached = recipeEconomyCache[recipeID]
 	if cached then
-		return cached[1], cached[2], cached[3], cached[4], cached[5]
+		return cached[1], cached[2], cached[3], cached[4], cached[5], cached[6]
 	end
 	local rec = self:GetRecipeRecord(recipeID)
 	if not rec or #rec.reagents == 0 then
@@ -376,39 +392,39 @@ function ns:GetRecipeEconomy(recipeID)
 	local craftCost = allPriced and totalCost or nil
 	local outputValue = nil
 	local outputSource = nil
+	local alts = {}
 
 	if rec.outputItemID and rec.outputItemID > 0 then
+		local numMade = rec.numMade or 1
+		-- «Продажа торговцу»: вещь не перепродаём на аукционе, остаются торговец и распыление
 		local vendorOnly = self.db and self.db.options and self.db.options.deductVendorInRoute == true
-		local vendorSell = self:GetItemSellPrice(rec.outputItemID) * (rec.numMade or 1)
-		if vendorOnly then
-			if vendorSell > 0 then
-				outputValue = vendorSell
-				outputSource = "vendor"
-			end
-		else
+		local vendorSell = self:GetItemSellPrice(rec.outputItemID) * numMade
+		if vendorSell > 0 then
+			alts.vendor = vendorSell
+		end
+		if not vendorOnly then
 			local ahUnit = self:GetAuctionPrice(rec.outputItemID)
-			local ahNet = ahUnit and math.floor(ahUnit * (rec.numMade or 1) * (1 - AUCTION_CUT) + 0.5) or nil
-			local deNet = self:GetItemDisenchantInfo(rec.outputItemID)
-			if deNet then
-				deNet = math.floor(deNet * (rec.numMade or 1) + 0.5)
+			if ahUnit and ahUnit > 0 then
+				alts.ah = math.floor(ahUnit * numMade * (1 - AUCTION_CUT) + 0.5)
 			end
-			if ahNet and ahNet > vendorSell then
-				outputValue = ahNet
-				outputSource = "ah"
-			elseif vendorSell > 0 then
-				outputValue = vendorSell
-				outputSource = "vendor"
-			end
-			if deNet and deNet > (outputValue or 0) then
-				outputValue = deNet
-				outputSource = "disenchant"
+		end
+		local deNet = self:GetItemDisenchantInfo(rec.outputItemID)
+		if deNet then
+			alts.disenchant = math.floor(deNet * numMade + 0.5)
+		end
+		-- лучшее из доступного; при равенстве — торговец, потом аукцион, потом распыление
+		for _, src in ipairs(OUTPUT_SOURCES) do
+			local v = alts[src]
+			if v and v > (outputValue or 0) then
+				outputValue = v
+				outputSource = src
 			end
 		end
 	end
 
 	local netProfit = (craftCost and outputValue) and (outputValue - craftCost) or nil
-	recipeEconomyCache[recipeID] = { craftCost, outputValue, netProfit, breakdown, outputSource }
-	return craftCost, outputValue, netProfit, breakdown, outputSource
+	recipeEconomyCache[recipeID] = { craftCost, outputValue, netProfit, breakdown, outputSource, alts }
+	return craftCost, outputValue, netProfit, breakdown, outputSource, alts
 end
 
 -- Подписка на обновления базы Auctionator + запись живых цен у вендоров и тренеров
