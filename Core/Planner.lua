@@ -166,13 +166,15 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			-- Базовые стартовые рецепты (оранжевые с 1, без свитка) тоже доступны
 			local isBasic = th and th[1] == 1 and not (self.RecipeScrolls and self.RecipeScrolls[recipeID])
 			if learned or isBasic or (includeTrainer and isTrainer) then
-				local craftCost = self:GetRecipeEconomy(recipeID)
+				local craftCost, outVal = self:GetRecipeEconomy(recipeID)
 				if craftCost then
 					local rec = self:GetRecipeRecord(recipeID)
-					local vendorReturn = 0
-					if deductVendor and rec and rec.outputItemID and rec.outputItemID > 0 then
-						vendorReturn = self:GetItemSellPrice(rec.outputItemID) * (rec.numMade or 1)
+					local vendorSell = 0
+					if rec and rec.outputItemID and rec.outputItemID > 0 then
+						vendorSell = self:GetItemSellPrice(rec.outputItemID) * (rec.numMade or 1)
 					end
+					local unitReturn = deductVendor and vendorSell or math.max(outVal or 0, vendorSell)
+					local effectiveDeduct = deductVendor and vendorSell or 0
 					candidates[#candidates + 1] = {
 						recipeID = recipeID,
 						learned = learned or isBasic,
@@ -180,7 +182,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						trainerFee = (not learned and not isBasic and trainerFee) or 0,
 						th = th,
 						craftCost = craftCost,
-						netCost = math.max(0, craftCost - vendorReturn),
+						unitReturn = unitReturn,
+						netCost = math.max(0, craftCost - effectiveDeduct),
 					}
 				end
 			end
@@ -189,6 +192,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 
 	local steps = {}
 	local totalCost = 0
+	local totalGrossCost = 0
+	local totalReturn = 0
 	local learnedInSim = {}
 	-- Нормализуем потолок ранга к стандартным ступеням 75/150/225/300 (на случай расовых бонусов +10/+15)
 	local activeCap = 75
@@ -210,6 +215,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				if milestone and s >= milestone.reqSkill then
 					steps[#steps + 1] = milestone
 					totalCost = totalCost + (milestone.fee or 0)
+					totalGrossCost = totalGrossCost + (milestone.fee or 0)
 					activeCap = nextCap
 				end
 			end
@@ -254,6 +260,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			learnedInSim[bestCand.recipeID] = true
 			learnFee = bestCand.trainerFee
 			totalCost = totalCost + learnFee
+			totalGrossCost = totalGrossCost + learnFee
 		end
 
 		prevRecipeID = bestCand.recipeID
@@ -275,6 +282,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				colorKey = bestColor,
 				unitNetCost = bestCand.netCost,
 				unitCraftCost = bestCand.craftCost,
+				unitReturn = bestCand.unitReturn or 0,
 				learnFee = learnFee,
 				reqSkill = bestCand.reqSkill,
 			}
@@ -286,14 +294,20 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		if st.kind == "craft" then
 			st.crafts = math.max(st.points, math.ceil(st.expectedCrafts - 0.05))
 			st.avgChance = math.floor((st.chanceSum / st.points) * 100 + 0.5)
+			st.grossCost = st.crafts * st.unitCraftCost + (st.learnFee or 0)
+			st.returnVal = st.crafts * (st.unitReturn or 0)
 			st.stepCost = st.crafts * st.unitNetCost + (st.learnFee or 0)
 			totalCost = totalCost + (st.crafts * st.unitNetCost)
+			totalGrossCost = totalGrossCost + (st.crafts * st.unitCraftCost)
+			totalReturn = totalReturn + st.returnVal
 		end
 	end
 
 	return {
 		steps = steps,
 		totalCost = totalCost,
+		grossCost = totalGrossCost,
+		totalReturn = totalReturn,
 		startSkill = startSkill,
 		goalSkill = goalSkill,
 	}

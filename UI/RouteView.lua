@@ -69,10 +69,29 @@ function ns:CreateRouteView(parent)
 		prevBtn = b
 	end
 
-	-- Кнопка сброса скрытых (исключённых) рецептов — во 2-й строке справа
+	-- Галочки опций расчёта — во 2-й строке слева
+	local function MakeCheck(label, optKey, xOff, hitW)
+		local cb = CreateFrame("CheckButton", nil, top, "UICheckButtonTemplate")
+		cb:SetSize(20, 20)
+		cb:SetPoint("TOPLEFT", xOff, -26)
+		cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		cb.text:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+		cb.text:SetText(label)
+		cb:SetHitRectInsets(0, -(hitW or 115), 0, 0)
+		cb:SetScript("OnClick", function(self)
+			ns.db.options[optKey] = self:GetChecked() and true or false
+			ns:RefreshRouteView()
+		end)
+		return cb
+	end
+
+	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", 0, 115)
+	f.cbVendor  = MakeCheck(L["PLANNER_DEDUCT_VENDOR"], "deductVendorInRoute", 142, 105)
+
+	-- Кнопка сброса скрытых (исключённых) рецептов — во 2-й строке после галочек
 	local resetSkips = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
-	resetSkips:SetSize(140, 20)
-	resetSkips:SetPoint("TOPRIGHT", 0, -26)
+	resetSkips:SetSize(96, 20)
+	resetSkips:SetPoint("TOPLEFT", 272, -26)
 	resetSkips:SetScript("OnClick", function()
 		if ns.charDB then
 			ns.charDB.skippedRecipes = {}
@@ -81,29 +100,14 @@ function ns:CreateRouteView(parent)
 	end)
 	f.resetSkipsBtn = resetSkips
 
-	-- Галочки опций расчёта — во 2-й строке слева
-	local function MakeCheck(label, optKey, xOff)
-		local cb = CreateFrame("CheckButton", nil, top, "UICheckButtonTemplate")
-		cb:SetSize(20, 20)
-		cb:SetPoint("TOPLEFT", xOff, -26)
-		cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		cb.text:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-		cb.text:SetText(label)
-		cb:SetHitRectInsets(0, -130, 0, 0)
-		cb:SetScript("OnClick", function(self)
-			ns.db.options[optKey] = self:GetChecked() and true or false
-			ns:RefreshRouteView()
-		end)
-		return cb
-	end
-
-	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", 0)
-	f.cbVendor  = MakeCheck(L["PLANNER_DEDUCT_VENDOR"], "deductVendorInRoute", 148)
-
-	-- Сводка стоимости маршрута — в 1-й строке справа (напротив кнопок цели)
+	-- Отдельные поля справа: 1) Затраты (реагенты + тренер) и 2) Расчётный возврат (вендор / аукцион)
 	f.summaryText = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	f.summaryText:SetPoint("TOPRIGHT", 0, -5)
+	f.summaryText:SetPoint("TOPRIGHT", 0, -4)
 	f.summaryText:SetJustifyH("RIGHT")
+
+	f.returnText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	f.returnText:SetPoint("TOPRIGHT", 0, -22)
+	f.returnText:SetJustifyH("RIGHT")
 
 	-- Список шагов маршрута
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
@@ -195,8 +199,12 @@ function ns:CreateRouteView(parent)
 		end)
 
 		row.cost = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		row.cost:SetPoint("RIGHT", row.queueBtn, "LEFT", -6, 0)
+		row.cost:SetPoint("TOPRIGHT", row.queueBtn, "TOPLEFT", -6, 1)
 		row.cost:SetJustifyH("RIGHT")
+
+		row.ret = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		row.ret:SetPoint("BOTTOMRIGHT", row.queueBtn, "BOTTOMLEFT", -6, -1)
+		row.ret:SetJustifyH("RIGHT")
 
 		row:SetScript("OnClick", function(self)
 			local st = self.stepData
@@ -285,7 +293,12 @@ function ns:RenderRouteRows()
 					subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_LEARN"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
 				end
 				row.sub:SetText(subText)
-				row.cost:SetText(ns.FormatMoney(st.stepCost))
+				row.cost:SetText(ns.FormatMoney(st.grossCost or st.stepCost))
+				if st.returnVal and st.returnVal > 0 then
+					row.ret:SetText("|cff40ff40+" .. ns.FormatMoney(st.returnVal) .. "|r")
+				else
+					row.ret:SetText("")
+				end
 				row.queueBtn:Show()
 				row.skipBtn:Show()
 			else
@@ -293,6 +306,7 @@ function ns:RenderRouteRows()
 				row.title:SetText("|cffffd100" .. (st.title or "") .. "|r")
 				row.sub:SetText("")
 				row.cost:SetText(st.fee and st.fee > 0 and ns.FormatMoney(st.fee) or "")
+				row.ret:SetText("")
 				row.queueBtn:Hide()
 				row.skipBtn:Hide()
 			end
@@ -336,7 +350,10 @@ function ns:RefreshRouteView()
 	if f.offset > maxOff then
 		f.offset = maxOff
 	end
-	f.summaryText:SetText(string.format(L["PLANNER_TOTAL_COST"], ns.FormatMoney(route.totalCost or 0), #f.steps))
+	f.summaryText:SetText(string.format(L["PLANNER_TOTAL_COST"], ns.FormatMoney(route.grossCost or route.totalCost or 0)))
+	if f.returnText then
+		f.returnText:SetText(string.format(L["PLANNER_TOTAL_RETURN"], ns.FormatMoney(route.totalReturn or 0)))
+	end
 	self:RenderRouteRows()
 end
 

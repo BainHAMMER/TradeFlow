@@ -658,13 +658,13 @@ function ns:CreateDetailsView(parent)
 		local v = econBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		v:SetPoint("TOPRIGHT", -8, yOff - 14)
 		v:SetJustifyH("RIGHT")
-		return v
+		return v, l
 	end
 
-	d.valCraftCost   = EconLine(-8,  L["CRAFT_COST"])
-	d.valOutput      = EconLine(-38, L["OUTPUT_VALUE"])
-	d.valProfit      = EconLine(-68, L["NET_PROFIT"])
-	d.valCostSkillUp = EconLine(-98, L["COST_PER_SKILLUP"])
+	d.valCraftCost                  = EconLine(-8,  L["CRAFT_COST"])
+	d.valOutput, d.lblOutput        = EconLine(-38, L["OUTPUT_VALUE"])
+	d.valProfit                     = EconLine(-68, L["NET_PROFIT"])
+	d.valCostSkillUp                = EconLine(-98, L["COST_PER_SKILLUP"])
 
 	-- Галочка авто-разворачивания промежуточных крафтов
 	local cbSub = CreateFrame("CheckButton", nil, d, "UICheckButtonTemplate")
@@ -783,7 +783,7 @@ function ns:RefreshDetailsView()
 	local rec = self:GetRecipeRecord(recipeID)
 	local name, icon, outItemID, _, _, hex = self:GetRecipeDisplay(recipeID)
 	local metrics = self:GetRecipeSkillMetrics(recipeID, curSkill, self.db.options.deductVendorInRoute ~= false)
-	local craftCost, outVal, profit, breakdown = self:GetRecipeEconomy(recipeID)
+	local craftCost, outVal, profit, breakdown, outSource = self:GetRecipeEconomy(recipeID)
 
 	d.outBtn.recipeID = recipeID
 	d.outBtn.itemID = outItemID
@@ -836,6 +836,13 @@ function ns:RefreshDetailsView()
 		end
 	end
 
+	if d.lblOutput then
+		d.lblOutput:SetText(
+			(outSource == "ah" and L["OUTPUT_VALUE_AH"])
+			or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
+			or L["OUTPUT_VALUE"]
+		)
+	end
 	d.valCraftCost:SetText(ns.FormatMoney(craftCost))
 	d.valOutput:SetText(ns.FormatMoney(outVal))
 	d.valProfit:SetText(ns.FormatMoney(profit, true))

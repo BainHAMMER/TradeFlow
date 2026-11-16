@@ -249,12 +249,15 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 			0.9, 0.8, 0.5, 1, 1, 1
 		)
 	end
-	local cost, outVal, profit = self:GetRecipeEconomy(recipeID)
+	local cost, outVal, profit, _, outSource = self:GetRecipeEconomy(recipeID)
 	if cost then
 		GameTooltip:AddDoubleLine(L["CRAFT_COST"], ns.FormatMoney(cost), 0.8, 0.8, 0.8, 1, 1, 1)
 	end
 	if outVal and outVal > 0 then
-		GameTooltip:AddDoubleLine(L["OUTPUT_VALUE"], ns.FormatMoney(outVal), 0.8, 0.8, 0.8, 1, 1, 1)
+		local outLabel = (outSource == "ah" and L["OUTPUT_VALUE_AH"])
+			or (outSource == "vendor" and L["OUTPUT_VALUE_VENDOR"])
+			or L["OUTPUT_VALUE"]
+		GameTooltip:AddDoubleLine(outLabel, ns.FormatMoney(outVal), 0.8, 0.8, 0.8, 1, 1, 1)
 	end
 	if profit then
 		GameTooltip:AddDoubleLine(L["NET_PROFIT"], ns.FormatMoney(profit, true), 0.8, 0.8, 0.8, 1, 1, 1)
