@@ -935,6 +935,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			autoSubcrafts = true,
 			includeTrainerInRoute = true,
 			deductVendorInRoute = true,
+			includeDisenchant = true,
 			filterCraftable = false,
 			filterSkillUp = false,
 			showUnlearned = false,

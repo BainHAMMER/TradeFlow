@@ -35,6 +35,9 @@ local DE_RARE_BRACKETS = {
 }
 
 function ns:GetItemDisenchantInfo(itemID)
+	if self.db and self.db.options and self.db.options.includeDisenchant == false then
+		return nil
+	end
 	local ench = self.playerProfessions and self.playerProfessions[333]
 	if not (ench and itemID and itemID > 0 and C_Item and C_Item.GetItemInfo) then
 		return nil

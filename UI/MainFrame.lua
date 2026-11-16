@@ -367,7 +367,7 @@ function ns:CreateMainFrame()
 	end)
 
 	local langBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-	langBtn:SetSize(44, 22)
+	langBtn:SetSize(38, 22)
 	langBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
 	langBtn:SetText(self.lang == "ru" and "RU" or "EN")
 	langBtn:SetScript("OnClick", function()
@@ -381,9 +381,18 @@ function ns:CreateMainFrame()
 	langBtn:SetScript("OnLeave", GameTooltip_Hide)
 	f.langBtn = langBtn
 
+	local settingsBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+	settingsBtn:SetSize(82, 22)
+	settingsBtn:SetPoint("RIGHT", langBtn, "LEFT", -4, 0)
+	settingsBtn:SetText(L["SETTINGS_BTN"])
+	settingsBtn:SetScript("OnClick", function()
+		ns:ToggleSettingsFrame()
+	end)
+	f.settingsBtn = settingsBtn
+
 	local blizzBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-	blizzBtn:SetSize(115, 22)
-	blizzBtn:SetPoint("RIGHT", langBtn, "LEFT", -6, 0)
+	blizzBtn:SetSize(104, 22)
+	blizzBtn:SetPoint("RIGHT", settingsBtn, "LEFT", -4, 0)
 	blizzBtn:SetText(L["BLIZZARD_UI"])
 	blizzBtn:SetScript("OnClick", function()
 		ns:OpenBlizzardProfessions()
@@ -861,6 +870,40 @@ function ns:CreateDetailsView(parent)
 	sourceBtn:Hide()
 	d.sourceBtn = sourceBtn
 
+	-- Строка распыления (если изучено Наложение чар и предмет распыляется)
+	local deBtn = CreateFrame("Button", nil, d)
+	deBtn:SetHeight(16)
+	deBtn:SetPoint("BOTTOMLEFT", cbSub, "TOPLEFT", 0, 2)
+	deBtn:SetPoint("RIGHT", -8, 0)
+	deBtn.text = deBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	deBtn.text:SetAllPoints()
+	deBtn.text:SetJustifyH("LEFT")
+	deBtn.text:SetWordWrap(false)
+	if deBtn.text.SetMaxLines then deBtn.text:SetMaxLines(1) end
+	deBtn:SetScript("OnEnter", function(self)
+		if self.yields and #self.yields > 0 then
+			GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+			GameTooltip:AddDoubleLine(
+				string.format(L["DE_TOOLTIP_HEADER"], self.reqEnch or 1),
+				self.deNet and ns.FormatMoney(self.deNet) or "-",
+				0.75, 0.65, 1.0, 1, 1, 1
+			)
+			for _, y in ipairs(self.yields) do
+				local yName, _, _, _, _, yHex = ns:GetItemDisplay(y.itemID)
+				local p = ns:GetAuctionPrice(y.itemID)
+				GameTooltip:AddDoubleLine(
+					string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
+					string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
+					0.85, 0.85, 0.85, 0.8, 0.8, 0.8
+				)
+			end
+			GameTooltip:Show()
+		end
+	end)
+	deBtn:SetScript("OnLeave", GameTooltip_Hide)
+	deBtn:Hide()
+	d.deBtn = deBtn
+
 	-- Ввод количества и кнопки «В очередь», «В очередь все», «Создать»
 	local minusBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
 	minusBtn:SetSize(24, 24)
@@ -963,6 +1006,10 @@ function ns:RefreshDetailsView()
 			d.tomtomBtn.itemName = nil
 			d.tomtomBtn:Hide()
 		end
+		if d.deBtn then
+			d.deBtn.yields = nil
+			d.deBtn:Hide()
+		end
 		for i = 1, 6 do d.reagentRows[i]:Hide() end
 		d.valCraftCost:SetText("-")
 		d.valOutput:SetText("-")
@@ -1009,7 +1056,29 @@ function ns:RefreshDetailsView()
 			d.tomtomBtn.itemName = nil
 			d.tomtomBtn:Hide()
 		end
+		if d.deBtn then
+			local deNet, yields, reqEnch = outItemID and self.GetItemDisenchantInfo and self:GetItemDisenchantInfo(outItemID)
+			if yields and #yields > 0 then
+				local parts = {}
+				for _, y in ipairs(yields) do
+					local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
+					parts[#parts + 1] = string.format("%.0f%% %s%s|r", y.chance * 100, yHex or "|cffffffff", yName)
+				end
+				d.deBtn.deNet = deNet
+				d.deBtn.yields = yields
+				d.deBtn.reqEnch = reqEnch
+				d.deBtn.text:SetText(string.format(L["DE_LINE_FMT"], reqEnch or 1, deNet and ns.FormatMoney(deNet) or "-", table.concat(parts, ", ")))
+				d.deBtn:Show()
+			else
+				d.deBtn.yields = nil
+				d.deBtn:Hide()
+			end
+		end
 	else
+		if d.deBtn then
+			d.deBtn.yields = nil
+			d.deBtn:Hide()
+		end
 		local src = self.GetRecipeSourceInfo and self:GetRecipeSourceInfo(recipeID)
 		if src and src.isTrainer then
 			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
@@ -1300,9 +1369,90 @@ function ns:ShowMainWindow()
 end
 
 function ns:HideMainWindow()
+	if self.settingsFrame and self.settingsFrame:IsShown() then
+		self.settingsFrame:Hide()
+	end
 	if self.mainFrame and self.mainFrame:IsShown() then
 		self.mainFrame:Hide()
 	end
+end
+
+function ns:ToggleSettingsFrame()
+	if not self.settingsFrame then
+		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
+		sf:SetSize(310, 196)
+		sf:SetFrameStrata("DIALOG")
+		sf:SetToplevel(true)
+		sf:SetClampedToScreen(true)
+		sf:SetMovable(true)
+		sf:EnableMouse(true)
+		sf:RegisterForDrag("LeftButton")
+		sf:SetScript("OnDragStart", sf.StartMoving)
+		sf:SetScript("OnDragStop", sf.StopMovingOrSizing)
+		StylePanel(sf, 0.07, 0.065, 0.055, 0.98)
+		sf:Hide()
+
+		local title = sf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		title:SetPoint("TOPLEFT", 12, -10)
+		title:SetText("|cffffd100" .. L["SETTINGS_TITLE"] .. "|r")
+
+		local close = CreateFrame("Button", nil, sf, "UIPanelCloseButton")
+		close:SetPoint("TOPRIGHT", -2, -2)
+		close:SetScript("OnClick", function() sf:Hide() end)
+
+		local opts = {
+			{ key = "includeDisenchant",    label = L["OPT_INCLUDE_DE"],          defaultTrue = true,  invalidatePrices = true },
+			{ key = "deductVendorInRoute",  label = L["PLANNER_DEDUCT_VENDOR"],   defaultTrue = true,  invalidatePrices = true },
+			{ key = "includeTrainerInRoute",label = L["PLANNER_INCLUDE_TRAINER"], defaultTrue = true,  invalidatePrices = false },
+			{ key = "autoSubcrafts",        label = L["AUTO_SUBCRAFTS"],          defaultTrue = true,  invalidatePrices = false },
+			{ key = "groupByCategory",      label = L["GROUP_BY_CATEGORY"],       defaultTrue = false, invalidatePrices = false },
+		}
+
+		sf.checks = {}
+		for i, o in ipairs(opts) do
+			local cb = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
+			cb:SetSize(22, 22)
+			cb:SetPoint("TOPLEFT", 12, -34 - (i - 1) * 28)
+			cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			cb.text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+			cb.text:SetText(o.label)
+			cb:SetHitRectInsets(0, -240, 0, 0)
+			cb:SetScript("OnClick", function(self)
+				ns.db.options[o.key] = self:GetChecked() and true or false
+				if o.invalidatePrices and ns.InvalidatePrices then
+					ns:InvalidatePrices()
+				elseif ns.RefreshMainWindow then
+					ns:RefreshMainWindow()
+				end
+			end)
+			sf.checks[i] = { cb = cb, opt = o }
+		end
+
+		tinsert(UISpecialFrames, "TradeFlowSettingsFrame")
+		self.settingsFrame = sf
+	end
+
+	local sf = self.settingsFrame
+	if sf:IsShown() then
+		sf:Hide()
+		return
+	end
+	if self.mainFrame and self.mainFrame.settingsBtn then
+		sf:ClearAllPoints()
+		sf:SetPoint("TOPRIGHT", self.mainFrame.settingsBtn, "BOTTOMRIGHT", 0, -4)
+	else
+		sf:ClearAllPoints()
+		sf:SetPoint("CENTER")
+	end
+	for _, entry in ipairs(sf.checks) do
+		local val = self.db and self.db.options and self.db.options[entry.opt.key]
+		if entry.opt.defaultTrue then
+			entry.cb:SetChecked(val ~= false)
+		else
+			entry.cb:SetChecked(val == true)
+		end
+	end
+	sf:Show()
 end
 
 function ns:ToggleMainWindow()
