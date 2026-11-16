@@ -827,7 +827,7 @@ function ns:CreateDetailsView(parent)
 
 	local tomtomBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
 	tomtomBtn:SetSize(66, 18)
-	tomtomBtn:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -8, 54)
+	tomtomBtn:SetPoint("TOPRIGHT", -8, -203)
 	tomtomBtn:SetText(L["WAYPOINT_BTN"])
 	tomtomBtn:SetScript("OnClick", function(self)
 		if self.waypoint then
@@ -839,14 +839,14 @@ function ns:CreateDetailsView(parent)
 
 	-- Строка источника для неизученных рецептов (свиток + цена на аукционе / ближайший источник)
 	local sourceBtn = CreateFrame("Button", nil, d)
-	sourceBtn:SetHeight(16)
-	sourceBtn:SetPoint("BOTTOMLEFT", cbSub, "TOPLEFT", 0, 2)
-	sourceBtn:SetPoint("RIGHT", -8, 0)
+	sourceBtn:SetHeight(18)
+	sourceBtn:SetPoint("TOPLEFT", 8, -203)
+	sourceBtn:SetPoint("TOPRIGHT", -8, -203)
 	sourceBtn.text = sourceBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	sourceBtn.text:SetAllPoints()
+	sourceBtn.text:SetPoint("LEFT", 2, 0)
+	sourceBtn.text:SetPoint("RIGHT", -2, 0)
 	sourceBtn.text:SetJustifyH("LEFT")
 	sourceBtn.text:SetWordWrap(false)
-	if sourceBtn.text.SetMaxLines then sourceBtn.text:SetMaxLines(1) end
 	sourceBtn:SetScript("OnClick", function(self)
 		if self.itemID then
 			ns:HandleItemClick(self.itemID, nil)
@@ -870,33 +870,23 @@ function ns:CreateDetailsView(parent)
 	sourceBtn:Hide()
 	d.sourceBtn = sourceBtn
 
-	-- Строка распыления (если изучено Наложение чар и предмет распыляется)
+	-- Строка распыления (если включено в настройках и предмет распыляется)
 	local deBtn = CreateFrame("Button", nil, d)
-	deBtn:SetHeight(16)
-	deBtn:SetPoint("BOTTOMLEFT", cbSub, "TOPLEFT", 0, 2)
-	deBtn:SetPoint("RIGHT", -8, 0)
+	deBtn:SetHeight(18)
+	deBtn:SetPoint("TOPLEFT", 8, -203)
+	deBtn:SetPoint("TOPRIGHT", -8, -203)
+	deBtn.bg = deBtn:CreateTexture(nil, "BACKGROUND")
+	deBtn.bg:SetAllPoints()
+	deBtn.bg:SetColorTexture(0.18, 0.10, 0.28, 0.35)
 	deBtn.text = deBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	deBtn.text:SetAllPoints()
+	deBtn.text:SetPoint("LEFT", 6, 0)
+	deBtn.text:SetPoint("RIGHT", -6, 0)
 	deBtn.text:SetJustifyH("LEFT")
 	deBtn.text:SetWordWrap(false)
-	if deBtn.text.SetMaxLines then deBtn.text:SetMaxLines(1) end
 	deBtn:SetScript("OnEnter", function(self)
-		if self.yields and #self.yields > 0 then
+		if self.yields and #self.yields > 0 and ns.AddDisenchantTooltipLines then
 			GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-			GameTooltip:AddDoubleLine(
-				string.format(L["DE_TOOLTIP_HEADER"], self.reqEnch or 1),
-				self.deNet and ns.FormatMoney(self.deNet) or "-",
-				0.75, 0.65, 1.0, 1, 1, 1
-			)
-			for _, y in ipairs(self.yields) do
-				local yName, _, _, _, _, yHex = ns:GetItemDisplay(y.itemID)
-				local p = ns:GetAuctionPrice(y.itemID)
-				GameTooltip:AddDoubleLine(
-					string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
-					string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
-					0.85, 0.85, 0.85, 0.8, 0.8, 0.8
-				)
-			end
+			ns:AddDisenchantTooltipLines(GameTooltip, self.deNet, self.yields, self.reqEnch)
 			GameTooltip:Show()
 		end
 	end)
@@ -1133,11 +1123,11 @@ function ns:RefreshDetailsView()
 				d.sourceBtn.sourceDetail = detailText
 				d.sourceBtn.fullText = full
 				d.sourceBtn:ClearAllPoints()
-				d.sourceBtn:SetPoint("BOTTOMLEFT", d.cbAutoSub, "TOPLEFT", 0, 2)
-				if wp and d.tomtomBtn and d.tomtomBtn:IsShown() then
-					d.sourceBtn:SetPoint("RIGHT", d.tomtomBtn, "LEFT", -6, 0)
+				d.sourceBtn:SetPoint("TOPLEFT", 8, -203)
+				if canTomTom and d.tomtomBtn and d.tomtomBtn:IsShown() then
+					d.sourceBtn:SetPoint("TOPRIGHT", d.tomtomBtn, "TOPLEFT", -6, 0)
 				else
-					d.sourceBtn:SetPoint("RIGHT", -8, 0)
+					d.sourceBtn:SetPoint("TOPRIGHT", -8, -203)
 				end
 				d.sourceBtn.text:SetText(full)
 				d.sourceBtn:Show()
@@ -1348,6 +1338,9 @@ function ns:RefreshMainWindow()
 	f.rankBar:SetValue(rank)
 	f.rankBar.text:SetText(string.format("%s  %d / %d", profName, rank, maxRank))
 	f.langBtn:SetText(self.lang == "ru" and "RU" or "EN")
+	if f.sortMenu then
+		f.sortMenu:Hide()
+	end
 	if f.cbVendor then
 		f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
 	end
@@ -1427,8 +1420,15 @@ function ns:ToggleSettingsFrame()
 			sf.checks[i] = { cb = cb, opt = o }
 		end
 
-		tinsert(UISpecialFrames, "TradeFlowSettingsFrame")
+		if not self.settingsSpecialRegistered then
+			self.settingsSpecialRegistered = true
+			tinsert(UISpecialFrames, "TradeFlowSettingsFrame")
+		end
 		self.settingsFrame = sf
+	end
+
+	if self.mainFrame and self.mainFrame.sortMenu then
+		self.mainFrame.sortMenu:Hide()
 	end
 
 	local sf = self.settingsFrame
@@ -1467,6 +1467,10 @@ function ns:RebuildMainFrame()
 	local wasShown = self.mainFrame and self.mainFrame:IsShown()
 	local topTab = self.mainFrame and self.mainFrame.topTab or "details"
 	local bottomMode = self.queueView and self.queueView.activeMode or "queue"
+	if self.settingsFrame then
+		self.settingsFrame:Hide()
+		self.settingsFrame = nil
+	end
 	if self.mainFrame then
 		self.isRebuildingFrame = true
 		self.mainFrame:Hide()

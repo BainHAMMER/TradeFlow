@@ -42,7 +42,13 @@ function ns:GetItemDisenchantInfo(itemID)
 		return nil
 	end
 	local _, _, quality, iLevel, _, _, _, _, _, _, _, classID = C_Item.GetItemInfo(itemID)
-	if not (quality and iLevel and iLevel > 0 and (classID == 2 or classID == 4)) then
+	if not quality then
+		if self.RequestItemData then
+			self:RequestItemData(itemID)
+		end
+		return nil
+	end
+	if not (iLevel and iLevel > 0 and (classID == 2 or classID == 4)) then
 		return nil
 	end
 	if quality < 2 or quality > 4 then

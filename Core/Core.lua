@@ -131,8 +131,12 @@ local function ScheduleItemDataRefresh()
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.5, function()
 			pendingItemRefresh = false
-			if ns.mainFrame and ns.mainFrame:IsShown() and ns.RefreshVisibleUI then
-				ns:RefreshVisibleUI()
+			if ns.mainFrame and ns.mainFrame:IsShown() then
+				if ns.InvalidatePrices then
+					ns:InvalidatePrices()
+				elseif ns.RefreshVisibleUI then
+					ns:RefreshVisibleUI()
+				end
 			end
 		end)
 	end
@@ -251,6 +255,26 @@ function ns:ShowItemTooltip(owner, itemID, extraLinesFn)
 	GameTooltip:Show()
 end
 
+function ns:AddDisenchantTooltipLines(tooltip, deNet, yields, reqEnch)
+	if not (tooltip and yields and #yields > 0) then
+		return
+	end
+	tooltip:AddDoubleLine(
+		string.format(L["DE_TOOLTIP_HEADER"], reqEnch or 1),
+		deNet and ns.FormatMoney(deNet) or "-",
+		0.75, 0.65, 1.0, 1, 1, 1
+	)
+	for _, y in ipairs(yields) do
+		local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
+		local p = self:GetAuctionPrice(y.itemID)
+		tooltip:AddDoubleLine(
+			string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
+			string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
+			0.85, 0.85, 0.85, 0.8, 0.8, 0.8
+		)
+	end
+end
+
 -- Нативный тултип рецепта (или создаваемого им предмета) + инфо о порогах и ценах
 function ns:ShowRecipeTooltip(owner, recipeID)
 	if not recipeID or recipeID <= 0 then
@@ -298,20 +322,7 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 			local deNet, yields, reqEnch = self:GetItemDisenchantInfo(rec.outputItemID)
 			if yields and #yields > 0 then
 				GameTooltip:AddLine(" ")
-				GameTooltip:AddDoubleLine(
-					string.format(L["DE_TOOLTIP_HEADER"], reqEnch or 1),
-					deNet and ns.FormatMoney(deNet) or "-",
-					0.75, 0.65, 1.0, 1, 1, 1
-				)
-				for _, y in ipairs(yields) do
-					local yName, _, _, _, _, yHex = self:GetItemDisplay(y.itemID)
-					local p = self:GetAuctionPrice(y.itemID)
-					GameTooltip:AddDoubleLine(
-						string.format("  %s%s|r x%.1f", yHex or "|cffffffff", yName, y.avg),
-						string.format("%.1f%% (%s)", y.chance * 100, p and ns.FormatMoney(p) or "-"),
-						0.85, 0.85, 0.85, 0.8, 0.8, 0.8
-					)
-				end
+				self:AddDisenchantTooltipLines(GameTooltip, deNet, yields, reqEnch)
 			end
 		end
 	end
@@ -578,7 +589,7 @@ function ns:ScanActiveTradeSkill()
 			local outItemID = prevLive and prevLive.outputItemID
 			local numMade = (prevLive and prevLive.numMade) or 1
 			local recipeType = prevLive and prevLive.recipeType
-			if not prevLive then
+			if not (prevLive and prevLive.reagents) then
 				local schematic = C_TradeSkillUI.GetRecipeSchematic and C_TradeSkillUI.GetRecipeSchematic(recipeID, false)
 				if schematic then
 					outItemID = schematic.outputItemID

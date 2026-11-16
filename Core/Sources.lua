@@ -203,10 +203,12 @@ local function CollectSortedNpcs(db, npcIDs)
 		end
 	end
 	local list = (#friendlyList > 0) and friendlyList or fallbackList
+	for _, loc in ipairs(list) do
+		loc.dist = DistanceToNpc(loc)
+	end
 	table.sort(list, function(a, b)
-		local da, dbDist = DistanceToNpc(a), DistanceToNpc(b)
-		if da ~= dbDist then
-			return da < dbDist
+		if a.dist ~= b.dist then
+			return a.dist < b.dist
 		end
 		return a.id < b.id
 	end)
