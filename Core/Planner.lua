@@ -49,6 +49,7 @@ end
 
 -- Метрики рецепта при заданном навыке:
 -- colorKey, chance, craftCost, netCost, costPerSkillUp, reqSkill, trainerFee
+-- (netCost и costPerSkillUp меньше нуля, если выручка с вещи больше себестоимости)
 function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 	local th = self:GetRecipeThresholds(recipeID)
 	local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
@@ -69,13 +70,12 @@ function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 		end
 	end
 
-	local craftCost, _, netProfit = self:GetRecipeEconomy(recipeID)
-	local rec = self:GetRecipeRecord(recipeID)
-	local vendorReturn = 0
-	if deductVendor and rec and rec.outputItemID and rec.outputItemID > 0 then
-		vendorReturn = self:GetItemSellPrice(rec.outputItemID) * (rec.numMade or 1)
-	end
-	local netCost = craftCost and math.max(0, craftCost - vendorReturn) or nil
+	local craftCost, _, netProfit, _, _, alts = self:GetRecipeEconomy(recipeID)
+	-- вычитаем продажу торговцу (если отмечена) или распыление (если включено), что больше
+	local skillUpReturn = ns.GetSkillUpReturn(alts, deductVendor)
+	-- Без обрезки по нулю: отрицательная цена значит, что крафт окупается и приносит доход
+	-- (показывается зелёным «+», ns.FormatSkillUpCost); прибыльные рецепты в сортировке выше бесплатных.
+	local netCost = craftCost and (craftCost - skillUpReturn) or nil
 	local costPerSkillUp = (netCost and chance and chance > 0) and math.floor(netCost / chance + 0.5) or nil
 
 	return {
@@ -173,15 +173,12 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			-- Базовые стартовые рецепты (оранжевые с 1, без свитка и тренера) тоже доступны
 			local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
 			if learned or isBasic or (includeTrainer and isTrainer) then
-				local craftCost, outVal, _, breakdown = self:GetRecipeEconomy(recipeID)
+				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
 				if craftCost then
-					local rec = self:GetRecipeRecord(recipeID)
-					local vendorSell = 0
-					if rec and rec.outputItemID and rec.outputItemID > 0 then
-						vendorSell = self:GetItemSellPrice(rec.outputItemID) * (rec.numMade or 1)
-					end
-					local unitReturn = deductVendor and vendorSell or math.max(outVal or 0, vendorSell)
-					local effectiveDeduct = deductVendor and vendorSell or 0
+					local vendorSell = (alts and alts.vendor) or 0
+					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше
+					local effectiveDeduct = ns.GetSkillUpReturn(alts, deductVendor)
+					local unitReturn = deductVendor and effectiveDeduct or math.max(outVal or 0, vendorSell)
 					candidates[#candidates + 1] = {
 						recipeID = recipeID,
 						learned = learned or isBasic,
