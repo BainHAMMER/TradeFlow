@@ -95,6 +95,14 @@ function ns.FormatMoney(copper, signed)
 	return text
 end
 
+-- Цена за +1 навык: расход как обычная сумма, доход (цена меньше нуля) — зелёным «+сумма»
+function ns.FormatSkillUpCost(copper)
+	if copper and copper < 0 then
+		return ns.FormatMoney(-copper, true)
+	end
+	return ns.FormatMoney(copper)
+end
+
 function ns:RealmKey()
 	local realm = GetRealmName and GetRealmName() or "Realm"
 	local faction = UnitFactionGroup and UnitFactionGroup("player") or "Neutral"

@@ -49,6 +49,7 @@ end
 
 -- Метрики рецепта при заданном навыке:
 -- colorKey, chance, craftCost, netCost, costPerSkillUp, reqSkill, trainerFee
+-- (netCost и costPerSkillUp меньше нуля, если выручка с вещи больше себестоимости)
 function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 	local th = self:GetRecipeThresholds(recipeID)
 	local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
@@ -72,7 +73,9 @@ function ns:GetRecipeSkillMetrics(recipeID, currentSkill, deductVendor)
 	local craftCost, _, netProfit, _, _, alts = self:GetRecipeEconomy(recipeID)
 	-- вычитаем продажу торговцу (если отмечена) или распыление (если включено), что больше
 	local skillUpReturn = ns.GetSkillUpReturn(alts, deductVendor)
-	local netCost = craftCost and math.max(0, craftCost - skillUpReturn) or nil
+	-- Без обрезки по нулю: отрицательная цена значит, что крафт окупается и приносит доход
+	-- (показывается зелёным «+», ns.FormatSkillUpCost); прибыльные рецепты в сортировке выше бесплатных.
+	local netCost = craftCost and (craftCost - skillUpReturn) or nil
 	local costPerSkillUp = (netCost and chance and chance > 0) and math.floor(netCost / chance + 0.5) or nil
 
 	return {

@@ -1223,7 +1223,7 @@ function ns:UpdateEconBox(d, e)
 			Add(L["OUTPUT_VALUE"], DASH)
 		end
 		Add(L["NET_PROFIT"], ns.FormatMoney(e.profit, true))
-		Add(L["COST_PER_SKILLUP"], ns.FormatMoney(e.costPerSkillUp))
+		Add(L["COST_PER_SKILLUP"], ns.FormatSkillUpCost(e.costPerSkillUp))
 	else
 		Add(L["CRAFT_COST"], DASH)
 		Add(L["OUTPUT_VALUE"], DASH)
@@ -1302,6 +1302,18 @@ function ns:UpdateDisenchantBlock(d, outItemID, numReagents)
 		end
 	end
 
+	-- Колонка цены по самой широкой цене в блоке («1с 25м» шире «90м»): шанс и количество стоят
+	-- левее неё, ровно во всех строках, и не налезают на цену
+	local priceW = 24
+	for i = 1, shown do
+		priceW = math.max(priceW, b.rows[i].priceText:GetStringWidth() or 0)
+	end
+	for i = 1, shown do
+		local r = b.rows[i]
+		r.chanceText:ClearAllPoints()
+		r.chanceText:SetPoint("RIGHT", r, "RIGHT", -(4 + math.ceil(priceW) + 8), 0)
+	end
+
 	local totalTop = -14 - shown * 20 - 3
 	b.totalLabel:ClearAllPoints()
 	b.totalLabel:SetPoint("TOPLEFT", b, "TOPLEFT", 25, totalTop)
@@ -1364,7 +1376,7 @@ function ns:RenderRecipeListRows()
 						row.rightText:SetText(profStr)
 					end
 				elseif pct > 0 then
-					local costStr = entry.metrics.costPerSkillUp and ns.FormatMoney(entry.metrics.costPerSkillUp) or ""
+					local costStr = entry.metrics.costPerSkillUp and ns.FormatSkillUpCost(entry.metrics.costPerSkillUp) or ""
 					row.rightText:SetText(string.format("%s%d%%|r  %s", dc.hex, pct, costStr))
 				else
 					row.rightText:SetText(entry.profit and ns.FormatMoney(entry.profit, true) or "")
