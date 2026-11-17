@@ -666,29 +666,41 @@ end
 
 -- Скрывает нативный ProfessionsFrame (уводит за экран и делает прозрачным),
 -- сохраняя сессию C_TradeSkillUI открытой для крафта в WoW Forever
--- WoW Forever: внутри ProfessionsFrame есть общая вкладка профессий (BookPage). На неё окно
--- открывается по K и кнопке микроменю, если последней была общая вкладка или профессия без
--- окна создания (рыбалка). Профессия при этом не открыта и TradeFlow не показывается,
--- поэтому окно Blizzard прятать нельзя. С TRADE_SKILL_SHOW Blizzard сама убирает BookPage,
--- там передаётся force.
+-- WoW Forever: внутри ProfessionsFrame есть общая вкладка профессий (BookPage), на неё окно
+-- открывается по K, если последней была она. Профессии, которых нет в TradeFlow (рыбалка),
+-- тоже открываются в окне Blizzard. В обоих случаях TradeFlow своё окно не показывает,
+-- поэтому окно Blizzard прятать нельзя. ns.blizzardOwnsTradeSkill ставится на
+-- TRADE_SKILL_SHOW такой профессии. На TRADE_SKILL_SHOW профессии TradeFlow передаётся
+-- force: Blizzard сама убирает BookPage при открытии профессии.
 local function IsBlizzardBookPageShown()
 	local page = ProfessionsFrame and ProfessionsFrame.BookPage
 	return page and page:IsShown() or false
+end
+
+-- Открытая сейчас профессия (как Professions.GetEffectiveSkillLineID у Blizzard), nil если нет
+local function GetOpenTradeSkillID()
+	if not C_TradeSkillUI then
+		return nil
+	end
+	local child = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
+	local base = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
+	local id = (child and child.parentProfessionID) or (base and base.professionID)
+	if id and id ~= 0 then
+		return id
+	end
+	return nil
 end
 
 function ns:SuppressBlizzardFrame(force)
 	if not ProfessionsFrame or self.bypassIntercept then
 		return
 	end
-	if not force and IsBlizzardBookPageShown() then
-		self:RestoreBlizzardFrame()
-		if not self.blizzFrameHooked then
-			self:HookBlizzardFrame()
-		end
-		return
-	end
 	if not self.blizzFrameHooked then
 		self:HookBlizzardFrame()
+	end
+	if not force and (IsBlizzardBookPageShown() or self.blizzardOwnsTradeSkill) then
+		self:RestoreBlizzardFrame()
+		return
 	end
 	ProfessionsFrame:SetAlpha(0)
 	if not InCombatLockdown() then
@@ -703,9 +715,8 @@ function ns:HookBlizzardFrame()
 		ProfessionsFrame:HookScript("OnShow", function()
 			if not ns.bypassIntercept then
 				ns:SuppressBlizzardFrame()
-			elseif ns.EnsureBlizzardReturnButton then
-				ns:EnsureBlizzardReturnButton()
 			end
+			ns:EnsureBlizzardReturnButton()
 		end)
 		ProfessionsFrame:HookScript("OnHide", function()
 			if not ns.bypassIntercept and not ns.isSwitchingProfession and not ns.isHidingMain then
@@ -913,12 +924,19 @@ function ns:EnsureBlizzardReturnButton()
 		btn:SetFrameLevel(((closeBtn and closeBtn:GetFrameLevel()) or ProfessionsFrame:GetFrameLevel()) + 5)
 		btn:SetScript("OnClick", function()
 			ns.bypassIntercept = false
-			ns:SuppressBlizzardFrame()
+			if ns:ScanActiveTradeSkill() then
+				-- Профессия TradeFlow открыта (в том числе за общей вкладкой): прячем окно Blizzard
+				ns.blizzardOwnsTradeSkill = false
+				ns:SuppressBlizzardFrame(true)
+			elseif not InCombatLockdown() then
+				-- Открыта общая вкладка без профессии или рыбалка: TradeFlow открывается
+				-- отдельно, как по /tf, а окно Blizzard закрываем
+				HideUIPanel(ProfessionsFrame)
+			end
 			local sl = ns:GetActiveClientSkillLine() or ns.currentSkillLine
 			if sl then
 				ns.currentSkillLine = sl
 			end
-			ns:ScanActiveTradeSkill()
 			if ns.ShowMainWindow then
 				ns:ShowMainWindow()
 			end
@@ -930,9 +948,10 @@ end
 
 function ns:OpenBlizzardProfessions()
 	-- WoW Forever: C_TradeSkillUI.OpenTradeSkill защищена, вызов из аддона блокируется
-	-- (ADDON_ACTION_BLOCKED). Окно Blizzard можно только вернуть на экран, если профессия
-	-- уже открыта (TradeFlow открыт из профессии, а не через /tf или значок).
-	if not (ProfessionsFrame and ProfessionsFrame:IsShown()) then
+	-- (ADDON_ACTION_BLOCKED). Окно Blizzard можно только показать для уже открытой
+	-- профессии: при открытой профессии ProfessionsFrame:OnShow ничего не произносит заново.
+	local shown = ProfessionsFrame and ProfessionsFrame:IsShown()
+	if not shown and not (ProfessionsFrame and GetOpenTradeSkillID() and not InCombatLockdown()) then
 		self:Print(L["BLIZZARD_UI_NEED_PROF"])
 		return
 	end
@@ -941,6 +960,9 @@ function ns:OpenBlizzardProfessions()
 		self:HideMainWindow()
 	end
 	self:RestoreBlizzardFrame()
+	if not shown then
+		ShowUIPanel(ProfessionsFrame)
+	end
 	self:EnsureBlizzardReturnButton()
 end
 
@@ -1022,6 +1044,19 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_DATA_SOURCE_CHANGED" then
 		ns:ScanPlayerProfessions()
 		local ok = ns:ScanActiveTradeSkill()
+		if ok then
+			ns.blizzardOwnsTradeSkill = false
+		elseif event == "TRADE_SKILL_SHOW" and not ns.isSwitchingProfession and not ns.bypassIntercept then
+			-- Профессия, которой нет в TradeFlow (рыбалка): её показывает окно Blizzard.
+			-- Окно TradeFlow закрываем без CloseTradeSkill, иначе закроется и рыбалка.
+			ns.blizzardOwnsTradeSkill = true
+			ns:RestoreBlizzardFrame()
+			if ns.mainFrame and ns.mainFrame:IsShown() and ns.HideMainWindow then
+				ns.isClosingFromBlizz = true
+				ns:HideMainWindow()
+				ns.isClosingFromBlizz = false
+			end
+		end
 		if ok and not ns.bypassIntercept then
 			ns:SuppressBlizzardFrame(true)
 			if C_Timer and C_Timer.After then
@@ -1043,6 +1078,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			ScheduleTradeSkillRefresh()
 		end
 	elseif event == "TRADE_SKILL_CLOSE" then
+		ns.blizzardOwnsTradeSkill = false
 		-- Если окно Blizzard закрыто (Esc или повторное нажатие бинда профессии K), закрываем и TradeFlow
 		if ns.bypassIntercept then
 			ns.bypassIntercept = false
