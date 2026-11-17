@@ -2495,34 +2495,35 @@ ns.RecipeData = {
 	[1328948] = { skillLine = 333, reagents = { { itemID = 11175, quantity = 2 }, { itemID = 11176, quantity = 8 }, { itemID = 11178, quantity = 2 }, { itemID = 12361, quantity = 1 } }, output = false },
 }
 
--- RecipeScrolls: [recipe spell] = { scroll item, required skill }, the pattern or recipe
--- item that teaches it and the skill that item asks for, from ItemEffect and ItemSparse.
+-- Стартовые рецепты «Ученика», которые известны сразу при изучении профессии (без тренера/свитка).
+-- Квестовые, специализационные и прочие особые рецепты с порогом th[1]==1 сюда не включаются.
 -- stylua: ignore
 ns.BasicRecipes = {
-	[818] = true, [2149] = true, [2152] = true, [2329] = true, [2330] = true, [2365] = true, [2387] = true, [2538] = true, [2540] = true, [2657] = true, [2660] = true, [2663] = true,
-	[2671] = true, [2881] = true, [2963] = true, [3115] = true, [3275] = true, [3918] = true, [3919] = true, [3920] = true, [6619] = true, [7126] = true, [7183] = true, [7418] = true,
-	[7421] = true, [7636] = true, [8366] = true, [8368] = true, [8604] = true, [8778] = true, [9058] = true, [9059] = true, [9942] = true, [9957] = true, [9972] = true, [9979] = true,
-	[9980] = true, [11447] = true, [11452] = true, [12260] = true, [12719] = true, [12720] = true, [12722] = true, [12900] = true, [12904] = true, [13262] = true, [14891] = true, [16960] = true,
-	[16965] = true, [16967] = true, [16980] = true, [16986] = true, [16987] = true, [17556] = true, [19093] = true, [19106] = true, [19435] = true, [22430] = true, [22813] = true, [22815] = true,
-	[22967] = true, [23486] = true, [23489] = true, [24266] = true, [24703] = true, [24801] = true, [24846] = true, [24847] = true, [24848] = true, [24849] = true, [24850] = true, [24851] = true,
-	[26011] = true, [26086] = true, [27585] = true, [27588] = true, [28205] = true, [28207] = true, [28208] = true, [28209] = true, [28219] = true, [28220] = true, [28221] = true, [28222] = true,
-	[28223] = true, [28224] = true, [28461] = true, [28462] = true, [28463] = true, [28472] = true, [28473] = true, [28474] = true, [30021] = true, [429348] = true, [429351] = true, [429354] = true,
-	[429869] = true, [430397] = true, [430409] = true, [439086] = true, [439088] = true, [439094] = true, [439098] = true, [439100] = true, [439114] = true, [439116] = true, [439134] = true, [446179] = true,
-	[446183] = true, [446185] = true, [446186] = true, [446188] = true, [446189] = true, [446190] = true, [446191] = true, [446192] = true, [446193] = true, [446194] = true, [446195] = true, [446226] = true,
-	[446236] = true, [446237] = true, [446238] = true, [446243] = true, [446851] = true, [448085] = true, [451706] = true, [461692] = true, [461710] = true, [461712] = true, [461714] = true, [461716] = true,
-	[461718] = true, [462227] = true, [1213481] = true, [1213484] = true, [1213490] = true, [1213492] = true, [1213498] = true, [1213500] = true, [1213502] = true, [1213504] = true, [1213506] = true, [1213513] = true,
-	[1213519] = true, [1213521] = true, [1213523] = true, [1213525] = true, [1213527] = true, [1213530] = true, [1213532] = true, [1213534] = true, [1213536] = true, [1213538] = true, [1213540] = true, [1213544] = true,
-	[1213546] = true, [1213548] = true, [1213552] = true, [1213559] = true, [1213563] = true, [1213565] = true, [1213571] = true, [1213573] = true, [1213576] = true, [1213578] = true, [1213586] = true, [1213588] = true,
-	[1213593] = true, [1213595] = true, [1213598] = true, [1213600] = true, [1213603] = true, [1213607] = true, [1213610] = true, [1213616] = true, [1213628] = true, [1213633] = true, [1213635] = true, [1213638] = true,
-	[1213643] = true, [1213646] = true, [1213709] = true, [1213711] = true, [1213715] = true, [1213717] = true, [1213720] = true, [1213723] = true, [1213726] = true, [1213728] = true, [1213731] = true, [1213734] = true,
-	[1213736] = true, [1213738] = true, [1213740] = true, [1213742] = true, [1213744] = true, [1213746] = true, [1213748] = true, [1213751] = true, [1214137] = true, [1214145] = true, [1214173] = true, [1214257] = true,
-	[1214270] = true, [1214274] = true, [1214303] = true, [1214306] = true, [1214307] = true, [1214309] = true, [1215507] = true, [1216005] = true, [1216007] = true, [1216010] = true, [1216014] = true, [1216016] = true,
-	[1216018] = true, [1216020] = true, [1216022] = true, [1216024] = true, [1217189] = true, [1217203] = true, [1217207] = true, [1223760] = true, [1223762] = true, [1223764] = true, [1223766] = true, [1223768] = true,
-	[1223770] = true, [1223772] = true, [1223774] = true, [1223776] = true, [1223778] = true, [1223780] = true, [1223782] = true, [1223784] = true, [1223787] = true, [1223789] = true, [1223791] = true, [1229432] = true,
-	[1229504] = true, [1229517] = true, [1229705] = true, [1229737] = true, [1229745] = true, [1230117] = true, [1230161] = true, [1230171] = true, [1230564] = true, [1230643] = true, [1230656] = true, [1244431] = true,
-	[1244432] = true, [1244433] = true, [1244645] = true, [1244646] = true, [1244647] = true, [1244648] = true, [1245246] = true, [1245250] = true, [1245287] = true, [1245320] = true, [1245321] = true, [1247741] = true,
-	[1249630] = true, [1249631] = true, [1249632] = true, [1249633] = true, [1249634] = true, [1249637] = true, [1250775] = true, [1259342] = true, [1259347] = true, [1263425] = true, [1270632] = true, [1293088] = true,
-	[1306126] = true,
+	[818] = true,   -- Basic Campfire (Cooking)
+	[2149] = true,  -- Handstitched Leather Boots (Leatherworking)
+	[2152] = true,  -- Light Armor Kit (Leatherworking)
+	[2329] = true,  -- Elixir of Minor Strength (Alchemy)
+	[2387] = true,  -- Linen Cloak (Tailoring)
+	[2538] = true,  -- Charred Wolf Meat (Cooking)
+	[2540] = true,  -- Roasted Boar Meat (Cooking)
+	[2657] = true,  -- Smelt Copper (Mining)
+	[2660] = true,  -- Rough Sharpening Stone (Blacksmithing)
+	[2663] = true,  -- Copper Bracers (Blacksmithing)
+	[2881] = true,  -- Light Leather (Leatherworking)
+	[2963] = true,  -- Bolt of Linen Cloth (Tailoring)
+	[3115] = true,  -- Rough Weightstone (Blacksmithing)
+	[3275] = true,  -- Linen Bandage (First Aid)
+	[3918] = true,  -- Rough Blasting Powder (Engineering)
+	[3919] = true,  -- Rough Dynamite (Engineering)
+	[3920] = true,  -- Crafted Light Shot (Engineering)
+	[7126] = true,  -- Handstitched Leather Vest (Leatherworking)
+	[7183] = true,  -- Elixir of Minor Defense (Alchemy)
+	[7418] = true,  -- Enchant Bracer - Minor Health (Enchanting)
+	[7421] = true,  -- Runed Copper Rod (Enchanting)
+	[8604] = true,  -- Herb Baked Egg (Cooking)
+	[9058] = true,  -- Handstitched Leather Cloak (Leatherworking)
+	[9059] = true,  -- Handstitched Leather Bracers (Leatherworking)
+	[12260] = true, -- Rough Copper Vest (Blacksmithing)
 }
 
 ns.RankBooks = {

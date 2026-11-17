@@ -74,39 +74,45 @@ function ns:BuildFilteredRecipeList()
 
 	local rawIDs = (self.RecipesBySkill and self.RecipesBySkill[sl]) or {}
 	local entries = {}
+	local sel = self.selectedRecipeBySkill[sl]
+	local pinned = self.pinnedRecipeBySkill and self.pinnedRecipeBySkill[sl]
 
 	for _, recipeID in ipairs(rawIDs) do
 		local learned = self:IsRecipeLearned(recipeID)
 		local metrics = self:GetRecipeSkillMetrics(recipeID, curSkill, deductVendor)
-		-- При включённой галочке показываем неизученные рецепты (в первую очередь доступные сейчас или в ближайшие +40 очков навыка)
+		-- При включённой галочке показываем неизученные рецепты (в первую очередь доступные сейчас или в ближайшие +40 очков навыка).
+		-- Рецепт, выбранный явно (например, из калькулятора прокачки или очереди), удерживается и выделяется слева, игнорируя галку.
+		local isPinned = (pinned ~= nil and pinned == recipeID and sel == recipeID)
 		local unlearnedRelevant = showUnlearned and not learned and ((metrics.reqSkill or 1) <= curSkill + 40)
-		if learned or unlearnedRelevant then
+		if learned or unlearnedRelevant or isPinned then
 			local direct, withCraft, withVendor, _, withBank = self:GetRecipeCraftCounts(recipeID)
 			local canCraft = (direct > 0 or withCraft > 0 or withVendor > 0 or (withBank or 0) > 0)
 			local givesSkill = (metrics.chance and metrics.chance > 0)
 
 			local passFilter = true
-			if onlyCraftable and not canCraft then
-				passFilter = false
-			end
-			if onlySkillUp and not givesSkill then
-				passFilter = false
-			end
+			if not isPinned then
+				if onlyCraftable and not canCraft then
+					passFilter = false
+				end
+				if onlySkillUp and not givesSkill then
+					passFilter = false
+				end
 
-			if passFilter and search ~= "" then
-				local rName = self:GetRecipeDisplay(recipeID):lower()
-				local matched = rName:find(search, 1, true) ~= nil
-				if not matched then
-					local rec = self:GetRecipeRecord(recipeID)
-					for _, rg in ipairs((rec and rec.reagents) or {}) do
-						local iName = self:GetItemDisplay(rg.itemID):lower()
-						if iName:find(search, 1, true) then
-							matched = true
-							break
+				if passFilter and search ~= "" then
+					local rName = self:GetRecipeDisplay(recipeID):lower()
+					local matched = rName:find(search, 1, true) ~= nil
+					if not matched then
+						local rec = self:GetRecipeRecord(recipeID)
+						for _, rg in ipairs((rec and rec.reagents) or {}) do
+							local iName = self:GetItemDisplay(rg.itemID):lower()
+							if iName:find(search, 1, true) then
+								matched = true
+								break
+							end
 						end
 					end
+					passFilter = matched
 				end
-				passFilter = matched
 			end
 
 			if passFilter then
@@ -176,7 +182,16 @@ function ns:BuildFilteredRecipeList()
 		local grouped = {}
 		for _, c in ipairs(catOrder) do
 			local list = byCat[c]
-			local collapsed = self.collapsedCategories[c] == true
+			local hasPinned = false
+			if pinned then
+				for _, e in ipairs(list) do
+					if e.recipeID == pinned and e.recipeID == sel then
+						hasPinned = true
+						break
+					end
+				end
+			end
+			local collapsed = (self.collapsedCategories[c] == true) and not hasPinned
 			grouped[#grouped + 1] = {
 				isHeader = true,
 				categoryName = c,
@@ -221,8 +236,10 @@ function ns:SelectRecipeID(recipeID)
 	if rec and rec.skillLine and rec.skillLine ~= self.currentSkillLine then
 		self.currentSkillLine = rec.skillLine
 	end
+	self.pinnedRecipeBySkill = self.pinnedRecipeBySkill or {}
 	if self.currentSkillLine then
 		self.selectedRecipeBySkill[self.currentSkillLine] = recipeID
+		self.pinnedRecipeBySkill[self.currentSkillLine] = recipeID
 	end
 	if self.mainFrame and self.mainFrame:IsShown() then
 		if self.mainFrame.SelectTopTab and self.mainFrame.topTab ~= "details" then
@@ -422,6 +439,9 @@ function ns:CreateMainFrame()
 	searchBox:SetScript("OnTextChanged", function(self, userInput)
 		if userInput then
 			ns.searchQuery = self:GetText()
+			if ns.pinnedRecipeBySkill and ns.currentSkillLine then
+				ns.pinnedRecipeBySkill[ns.currentSkillLine] = nil
+			end
 			f.recipeOffset = 0
 			ns:RefreshRecipeList()
 		end
@@ -442,6 +462,9 @@ function ns:CreateMainFrame()
 		ns.searchQuery = ""
 		searchBox:SetText("")
 		searchBox:ClearFocus()
+		if ns.pinnedRecipeBySkill and ns.currentSkillLine then
+			ns.pinnedRecipeBySkill[ns.currentSkillLine] = nil
+		end
 		f.recipeOffset = 0
 		ns:RefreshRecipeList()
 	end)
@@ -531,6 +554,9 @@ function ns:CreateMainFrame()
 		cb:SetHitRectInsets(0, -math.min(maxHitWidth or 115, math.floor((cb.text:GetStringWidth() or 90) + 6)), 0, 0)
 		cb:SetScript("OnClick", function(self)
 			ns.db.options[optKey] = self:GetChecked() and true or false
+			if ns.pinnedRecipeBySkill and ns.currentSkillLine then
+				ns.pinnedRecipeBySkill[ns.currentSkillLine] = nil
+			end
 			f.recipeOffset = 0
 			ns:RefreshRecipeList()
 		end)
@@ -1133,22 +1159,27 @@ function ns:RefreshDetailsView()
 		end
 	else
 		local src = self.GetRecipeSourceInfo and self:GetRecipeSourceInfo(recipeID)
+		local reqSkill = (src and src.reqSkill) or metrics.reqSkill or 1
+		local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
+		local hasKnownSkillReq = (reqSkill > 1) or isBasic or (src and (src.isTrainer or src.scrollItemID))
 		if src and src.isTrainer then
 			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
 				L["RECIPE_UNLEARNED_TAG"],
 				ns.FormatMoney(src.trainerFee or 0),
-				src.reqSkill or 1
+				reqSkill
 			) .. "|r"
 		elseif src and src.scrollItemID then
 			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
 				L["RECIPE_UNLEARNED_SCROLL"],
-				src.reqSkill or 1
+				reqSkill
 			) .. "|r"
-		else
+		elseif hasKnownSkillReq then
 			thParts[#thParts + 1] = "|cff809ec7" .. string.format(
 				L["RECIPE_UNLEARNED_UNKNOWN"],
-				(src and src.reqSkill) or metrics.reqSkill or 1
+				reqSkill
 			) .. "|r"
+		else
+			thParts[#thParts + 1] = "|cff809ec7" .. L["RECIPE_UNLEARNED_SPECIAL"] .. "|r"
 		end
 
 		if d.sourceBtn then
@@ -1166,6 +1197,9 @@ function ns:RefreshDetailsView()
 			local detailText = (src and src.detailText and src.detailText ~= "") and src.detailText or summaryText
 			if summaryText then
 				srcParts[#srcParts + 1] = "|cffd0d0d0" .. summaryText .. "|r"
+			elseif not (src and src.isTrainer) and not isBasic and not (src and src.scrollItemID) then
+				srcParts[#srcParts + 1] = "|cff999999" .. L["RECIPE_SOURCE_SPECIAL"] .. "|r"
+				detailText = L["RECIPE_SOURCE_SPECIAL"]
 			end
 			local wp = src and src.waypoint
 			local canTomTom = wp and self.HasTomTom and self:HasTomTom()
@@ -1421,7 +1455,12 @@ function ns:RenderRecipeListRows()
 
 				local dc = self.DIFFICULTY_COLORS[entry.metrics.colorKey] or self.DIFFICULTY_COLORS.grey
 				local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor, entry.withBank)
-				local trainerTag = (not entry.learned) and string.format(" |cff809ec7[%d]|r", entry.metrics.reqSkill or 1) or ""
+				local trainerTag = ""
+				if not entry.learned then
+					local req = entry.metrics.reqSkill or 1
+					local isKnownReq = (req > 1) or entry.metrics.isTrainer or entry.metrics.scrollItemID or (self.BasicRecipes and self.BasicRecipes[entry.recipeID])
+					trainerTag = isKnownReq and string.format(" |cff809ec7[%d]|r", req) or " |cff809ec7[?]|r"
+				end
 				row.nameText:SetText(dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
 
 				local pct = math.floor((entry.metrics.chance or 0) * 100 + 0.5)
