@@ -7,6 +7,9 @@ local L = ns.L
 local MAX_SNIPE_STOCK_AGE = 3600 -- не сигналим по вчерашнему кэшу (> 1 часа)
 local snipeBar = nil
 local lastSoundAt = 0
+local lastAutoScanAt = 0
+local lastChatHitAt = {}
+local lastSnipeListSig = nil
 local pendingUiRefresh = false
 local hookedAuctionFrames = {}
 
@@ -77,7 +80,7 @@ function ns:GetSnipeTargetList()
 	return list
 end
 
-function ns:AddSnipeTarget(itemID, maxPrice, recipeID)
+function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync)
 	if not itemID or itemID <= 0 or not maxPrice or maxPrice <= 0 then
 		return false
 	end
@@ -89,7 +92,10 @@ function ns:AddSnipeTarget(itemID, maxPrice, recipeID)
 		ts = time and time() or 0,
 	}
 	self:EvaluateSnipeItem(itemID, true)
-	self:RefreshSnipeUI()
+	if not deferSync then
+		self:SyncSnipeShoppingList(true)
+		self:RefreshSnipeUI()
+	end
 	return true
 end
 
@@ -128,10 +134,14 @@ function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio)
 	local added = 0
 	for _, entry in ipairs(items) do
 		if not entry.watched then
-			if self:AddSnipeTarget(entry.itemID, entry.maxPrice, recipeID) then
+			if self:AddSnipeTarget(entry.itemID, entry.maxPrice, recipeID, true) then
 				added = added + 1
 			end
 		end
+	end
+	if added > 0 then
+		self:SyncSnipeShoppingList(true)
+		self:RefreshSnipeUI()
 	end
 	return added, #items
 end
@@ -145,10 +155,14 @@ function ns:ImportShoppingToSnipe(discountRatio)
 		local buyQty = (item.toBuy ~= nil) and item.toBuy or item.missing
 		if item.itemID and item.source == "ah" and (buyQty or 0) > 0 and item.unitPrice and item.unitPrice > 0 and not targets[item.itemID] then
 			local maxP = math.max(1, math.floor(item.unitPrice * ratio + 0.5))
-			if self:AddSnipeTarget(item.itemID, maxP, nil) then
+			if self:AddSnipeTarget(item.itemID, maxP, nil, true) then
 				added = added + 1
 			end
 		end
+	end
+	if added > 0 then
+		self:SyncSnipeShoppingList(true)
+		self:RefreshSnipeUI()
 	end
 	return added
 end
@@ -161,7 +175,27 @@ function ns:AdjustSnipeTarget(itemID, factor)
 	end
 	t.maxPrice = math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5))
 	self:EvaluateSnipeItem(itemID, true)
+	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
+end
+
+function ns:RepriceSnipeTargets(ratio)
+	local r = ratio or 0.80
+	local targets = EnsureSnipeDB()
+	local updated = 0
+	for itemID, t in pairs(targets) do
+		local cur = self:GetAuctionPrice(itemID)
+		if cur and cur > 0 then
+			t.maxPrice = math.max(1, math.floor(cur * r + 0.5))
+			t.ts = time and time() or 0
+			self:EvaluateSnipeItem(itemID, true)
+			updated = updated + 1
+		end
+	end
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+	self:Print(string.format(L["SNIPE_REPRICED_MSG"], updated))
+	return updated
 end
 
 function ns:RemoveSnipeTarget(itemID)
@@ -170,6 +204,8 @@ function ns:RemoveSnipeTarget(itemID)
 	if self.snipeHits then
 		self.snipeHits[itemID] = nil
 	end
+	lastChatHitAt[itemID] = nil
+	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 end
 
@@ -178,6 +214,8 @@ function ns:ClearSnipeTargets()
 		self.realmDB.snipeTargets = {}
 	end
 	self.snipeHits = {}
+	wipe(lastChatHitAt)
+	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 end
 
@@ -231,18 +269,36 @@ function ns:EvaluateSnipeItem(itemID, silent)
 	if bestPrice then
 		local prev = self.snipeHits[itemID]
 		local isNewHit = not prev or prev.bestPrice ~= bestPrice or prev.qty ~= cheapQty
+		local discountPct = (target.maxPrice > 0)
+			and math.max(0, math.floor((target.maxPrice - bestPrice) / target.maxPrice * 100 + 0.5))
+			or 0
 		self.snipeHits[itemID] = {
 			itemID = itemID,
 			bestPrice = bestPrice,
 			qty = cheapQty,
 			maxPrice = target.maxPrice,
+			discountPct = discountPct,
 			ts = stock.ts or now,
 		}
-		if not silent and isNewHit and IsAuctionHouseOpen() and PlaySound then
+		if not silent and isNewHit and IsAuctionHouseOpen() then
 			local tNow = GetTime and GetTime() or 0
-			if (tNow - lastSoundAt) > 5 then
+			if PlaySound and (tNow - lastSoundAt) > 5 then
 				lastSoundAt = tNow
 				pcall(PlaySound, 8959)
+			end
+			if (tNow - (lastChatHitAt[itemID] or 0)) > 5 then
+				lastChatHitAt[itemID] = tNow
+				local name, _, _, link, _, hex = self:GetItemDisplay(itemID)
+				local label = link or ((hex or "|cffffffff") .. name .. "|r")
+				local qtyStr = cheapQty and ("x" .. cheapQty) or L["SNIPE_LOT_ANY"]
+				self:Print(string.format(
+					L["SNIPE_HIT_CHAT"],
+					label,
+					qtyStr,
+					ns.FormatMoney(bestPrice),
+					ns.FormatMoney(target.maxPrice),
+					discountPct
+				))
 			end
 		end
 		return self.snipeHits[itemID]
@@ -258,12 +314,64 @@ function ns:GetSnipeHitList()
 		res[#res + 1] = hit
 	end
 	table.sort(res, function(a, b)
+		if (a.discountPct or 0) ~= (b.discountPct or 0) then
+			return (a.discountPct or 0) > (b.discountPct or 0)
+		end
 		return (a.itemID or 0) < (b.itemID or 0)
 	end)
 	return res
 end
 
-function ns:SearchSnipeTargetsOnAH(onlyItemID)
+function ns:SyncSnipeShoppingList(silent)
+	local api = Auctionator and Auctionator.API and Auctionator.API.v1
+	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then
+		return
+	end
+	local targets = self:GetSnipeTargetList()
+	local parts = {}
+	for _, t in ipairs(targets) do
+		parts[#parts + 1] = (t.itemID or 0) .. ":" .. (t.maxPrice or 0)
+	end
+	local sig = table.concat(parts, ",")
+	if silent and sig == lastSnipeListSig then
+		return
+	end
+
+	local listName = L["SNIPE_LIST_NAME"]
+	if #targets == 0 then
+		lastSnipeListSig = sig
+		if api.GetShoppingListItems and api.DeleteShoppingList then
+			local ok, existing = pcall(api.GetShoppingListItems, ADDON_NAME, listName)
+			if ok and existing then
+				pcall(api.DeleteShoppingList, ADDON_NAME, listName)
+			end
+		end
+		return
+	end
+
+	WithLoadedItems(targets, function()
+		local searches = {}
+		for _, t in ipairs(targets) do
+			local name, _, _, _, loaded = self:GetItemDisplay(t.itemID)
+			if loaded and name then
+				local ok, str = pcall(api.ConvertToSearchString, ADDON_NAME, {
+					searchString = name,
+					isExact = true,
+					maxPrice = t.maxPrice,
+				})
+				if ok and str then
+					searches[#searches + 1] = str
+				end
+			end
+		end
+		if #searches > 0 then
+			lastSnipeListSig = sig
+			pcall(api.CreateShoppingList, ADDON_NAME, listName, searches)
+		end
+	end)
+end
+
+function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 	if not IsAuctionHouseOpen() then
 		self:Print(L["AH_NOT_OPEN"])
 		return
@@ -274,11 +382,18 @@ function ns:SearchSnipeTargetsOnAH(onlyItemID)
 		return
 	end
 
+	self:SyncSnipeShoppingList(true)
+	local targets = EnsureSnipeDB()
 	local items = {}
-	if onlyItemID then
-		local t = EnsureSnipeDB()[onlyItemID]
-		if t then
-			items[1] = t
+	if targetOrFilter == "hits" then
+		for _, h in ipairs(self:GetSnipeHitList()) do
+			if targets[h.itemID] then
+				items[#items + 1] = targets[h.itemID]
+			end
+		end
+	elseif type(targetOrFilter) == "number" then
+		if targets[targetOrFilter] then
+			items[1] = targets[targetOrFilter]
 		end
 	else
 		items = self:GetSnipeTargetList()
@@ -300,8 +415,8 @@ function ns:SearchSnipeTargetsOnAH(onlyItemID)
 					searchString = name,
 					isExact = true,
 				}
-				-- Фильтруем по maxPrice только для лота с активным хитом; иначе запрашиваем все лоты для обновления цены рынка
-				if onlyItemID and self.snipeHits and self.snipeHits[t.itemID] and t.maxPrice and t.maxPrice > 0 then
+				-- Передаём maxPrice, чтобы Auctionator сразу скрывал лоты дороже таргета
+				if not ignorePrice and t.maxPrice and t.maxPrice > 0 then
 					q.maxPrice = t.maxPrice
 				end
 				advanced[#advanced + 1] = q
@@ -373,14 +488,21 @@ function ns:RefreshSnipeBar()
 		snipeBar.scanBtn:SetScript("OnClick", function()
 			ns:SearchSnipeTargetsOnAH()
 		end)
+		snipeBar.scanBtn:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_SCAN_BTN"], 1, 0.82, 0)
+			GameTooltip:AddLine(L["SNIPE_SCAN_TIP"], 0.85, 0.85, 0.85, true)
+			GameTooltip:Show()
+		end)
+		snipeBar.scanBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		snipeBar.openBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
 		snipeBar.openBtn:SetSize(110, 24)
 		snipeBar.openBtn:SetPoint("RIGHT", snipeBar.scanBtn, "LEFT", -6, 0)
 		snipeBar.openBtn:SetScript("OnClick", function()
 			local hits = ns:GetSnipeHitList()
-			if hits[1] then
-				ns:SearchSnipeTargetsOnAH(hits[1].itemID)
+			if #hits > 0 then
+				ns:SearchSnipeTargetsOnAH("hits")
 			end
 		end)
 		snipeBar.openBtn:SetScript("OnEnter", function(self)
@@ -394,11 +516,13 @@ function ns:RefreshSnipeBar()
 				local name, _, _, _, _, hex = ns:GetItemDisplay(h.itemID)
 				local qtyStr = h.qty and ("x" .. h.qty) or L["SNIPE_LOT_ANY"]
 				GameTooltip:AddDoubleLine(
-					string.format("%s%s|r %s", hex or "|cffffffff", name, qtyStr),
+					string.format("%s%s|r %s (-%d%%)", hex or "|cffffffff", name, qtyStr, h.discountPct or 0),
 					string.format("%s (<= %s)", ns.FormatMoney(h.bestPrice), ns.FormatMoney(h.maxPrice)),
 					1, 1, 1, 0.4, 1, 0.4
 				)
 			end
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(L["SNIPE_FIND_HIT_TIP"], 0.75, 0.9, 1, true)
 			GameTooltip:Show()
 		end)
 		snipeBar.openBtn:SetScript("OnLeave", GameTooltip_Hide)
@@ -417,9 +541,9 @@ function ns:RefreshSnipeBar()
 	end
 
 	snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
-	snipeBar.openBtn:SetText(L["SNIPE_FIND_HIT_BTN"])
 
 	local hits = self:GetSnipeHitList()
+	snipeBar.openBtn:SetText(string.format(L["SNIPE_FIND_HIT_BTN"], #hits))
 	if #hits > 0 then
 		local first = hits[1]
 		local name = self:GetItemDisplay(first.itemID)
@@ -430,7 +554,8 @@ function ns:RefreshSnipeBar()
 			#hits,
 			name,
 			qtyStr,
-			ns.FormatMoney(first.bestPrice)
+			ns.FormatMoney(first.bestPrice),
+			first.discountPct or 0
 		))
 		snipeBar.openBtn:Show()
 	else
@@ -486,13 +611,26 @@ snipeEventFrame:SetScript("OnEvent", function(_, event)
 	if event == "AUCTION_HOUSE_SHOW" then
 		HookAuctionFrameShow(AuctionHouseFrame)
 		HookAuctionFrameShow(AuctionFrame)
-		for _, t in ipairs(ns:GetSnipeTargetList()) do
+		local targets = ns:GetSnipeTargetList()
+		for _, t in ipairs(targets) do
 			ns:EvaluateSnipeItem(t.itemID, true)
 		end
+		ns:SyncSnipeShoppingList(true)
 		ns:RefreshSnipeBar()
 		if C_Timer and C_Timer.After then
 			C_Timer.After(0, function() ns:RefreshSnipeBar() end)
 			C_Timer.After(0.15, function() ns:RefreshSnipeBar() end)
+			if #targets > 0 and ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
+				local tNow = GetTime and GetTime() or 0
+				if (tNow - lastAutoScanAt) >= 30 then
+					lastAutoScanAt = tNow
+					C_Timer.After(0.45, function()
+						if IsAuctionHouseOpen() and ns.IsModuleEnabled and ns:IsModuleEnabled("profit") then
+							ns:SearchSnipeTargetsOnAH()
+						end
+					end)
+				end
+			end
 		end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		if snipeBar then

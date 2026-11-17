@@ -232,7 +232,7 @@ function ProfitMod:CreateView(parent)
 	f.sniperTop = sniperTop
 
 	local importShopBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	importShopBtn:SetSize(156, 20)
+	importShopBtn:SetSize(128, 20)
 	importShopBtn:SetPoint("LEFT", 0, 0)
 	importShopBtn:SetText(L["SNIPE_IMPORT_SHOP"])
 	importShopBtn:SetScript("OnClick", function()
@@ -242,7 +242,7 @@ function ProfitMod:CreateView(parent)
 	end)
 
 	local scanSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	scanSnipeBtn:SetSize(104, 20)
+	scanSnipeBtn:SetSize(92, 20)
 	scanSnipeBtn:SetPoint("LEFT", importShopBtn, "RIGHT", 4, 0)
 	scanSnipeBtn:SetText(L["SNIPE_SCAN_BTN"])
 	scanSnipeBtn:SetScript("OnClick", function()
@@ -250,16 +250,61 @@ function ProfitMod:CreateView(parent)
 			ns:SearchSnipeTargetsOnAH()
 		end
 	end)
+	scanSnipeBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["SNIPE_SCAN_BTN"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["SNIPE_SCAN_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:Show()
+	end)
+	scanSnipeBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+	local repriceBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
+	repriceBtn:SetSize(84, 20)
+	repriceBtn:SetPoint("LEFT", scanSnipeBtn, "RIGHT", 4, 0)
+	repriceBtn:SetText(L["SNIPE_REPRICE_BTN"])
+	repriceBtn:SetScript("OnClick", function()
+		if ns.RepriceSnipeTargets then
+			ns:RepriceSnipeTargets(0.80)
+		end
+	end)
+	repriceBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["SNIPE_REPRICE_BTN"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["SNIPE_REPRICE_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:Show()
+	end)
+	repriceBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	local clearSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	clearSnipeBtn:SetSize(82, 20)
-	clearSnipeBtn:SetPoint("LEFT", scanSnipeBtn, "RIGHT", 4, 0)
+	clearSnipeBtn:SetSize(72, 20)
+	clearSnipeBtn:SetPoint("LEFT", repriceBtn, "RIGHT", 4, 0)
 	clearSnipeBtn:SetText(L["QUEUE_CLEAR"])
 	clearSnipeBtn:SetScript("OnClick", function()
 		if ns.ClearSnipeTargets then
 			ns:ClearSnipeTargets()
 		end
 	end)
+
+	local cbAutoScan = CreateFrame("CheckButton", nil, sniperTop, "UICheckButtonTemplate")
+	cbAutoScan:SetSize(20, 20)
+	cbAutoScan:SetPoint("LEFT", clearSnipeBtn, "RIGHT", 6, 0)
+	cbAutoScan.text = cbAutoScan:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 1, 0)
+	cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
+	cbAutoScan:SetHitRectInsets(0, -105, 0, 0)
+	cbAutoScan:SetScript("OnClick", function(self)
+		if ns.db and ns.db.options then
+			ns.db.options.snipeAutoScan = self:GetChecked() and true or false
+		end
+	end)
+	cbAutoScan:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["SNIPE_AUTOSCAN_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:Show()
+	end)
+	cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
+	f.cbAutoScan = cbAutoScan
 
 	local logTop = CreateFrame("Frame", nil, f)
 	logTop:SetPoint("TOPLEFT", 8, -28)
@@ -588,11 +633,19 @@ function ProfitMod:RenderRows()
 				local hit = ns.snipeHits and ns.snipeHits[e.itemID]
 				local qtyStr = hit and (hit.qty and (hit.qty .. "x") or L["SNIPE_LOT_ANY"]) or nil
 				local statusTag = hit
-					and string.format(" |cff40ff40[%s @ %s]|r", qtyStr, ns.FormatMoney(hit.bestPrice))
+					and string.format(" |cff40ff40[%s @ %s (-%d%%)]|r", qtyStr, ns.FormatMoney(hit.bestPrice), hit.discountPct or 0)
 					or ""
 				row.title:SetText(string.format("%s%s|r%s", hex or "|cffffffff", name, statusTag))
 				local curP = ns:GetAuctionPrice(e.itemID)
 				local curStr = curP and ns.FormatMoney(curP) or "|cff888888-|r"
+				if curP and curP > 0 and e.maxPrice and e.maxPrice > 0 then
+					local diffPct = math.floor((curP - e.maxPrice) / e.maxPrice * 100 + 0.5)
+					if diffPct <= 0 then
+						curStr = curStr .. string.format(" |cff40ff40(%d%%)|r", diffPct)
+					else
+						curStr = curStr .. string.format(" |cffaaaaaa(+%d%%)|r", diffPct)
+					end
+				end
 				row.sub:SetText(string.format(L["SNIPE_ROW_SUB"], ns.FormatMoney(e.maxPrice), curStr))
 				row.profitText:SetText("")
 				row.marginText:SetText("")
@@ -676,11 +729,26 @@ function ProfitMod:OnRefresh()
 	end
 
 	if isSniper then
+		if f.cbAutoScan then
+			f.cbAutoScan:SetChecked(ns.db and ns.db.options and ns.db.options.snipeAutoScan == true)
+		end
 		for _, t in ipairs(targets) do
 			if ns.EvaluateSnipeItem then
 				ns:EvaluateSnipeItem(t.itemID, true)
 			end
 		end
+		-- Сработавшие хиты всегда наверху списка, отсортированные по величине скидки
+		table.sort(targets, function(a, b)
+			local ha = ns.snipeHits and ns.snipeHits[a.itemID]
+			local hb = ns.snipeHits and ns.snipeHits[b.itemID]
+			if (ha ~= nil) ~= (hb ~= nil) then
+				return ha ~= nil
+			end
+			if ha and hb and (ha.discountPct or 0) ~= (hb.discountPct or 0) then
+				return (ha.discountPct or 0) > (hb.discountPct or 0)
+			end
+			return (a.itemID or 0) < (b.itemID or 0)
+		end)
 		f.entries = targets
 		local maxOff = math.max(0, #f.entries - VISIBLE_ROWS)
 		if f.offset > maxOff then
