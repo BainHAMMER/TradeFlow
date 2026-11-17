@@ -427,19 +427,116 @@ function ns:GetRecipeEconomy(recipeID)
 	return craftCost, outputValue, netProfit, breakdown, outputSource, alts
 end
 
--- Подписка на обновления базы Auctionator + запись живых цен у вендоров и тренеров
+local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty)
+	if not (ns.realmDB and itemID and itemID > 0 and minPrice and minPrice > 0) then
+		return
+	end
+	ns.realmDB.ahStock = ns.realmDB.ahStock or {}
+	ns.realmDB.ahStock[itemID] = {
+		price = minPrice,
+		qty = qtyAtMin or totalQty or 0,
+		total = totalQty or qtyAtMin or 0,
+		ts = time and time() or 0,
+	}
+end
+
+function ns:GetAuctionSeenQty(itemID, expectedPrice)
+	local stock = self.realmDB and self.realmDB.ahStock and self.realmDB.ahStock[itemID]
+	if not stock then
+		return nil, nil, false
+	end
+	if expectedPrice and stock.price and math.abs(stock.price - expectedPrice) <= math.max(1, expectedPrice * 0.02) then
+		return stock.qty, stock.total, true
+	end
+	return stock.total, stock.total, false
+end
+
+-- Подписка на обновления базы Auctionator + запись живых цен у вендоров, тренеров и остатков AH
 local priceFrame = CreateFrame("Frame")
-for _, ev in ipairs({ "PLAYER_LOGIN", "MERCHANT_SHOW", "TRAINER_SHOW", "TRAINER_UPDATE" }) do
+for _, ev in ipairs({
+	"PLAYER_LOGIN",
+	"MERCHANT_SHOW",
+	"TRAINER_SHOW",
+	"TRAINER_UPDATE",
+	"COMMODITY_SEARCH_RESULTS_UPDATED",
+	"AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
+}) do
 	pcall(priceFrame.RegisterEvent, priceFrame, ev)
 end
 
-priceFrame:SetScript("OnEvent", function(_, event)
+priceFrame:SetScript("OnEvent", function(_, event, arg1)
 	if event == "PLAYER_LOGIN" then
 		local api = Auctionator and Auctionator.API and Auctionator.API.v1
 		if api and api.RegisterForDBUpdate then
 			pcall(api.RegisterForDBUpdate, ADDON_NAME, function()
 				ns:InvalidatePrices()
 			end)
+		end
+		if Auctionator and Auctionator.Database and Auctionator.Database.ProcessScan and hooksecurefunc and not ns.atrScanHooked then
+			ns.atrScanHooked = true
+			pcall(hooksecurefunc, Auctionator.Database, "ProcessScan", function(_, priceInfo)
+				if type(priceInfo) ~= "table" then
+					return
+				end
+				for dbKey, list in pairs(priceInfo) do
+					local itemID = tonumber(dbKey) or tonumber(tostring(dbKey):match("^(%d+)$"))
+					if itemID and type(list) == "table" and #list > 0 then
+						local minP, qtyMin, total = nil, 0, 0
+						for _, e in ipairs(list) do
+							local p = e and tonumber(e.price)
+							local q = e and tonumber(e.available) or 0
+							if p and p > 0 and q > 0 then
+								total = total + q
+								if not minP or p < minP then
+									minP = p
+									qtyMin = q
+								elseif p == minP then
+									qtyMin = qtyMin + q
+								end
+							end
+						end
+						if minP and total > 0 then
+							RecordAuctionStock(itemID, minP, qtyMin, total)
+						end
+					end
+				end
+			end)
+		end
+	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" and arg1 and C_AuctionHouse and C_AuctionHouse.GetNumCommoditySearchResults then
+		local itemID = tonumber(arg1)
+		local n = itemID and C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
+		if n and n > 0 and C_AuctionHouse.GetCommoditySearchResultInfo then
+			local minP, qtyMin, total = nil, 0, 0
+			for i = 1, math.min(n, 30) do
+				local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+				if info and info.unitPrice and info.unitPrice > 0 and (info.quantity or 0) > 0 then
+					total = total + info.quantity
+					if not minP or info.unitPrice < minP then
+						minP = info.unitPrice
+						qtyMin = info.quantity
+					elseif info.unitPrice == minP then
+						qtyMin = qtyMin + info.quantity
+					end
+				end
+			end
+			if minP and total > 0 then
+				RecordAuctionStock(itemID, minP, qtyMin, total)
+				ns:InvalidatePrices()
+			end
+		end
+	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" and C_AuctionHouse and C_AuctionHouse.GetBrowseResults then
+		local results = C_AuctionHouse.GetBrowseResults()
+		if type(results) == "table" then
+			local now = time and time() or 0
+			for _, r in ipairs(results) do
+				local itemID = r and r.itemKey and r.itemKey.itemID
+				if itemID and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
+					local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
+					if not prev or (now - (prev.ts or 0)) > 5 then
+						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity)
+					end
+				end
+			end
 		end
 	elseif event == "MERCHANT_SHOW" then
 		if GetMerchantNumItems and GetMerchantItemInfo and GetMerchantItemLink then

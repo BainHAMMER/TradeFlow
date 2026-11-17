@@ -41,6 +41,7 @@ ns.Locales.en = {
 	["SETTINGS_TITLE"] = "TradeFlow Settings",
 	["OPT_INCLUDE_DE"] = "Include disenchant value",
 	["OPT_TOOLTIP_EXTRA"] = "Show economy & disenchant in tooltip",
+	["OPT_AH_STOCK"] = "Account for AH seen stock",
 	["NET_PROFIT"] = "Net profit:",
 	["COST_PER_SKILLUP"] = "Cost per +1 skill:",
 	["SOURCE_VENDOR"] = "Vendor",
@@ -75,6 +76,9 @@ ns.Locales.en = {
 	-- Leveling Calculator
 	["PLANNER_TARGET"] = "Target:",
 	["PLANNER_INCLUDE_TRAINER"] = "Trainer recipes",
+	["PLANNER_PRIORITY_SPEED"] = "Priority: Speed",
+	["PLANNER_PRIORITY_PROFIT"] = "Priority: Profit",
+	["PLANNER_LOW_STOCK"] = "|cffff8800Low AH stock|r",
 	["PLANNER_DEDUCT_VENDOR"] = "Sell to vendor",
 	["PLANNER_RESET_SKIPS"] = "Restore (%d)",
 	["PLANNER_TOTAL_COST"] = "Cost: %s",

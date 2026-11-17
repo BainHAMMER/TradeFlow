@@ -41,6 +41,7 @@ ns.Locales.ru = {
 	["SETTINGS_TITLE"] = "Настройки TradeFlow",
 	["OPT_INCLUDE_DE"] = "Учитывать распыление",
 	["OPT_TOOLTIP_EXTRA"] = "Доп. экономика и распыл в тултипе",
+	["OPT_AH_STOCK"] = "Учитывать кол-во лотов на аукционе",
 	["NET_PROFIT"] = "Чистая прибыль:",
 	["COST_PER_SKILLUP"] = "Цена за +1 навык:",
 	["SOURCE_VENDOR"] = "Торговец",
@@ -75,6 +76,9 @@ ns.Locales.ru = {
 	-- Калькулятор прокачки
 	["PLANNER_TARGET"] = "Цель:",
 	["PLANNER_INCLUDE_TRAINER"] = "Рецепты у тренера",
+	["PLANNER_PRIORITY_SPEED"] = "Приоритет: Скорость",
+	["PLANNER_PRIORITY_PROFIT"] = "Приоритет: Прибыль",
+	["PLANNER_LOW_STOCK"] = "|cffff8800Мало на аукционе|r",
 	["PLANNER_DEDUCT_VENDOR"] = "Продажа торговцу",
 	["PLANNER_RESET_SKIPS"] = "Вернуть (%d)",
 	["PLANNER_TOTAL_COST"] = "Затраты: %s",

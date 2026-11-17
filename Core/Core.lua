@@ -958,6 +958,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			deductVendorInRoute = true,
 			includeDisenchant = true,
 			tooltipExtraInfo = false,
+			checkAuctionStock = false,
+			routePriority = "speed",
 			filterCraftable = false,
 			filterSkillUp = false,
 			showUnlearned = false,
@@ -970,6 +972,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		local rKey = ns:RealmKey()
 		ns.db.realms[rKey] = ns.db.realms[rKey] or { chars = {} }
 		ns.realmDB = ns.db.realms[rKey]
+		ns.realmDB.ahStock = ns.realmDB.ahStock or {}
 
 		local cKey = ns:CharKey()
 		ns.realmDB.chars[cKey] = ns.realmDB.chars[cKey] or {

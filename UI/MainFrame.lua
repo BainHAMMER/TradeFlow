@@ -1170,6 +1170,12 @@ function ns:RefreshDetailsView()
 				or (b.source == "craft" and ("|cff66ccff" .. L["SOURCE_CRAFT"] .. "|r"))
 				or (b.source == "ah" and L["SOURCE_AH"])
 				or L["SOURCE_UNKNOWN"]
+			if b.source == "ah" and self.db and self.db.options and self.db.options.checkAuctionStock and self.GetAuctionSeenQty then
+				local ahQty = self:GetAuctionSeenQty(b.itemID, b.unitPrice)
+				if ahQty then
+					srcTag = srcTag .. ": " .. ahQty
+				end
+			end
 
 			rRow.icon:SetTexture(iIcon)
 			rRow.nameText:SetText((iHex or "|cffffffff") .. iName .. "|r |cff999999(" .. srcTag .. ")|r")
@@ -1511,7 +1517,7 @@ end
 function ns:ToggleSettingsFrame()
 	if not self.settingsFrame then
 		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(310, 134)
+		sf:SetSize(310, 162)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1535,6 +1541,7 @@ function ns:ToggleSettingsFrame()
 			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
 			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
 			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
+			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      defaultTrue = false, invalidatePrices = false },
 		}
 
 		sf.checks = {}

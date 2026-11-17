@@ -87,10 +87,23 @@ function ns:CreateRouteView(parent)
 
 	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", 0, 115)
 
-	-- Кнопка сброса скрытых (исключённых) рецептов — во 2-й строке после галочки
-	local resetSkips = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
+	-- Переключатель приоритета маршрута: Скорость (оранжевые/гарантированные) <-> Прибыль (дешевле/выгоднее)
+	local priorityBtn = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
+	priorityBtn:SetSize(148, 20)
+	priorityBtn:SetPoint("TOPLEFT", 134, -26)
+	priorityBtn:SetScript("OnClick", function()
+		if ns.db and ns.db.options then
+			local cur = ns.db.options.routePriority or "speed"
+			ns.db.options.routePriority = (cur == "profit") and "speed" or "profit"
+		end
+		ns:RefreshRouteView()
+	end)
+	f.priorityBtn = priorityBtn
+
+	-- Кнопка сброса скрытых (исключённых) рецептов (размещена по центру внизу, чтобы не теснить переключатель режима)
+	local resetSkips = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 	resetSkips:SetSize(96, 20)
-	resetSkips:SetPoint("TOPLEFT", 142, -26)
+	resetSkips:SetPoint("BOTTOM", -4, 7)
 	resetSkips:SetScript("OnClick", function()
 		if ns.charDB then
 			ns.charDB.skippedRecipes = {}
@@ -238,7 +251,7 @@ function ns:CreateRouteView(parent)
 
 	-- Нижние кнопки массового добавления маршрута в очередь крафта
 	local queueUntilBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	queueUntilBtn:SetSize(185, 24)
+	queueUntilBtn:SetSize(165, 24)
 	queueUntilBtn:SetPoint("BOTTOMLEFT", 8, 5)
 	queueUntilBtn:SetText(L["PLANNER_QUEUE_UNTIL_TRAIN"])
 	queueUntilBtn:SetScript("OnClick", function()
@@ -252,7 +265,7 @@ function ns:CreateRouteView(parent)
 	end)
 
 	local queueAllBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	queueAllBtn:SetSize(195, 24)
+	queueAllBtn:SetSize(175, 24)
 	queueAllBtn:SetPoint("BOTTOMRIGHT", -8, 5)
 	queueAllBtn:SetText(L["PLANNER_QUEUE_ALL"])
 	queueAllBtn:SetScript("OnClick", function()
@@ -290,6 +303,9 @@ function ns:RenderRouteRows()
 				local subText = string.format(L["PLANNER_STEP_CRAFT"], st.fromSkill, st.toSkill, st.crafts or 1, st.avgChance or 100)
 				if st.learnFee and st.learnFee > 0 then
 					subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_LEARN"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
+				end
+				if st.lowStock then
+					subText = subText .. " | " .. L["PLANNER_LOW_STOCK"]
 				end
 				row.sub:SetText(subText)
 				row.cost:SetText(ns.FormatMoney(st.grossCost or st.stepCost))
@@ -334,6 +350,8 @@ function ns:RefreshRouteView()
 		f.targetBox:SetText(tostring(target))
 	end
 	f.cbTrainer:SetChecked(self.db.options.includeTrainerInRoute ~= false)
+	local prio = (self.db and self.db.options and self.db.options.routePriority) or "speed"
+	f.priorityBtn:SetText(prio == "profit" and L["PLANNER_PRIORITY_PROFIT"] or L["PLANNER_PRIORITY_SPEED"])
 
 	local skipCount = 0
 	for _ in pairs((self.charDB and self.charDB.skippedRecipes) or {}) do

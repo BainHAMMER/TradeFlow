@@ -161,6 +161,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	local opts = (self.db and self.db.options) or {}
 	local includeTrainer = opts.includeTrainerInRoute ~= false
 	local deductVendor = opts.deductVendorInRoute ~= false
+	local priority = opts.routePriority or "speed"
+	local checkAhStock = opts.checkAuctionStock == true
 	local skipped = (self.charDB and self.charDB.skippedRecipes) or {}
 
 	local candidates = {}
@@ -202,23 +204,40 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	local totalReturn = 0
 	local learnedInSim = {}
 	local simPool = {}
+	local ahSimPool = {}
 	local function GetSimHave(itemID)
 		if simPool[itemID] == nil then
 			simPool[itemID] = self:GetBagCount(itemID) + self:GetBankCount(itemID)
 		end
 		return simPool[itemID]
 	end
+	local function GetSimAhStock(itemID, expectedPrice)
+		if ahSimPool[itemID] == nil then
+			local qty = self.GetAuctionSeenQty and self:GetAuctionSeenQty(itemID, expectedPrice) or nil
+			ahSimPool[itemID] = qty or -1
+		end
+		return ahSimPool[itemID]
+	end
 	local function EvalBuyCost(cand, craftsCount)
 		local n = craftsCount or 1
 		local cost = 0
+		local ahPenalty = 0
 		for _, b in ipairs(cand.reagents) do
 			local have = GetSimHave(b.itemID)
 			local need = b.quantity * n
 			if have < need then
-				cost = cost + (need - have) * (b.unitPrice or 0)
+				local toBuy = need - have
+				local unitPrice = b.unitPrice or 0
+				cost = cost + toBuy * unitPrice
+				if checkAhStock and b.source == "ah" then
+					local stock = GetSimAhStock(b.itemID, unitPrice)
+					if stock >= 0 and toBuy > stock then
+						ahPenalty = ahPenalty + (toBuy - stock) * math.max(500, unitPrice * 1.5)
+					end
+				end
 			end
 		end
-		return cost
+		return cost, ahPenalty
 	end
 
 	-- Нормализуем потолок ранга к стандартным ступеням 75/150/225/300 (учитывая расовый бонус до +15)
@@ -257,12 +276,24 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				local chance, color = ns.CalculateSkillUpChance(s, c.th)
 				if chance > 0.05 then
 					local craftsPerPoint = 1 / chance
-					local buyCostForPoint = EvalBuyCost(c, craftsPerPoint)
+					local buyCostForPoint, ahPenalty = EvalBuyCost(c, craftsPerPoint)
 					local returnForPoint = (c.vendorDeduct or 0) * craftsPerPoint
-					-- Считаем чистую стоимость +1 навыка по полному ожидаемому числу крафтов (без обрезки по 0)
-					-- и штрафуем негарантированный рост (шанс < 100%), чтобы 100% оранжевые рецепты имели приоритет над рандомом
-					local rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 250 + 50) or 0
-					local expectedCost = buyCostForPoint - returnForPoint + rngPenalty
+					local netTotal = buyCostForPoint - returnForPoint
+					-- В режиме скорости жёстко приоритезируем высокий шанс (оранжевые/жёлтые);
+					-- в режиме прибыли минимизируем цену/максимизируем прибыль за крафт без раздувания 1/chance
+					local rngPenalty
+					if priority == "profit" then
+						rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 500 + 100) or 0
+					else
+						rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 20000 + 5000) or 0
+					end
+					local expectedCost
+					if netTotal <= 0 then
+						expectedCost = (netTotal / craftsPerPoint) + rngPenalty
+					else
+						expectedCost = netTotal + rngPenalty
+					end
+					expectedCost = expectedCost + (ahPenalty or 0)
 					-- Амортизируем цену обучения у тренера на ~10 очков, чтобы не учить рецепт ради 1 крафта,
 					-- и даём небольшой бонус рецепту предыдущего шага, чтобы не дробить маршрут без выгоды
 					if not c.learned and not learnedInSim[c.recipeID] and c.trainerFee > 0 then
@@ -295,12 +326,20 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			totalGrossCost = totalGrossCost + learnFee
 		end
 
-		-- Списываем израсходованные в симуляции материалы из виртуального инвентаря
+		-- Списываем израсходованные в симуляции материалы из виртуального инвентаря и остатков аукциона
 		local craftsPerPoint = 1 / bestChance
 		for _, b in ipairs(bestCand.reagents) do
 			local have = GetSimHave(b.itemID)
+			local need = b.quantity * craftsPerPoint
 			if have > 0 then
-				simPool[b.itemID] = math.max(0, have - b.quantity * craftsPerPoint)
+				simPool[b.itemID] = math.max(0, have - need)
+			end
+			if checkAhStock and b.source == "ah" and need > have then
+				local toBuy = need - have
+				local stock = GetSimAhStock(b.itemID, b.unitPrice)
+				if stock > 0 then
+					ahSimPool[b.itemID] = math.max(0, stock - toBuy)
+				end
 			end
 		end
 
@@ -334,6 +373,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 
 	-- Финализируем округление количества крафтов и стоимость каждого шага с учётом имеющихся материалов
 	local finalPool = {}
+	local finalAhPool = {}
 	for _, st in ipairs(steps) do
 		if st.kind == "craft" then
 			st.crafts = math.max(st.points, math.ceil(st.expectedCrafts - 0.05))
@@ -347,7 +387,20 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				local need = b.quantity * st.crafts
 				local take = math.min(have, need)
 				finalPool[b.itemID] = have - take
-				stepBuyCost = stepBuyCost + (need - take) * (b.unitPrice or 0)
+				local toBuy = need - take
+				stepBuyCost = stepBuyCost + toBuy * (b.unitPrice or 0)
+				if checkAhStock and b.source == "ah" and toBuy > 0 then
+					if finalAhPool[b.itemID] == nil then
+						local qty = self.GetAuctionSeenQty and self:GetAuctionSeenQty(b.itemID, b.unitPrice) or nil
+						finalAhPool[b.itemID] = qty or -1
+					end
+					if finalAhPool[b.itemID] >= 0 then
+						if toBuy > finalAhPool[b.itemID] then
+							st.lowStock = true
+						end
+						finalAhPool[b.itemID] = math.max(0, finalAhPool[b.itemID] - toBuy)
+					end
+				end
 			end
 			st.grossCost = stepBuyCost + (st.learnFee or 0)
 			st.returnVal = st.crafts * (st.unitReturn or 0)
