@@ -782,7 +782,13 @@ function ns:CreateDetailsView(parent)
 		d.reagentRows[i] = rRow
 	end
 
-	-- Блок экономики справа от реагентов (без внутренней рамки, в одном стиле с левой частью деталей)
+	-- Блок экономики справа от реагентов (без внутренней рамки, отделён вертикальным разделителем)
+	local econDivider = d:CreateTexture(nil, "ARTWORK")
+	econDivider:SetWidth(1)
+	econDivider:SetPoint("TOPRIGHT", d, "TOPRIGHT", -238, -66)
+	econDivider:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", -238, 56)
+	econDivider:SetColorTexture(0.55, 0.44, 0.22, 0.45)
+
 	local econBox = CreateFrame("Frame", nil, d)
 	econBox:SetSize(226, 122)
 	econBox:SetPoint("TOPRIGHT", -8, -66)
