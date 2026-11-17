@@ -337,29 +337,79 @@ function ProfitMod:CreateView(parent)
 		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
 		row.snipeBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-		row.snipeBtn:SetSize(48, 20)
+		row.snipeBtn:SetSize(52, 20)
 		row.snipeBtn:SetPoint("RIGHT", -2, 0)
 		row.snipeBtn:SetText(L["PROFIT_BTN_SNIPE"])
 		row.snipeBtn:SetScript("OnClick", function()
 			local e = row.entryData
 			if e and e.recipeID and ns.AddRecipeReagentsToSnipe then
-				local cnt = ns:AddRecipeReagentsToSnipe(e.recipeID, 0.80)
-				if cnt > 0 then
-					ns:Print(string.format(L["SNIPE_ADDED_MSG"], cnt))
+				local added, total = ns:AddRecipeReagentsToSnipe(e.recipeID, 0.80)
+				if added > 0 then
+					ns:Print(string.format(L["SNIPE_ADDED_MSG"], added))
+				elseif total > 0 then
+					ns:Print(L["SNIPE_ALREADY_MSG"])
+				else
+					ns:Print(L["SNIPE_NO_AH_MSG"])
 				end
 			end
 		end)
+		row.snipeBtn:SetScript("OnEnter", function(self)
+			local e = row.entryData
+			if not (e and e.recipeID) then
+				return
+			end
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:AddLine(L["SNIPE_BTN_TITLE"], 1, 0.82, 0)
+			GameTooltip:AddLine(L["SNIPE_BTN_DESC"], 0.85, 0.85, 0.85, true)
+			if ns.GetRecipeSnipePreview then
+				local items = ns:GetRecipeSnipePreview(e.recipeID, 0.80)
+				if #items == 0 then
+					GameTooltip:AddLine(L["SNIPE_NO_AH_MSG"], 1, 0.5, 0.3, true)
+				else
+					GameTooltip:AddLine(" ")
+					for _, it in ipairs(items) do
+						local iName, _, _, _, _, iHex = ns:GetItemDisplay(it.itemID)
+						local tag = it.watched and L["SNIPE_WATCHED_TAG"] or ""
+						GameTooltip:AddDoubleLine(
+							(iHex or "|cffffffff") .. iName .. "|r" .. tag,
+							string.format("<= %s (%s)", ns.FormatMoney(it.maxPrice), ns.FormatMoney(it.curPrice)),
+							1, 1, 1, 0.4, 1, 0.4
+						)
+					end
+				end
+			end
+			GameTooltip:Show()
+		end)
+		row.snipeBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		row.queueBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-		row.queueBtn:SetSize(60, 20)
+		row.queueBtn:SetSize(76, 20)
 		row.queueBtn:SetPoint("RIGHT", row.snipeBtn, "LEFT", -3, 0)
+		row.queueBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		row.queueBtn:SetText(L["PLANNER_BTN_QUEUE_STEP"])
-		row.queueBtn:SetScript("OnClick", function()
+		row.queueBtn:SetScript("OnClick", function(_, button)
 			local e = row.entryData
 			if e and not e.isAlt and ns.QueueAddRecipe then
-				ns:QueueAddRecipe(e.recipeID, 1)
+				local qty = 1
+				if button == "RightButton" then
+					qty = (IsShiftKeyDown and IsShiftKeyDown()) and 10 or 5
+				elseif IsShiftKeyDown and IsShiftKeyDown() then
+					qty = math.max(1, e.craftNow or 1)
+				end
+				ns:QueueAddRecipe(e.recipeID, qty)
 			end
 		end)
+		row.queueBtn:SetScript("OnEnter", function(self)
+			local e = row.entryData
+			if not e then
+				return
+			end
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:AddLine(L["PLANNER_BTN_QUEUE_STEP"], 1, 0.82, 0)
+			GameTooltip:AddLine(string.format(L["PROFIT_QUEUE_TOOLTIP"], math.max(1, e.craftNow or 1)), 0.9, 0.9, 0.9, true)
+			GameTooltip:Show()
+		end)
+		row.queueBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		row.delBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 		row.delBtn:SetSize(20, 20)

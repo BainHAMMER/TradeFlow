@@ -93,26 +93,47 @@ function ns:AddSnipeTarget(itemID, maxPrice, recipeID)
 	return true
 end
 
-function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio)
+function ns:GetRecipeSnipePreview(recipeID, discountRatio)
+	local items = {}
+	local newCount = 0
 	if not recipeID then
-		return 0
+		return items, 0, 0
 	end
 	local ratio = discountRatio or 0.80
 	local _, _, _, breakdown = self:GetRecipeEconomy(recipeID)
 	if not breakdown then
-		return 0
+		return items, 0, 0
 	end
 	local targets = EnsureSnipeDB()
-	local added = 0
 	for _, b in ipairs(breakdown) do
-		if b.itemID and b.source == "ah" and b.unitPrice and b.unitPrice > 0 and not targets[b.itemID] then
+		if b.itemID and b.source == "ah" and b.unitPrice and b.unitPrice > 0 then
 			local maxP = math.max(1, math.floor(b.unitPrice * ratio + 0.5))
-			if self:AddSnipeTarget(b.itemID, maxP, recipeID) then
+			local watched = targets[b.itemID] ~= nil
+			if not watched then
+				newCount = newCount + 1
+			end
+			items[#items + 1] = {
+				itemID = b.itemID,
+				curPrice = b.unitPrice,
+				maxPrice = targets[b.itemID] and targets[b.itemID].maxPrice or maxP,
+				watched = watched,
+			}
+		end
+	end
+	return items, newCount, #items
+end
+
+function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio)
+	local items = self:GetRecipeSnipePreview(recipeID, discountRatio)
+	local added = 0
+	for _, entry in ipairs(items) do
+		if not entry.watched then
+			if self:AddSnipeTarget(entry.itemID, entry.maxPrice, recipeID) then
 				added = added + 1
 			end
 		end
 	end
-	return added
+	return added, #items
 end
 
 function ns:ImportShoppingToSnipe(discountRatio)
