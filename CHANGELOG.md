@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.6
+- **Leveling Calculator Priority Toggle (`UI\RouteView.lua`, `Core\Planner.lua`):**
+  - Added a `Priority: Speed` / `Priority: Profit` toggle button in the leveling route calculator.
+  - **Speed** mode strongly prioritizes guaranteed (100% orange) and high-chance recipes over low-chance green steps; **Profit** mode minimizes net gold spent / maximizes per-craft profit without inflating profit by `1 / chance`.
+  - Fixed simulation math to evaluate owned bag/bank reagents against the full expected `craftsPerPoint` instead of per-single-craft cost.
+- **Optional AH Depth & Seen Stock Tracking (`Core\Prices.lua`, `Core\Planner.lua`, `UI\MainFrame.lua`):**
+  - Added a **Settings** toggle (`Account for AH seen stock`, off by default) that captures visible Auction House price ladders (up to 25 price tiers per item) from `Auctionator.Database:ProcessScan` and Blizzard AH search updates into `ahStock`.
+  - When enabled, the leveling route consumes cheaper AH lots step-by-step and escalates remaining reagent purchases to higher-priced tiers (or flags `Low AH stock` if total visible supply runs out), and Details shows seen AH stock counts alongside `Auction`.
+- **Bank Withdraw Bar Fix (`Core\Queue.lua`, `UI\FloatingBars.lua`):** Refreshed bank withdraw bar visibility on `BankFrame` `OnShow`, delayed `BANKFRAME_OPENED`, and `OnInventoryUpdated` so the withdraw prompt appears even before opening the profession window.
+
 ## v1.0.5
 - **Disenchanting System (`Core\Prices.lua`, `Core\Planner.lua`, `UI\MainFrame.lua`):**
   - Integrated exact Classic / Forever disenchant probability tables (armor & weapon brackets, min-max yields `x1-2`, dust/essence/shard breakdown) via PR #2 (`frostmx`).
