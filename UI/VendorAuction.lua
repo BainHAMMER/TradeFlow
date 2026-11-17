@@ -422,9 +422,26 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 			end)
 		end
 	elseif event == "BANKFRAME_OPENED" or event == "PLAYERBANKSLOTS_CHANGED" then
+		if BankFrame and not ns.bankOnShowHooked then
+			ns.bankOnShowHooked = true
+			BankFrame:HookScript("OnShow", function()
+				ns:RefreshBankBar()
+				if ns.RefreshQueueAndShoppingView then
+					ns:RefreshQueueAndShoppingView()
+				end
+			end)
+		end
 		ns:RefreshBankBar()
 		if ns.RefreshQueueAndShoppingView then
 			ns:RefreshQueueAndShoppingView()
+		end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.15, function()
+				ns:RefreshBankBar()
+				if ns.RefreshQueueAndShoppingView then
+					ns:RefreshQueueAndShoppingView()
+				end
+			end)
 		end
 	else
 		ns:OnMerchantShow()

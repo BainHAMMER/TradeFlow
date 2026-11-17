@@ -381,6 +381,9 @@ function ns:OnInventoryUpdated()
 	if self.RefreshVendorBar then
 		self:RefreshVendorBar()
 	end
+	if self.RefreshBankBar then
+		self:RefreshBankBar()
+	end
 	if self.RefreshVisibleUI then
 		self:RefreshVisibleUI()
 	end
