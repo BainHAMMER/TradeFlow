@@ -242,6 +242,9 @@ function ns:CreateMainFrame()
 	end
 
 	local f = CreateFrame("Frame", "TradeFlowMainFrame", UIParent, "BackdropTemplate")
+	-- Новый фрейм видим: прячем до установки OnHide, иначе f:Hide() ниже вызовет его,
+	-- и CloseTradeSkill закроет профессию, из которой окно TradeFlow сейчас открывается
+	f:Hide()
 	f:SetSize(WIN_W, WIN_H)
 	f:SetPoint("CENTER")
 	f:SetFrameStrata("MEDIUM")
