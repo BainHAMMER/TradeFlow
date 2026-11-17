@@ -415,7 +415,7 @@ function ns:CreateMainFrame()
 	f.leftPane = leftPane
 
 	local searchBox = CreateFrame("EditBox", nil, leftPane, "InputBoxTemplate")
-	searchBox:SetSize(172, 20)
+	searchBox:SetSize(250, 20)
 	searchBox:SetPoint("TOPLEFT", 14, -10)
 	searchBox:SetAutoFocus(false)
 	searchBox:SetText(self.searchQuery or "")
@@ -518,16 +518,6 @@ function ns:CreateMainFrame()
 	end)
 	f.sortBtn = sortBtn
 	UpdateSortButtonLabel()
-
-	local catBtn = ns.CreateTabButton(leftPane, 74, 22, L["GROUP_BY_CATEGORY"])
-	catBtn:SetPoint("RIGHT", sortBtn, "LEFT", -4, 0)
-	catBtn:SetScript("OnClick", function()
-		ns.db.options.groupByCategory = not (ns.db.options.groupByCategory == true)
-		ns.SetTabButtonActive(catBtn, ns.db.options.groupByCategory == true)
-		f.recipeOffset = 0
-		ns:RefreshRecipeList()
-	end)
-	f.catBtn = catBtn
 
 	local function CreateFilterCheck(label, optKey, xOff, maxHitWidth)
 		local cb = CreateFrame("CheckButton", nil, leftPane, "UICheckButtonTemplate")
@@ -1399,9 +1389,6 @@ function ns:RefreshRecipeList()
 	f.cbCraftable:SetChecked(self.db.options.filterCraftable == true)
 	f.cbSkillUp:SetChecked(self.db.options.filterSkillUp == true)
 	f.cbUnlearned:SetChecked(self.db.options.showUnlearned == true)
-	if f.catBtn then
-		ns.SetTabButtonActive(f.catBtn, self.db.options.groupByCategory == true)
-	end
 
 	local list = self:BuildFilteredRecipeList()
 	local maxOff = math.max(0, #list - RECIPE_VISIBLE_ROWS)
