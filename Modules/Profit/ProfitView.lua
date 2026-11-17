@@ -78,7 +78,8 @@ end
 local function FormatChannelTag(src, ageDays)
 	local key = (src == "vendor" and "PROFIT_SRC_VENDOR")
 		or (src == "disenchant" and "PROFIT_SRC_DE")
-		or "PROFIT_SRC_AH"
+		or (src == "ah" and "PROFIT_SRC_AH")
+		or "SOURCE_UNKNOWN"
 	local label = L[key] or src or ""
 	if src == "ah" and ageDays and ageDays > 0 then
 		return string.format("%s (%d%s)", label, ageDays, L["PROFIT_DAYS_SHORT"])
@@ -115,22 +116,29 @@ function ProfitMod:CreateView(parent)
 	local subProfitBtn = ns.CreateTabButton(subBar, 148, 22, L["PROFIT_SUBTAB_SCAN"])
 	subProfitBtn:SetPoint("TOPLEFT", 0, 0)
 
-	local subSniperBtn = ns.CreateTabButton(subBar, 132, 22, string.format(L["PROFIT_SUBTAB_SNIPER"], 0))
+	local subSniperBtn = ns.CreateTabButton(subBar, 124, 22, string.format(L["PROFIT_SUBTAB_SNIPER"], 0))
 	subSniperBtn:SetPoint("LEFT", subProfitBtn, "RIGHT", 6, 0)
+
+	local subLogBtn = ns.CreateTabButton(subBar, 112, 22, string.format(L["PROFIT_SUBTAB_LOG"], 0))
+	subLogBtn:SetPoint("LEFT", subSniperBtn, "RIGHT", 6, 0)
 
 	local function SelectSubMode(mode)
 		f.subMode = mode
 		f.offset = 0
 		ns.SetTabButtonActive(subProfitBtn, mode == "profit")
 		ns.SetTabButtonActive(subSniperBtn, mode == "sniper")
+		ns.SetTabButtonActive(subLogBtn, mode == "log")
 		ProfitMod:OnRefresh()
 	end
 	subProfitBtn:SetScript("OnClick", function() SelectSubMode("profit") end)
 	subSniperBtn:SetScript("OnClick", function() SelectSubMode("sniper") end)
+	subLogBtn:SetScript("OnClick", function() SelectSubMode("log") end)
 	f.subProfitBtn = subProfitBtn
 	f.subSniperBtn = subSniperBtn
+	f.subLogBtn = subLogBtn
 	ns.SetTabButtonActive(subProfitBtn, true)
 	ns.SetTabButtonActive(subSniperBtn, false)
+	ns.SetTabButtonActive(subLogBtn, false)
 
 	local top = CreateFrame("Frame", nil, f)
 	top:SetPoint("TOPLEFT", 8, -28)
@@ -251,6 +259,39 @@ function ProfitMod:CreateView(parent)
 			ns:ClearSnipeTargets()
 		end
 	end)
+
+	local logTop = CreateFrame("Frame", nil, f)
+	logTop:SetPoint("TOPLEFT", 8, -28)
+	logTop:SetPoint("TOPRIGHT", -8, -28)
+	logTop:SetHeight(24)
+	logTop:Hide()
+	f.logTop = logTop
+	f.logPeriod = "today"
+
+	local periodBtn = CreateFrame("Button", nil, logTop, "UIPanelButtonTemplate")
+	periodBtn:SetSize(124, 20)
+	periodBtn:SetPoint("LEFT", 0, 0)
+	periodBtn:SetScript("OnClick", function()
+		f.logPeriod = (f.logPeriod == "today") and "all" or "today"
+		f.offset = 0
+		ProfitMod:OnRefresh()
+	end)
+	f.periodBtn = periodBtn
+
+	local clearLogBtn = CreateFrame("Button", nil, logTop, "UIPanelButtonTemplate")
+	clearLogBtn:SetSize(82, 20)
+	clearLogBtn:SetPoint("LEFT", periodBtn, "RIGHT", 4, 0)
+	clearLogBtn:SetText(L["QUEUE_CLEAR"])
+	clearLogBtn:SetScript("OnClick", function()
+		if ns.ClearProfitLog then
+			ns:ClearProfitLog()
+		end
+	end)
+
+	local logSummaryText = logTop:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	logSummaryText:SetPoint("RIGHT", -2, 0)
+	logSummaryText:SetJustifyH("RIGHT")
+	f.logSummaryText = logSummaryText
 
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
 	listBox:SetPoint("TOPLEFT", 8, -78)
@@ -448,7 +489,8 @@ function ProfitMod:RenderRows()
 	end
 	local list = f.entries or {}
 	local isSniper = (f.subMode == "sniper")
-	f.emptyLabel:SetText(isSniper and L["SNIPE_EMPTY"] or L["PROFIT_EMPTY"])
+	local isLog = (f.subMode == "log")
+	f.emptyLabel:SetText(isSniper and L["SNIPE_EMPTY"] or (isLog and L["PROFIT_LOG_EMPTY"] or L["PROFIT_EMPTY"]))
 	f.emptyLabel:SetShown(#list == 0)
 
 	for i = 1, VISIBLE_ROWS do
@@ -457,7 +499,29 @@ function ProfitMod:RenderRows()
 		row.entryData = e
 		if e then
 			row:Show()
-			if isSniper then
+			if isLog then
+				local name, icon, _, _, _, hex = ns:GetRecipeDisplay(e.recipeID)
+				row.icon:SetTexture(icon)
+				local timeStr = (date and e.ts and e.ts > 0) and date("%H:%M", e.ts) or ""
+				local charTag = (e.charKey and e.charKey ~= "" and e.charKey ~= ns:CharKey())
+					and (" |cff66ccff[" .. e.charKey .. "]|r") or ""
+				row.title:SetText(string.format("%s%s|r |cffffd100x%d|r |cff888888%s|r%s", hex or "|cffffffff", name, e.count or 1, timeStr, charTag))
+				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], FormatChannelTag(e.source, nil), ns.FormatMoney(e.cost), ns.FormatMoney(e.revenue)))
+				row.profitText:SetText(ns.FormatMoney(e.profit or 0, true))
+				row.marginText:SetText("")
+				row.snipeBtn:Hide()
+				row.queueBtn:Hide()
+				row.minusBtn:Hide()
+				row.plusBtn:Hide()
+				row.findBtn:Hide()
+				row.delBtn:Hide()
+				row.title:ClearAllPoints()
+				row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
+				row.title:SetPoint("RIGHT", row.profitText, "LEFT", -8, 0)
+				row.sub:ClearAllPoints()
+				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
+				row.sub:SetPoint("RIGHT", row.profitText, "LEFT", -8, 0)
+			elseif isSniper then
 				local name, icon, _, _, _, hex = ns:GetItemDisplay(e.itemID)
 				row.icon:SetTexture(icon)
 				local hit = ns.snipeHits and ns.snipeHits[e.itemID]
@@ -519,13 +583,30 @@ function ProfitMod:OnRefresh()
 	end
 	local targets = ns.GetSnipeTargetList and ns:GetSnipeTargetList() or {}
 	f.subSniperBtn:SetText(string.format(L["PROFIT_SUBTAB_SNIPER"], #targets))
+	local fullLog = (ns.realmDB and ns.realmDB.profitLog) or {}
+	f.subLogBtn:SetText(string.format(L["PROFIT_SUBTAB_LOG"], #fullLog))
 
 	local isSniper = (f.subMode == "sniper")
-	f.profitTop:SetShown(not isSniper)
+	local isLog = (f.subMode == "log")
+	f.profitTop:SetShown(not isSniper and not isLog)
 	f.sniperTop:SetShown(isSniper)
+	f.logTop:SetShown(isLog)
 	f.listBox:ClearAllPoints()
-	f.listBox:SetPoint("TOPLEFT", 8, isSniper and -56 or -78)
+	f.listBox:SetPoint("TOPLEFT", 8, (isSniper or isLog) and -56 or -78)
 	f.listBox:SetPoint("BOTTOMRIGHT", -8, 6)
+
+	if isLog then
+		local summary = ns.GetProfitLogSummary and ns:GetProfitLogSummary(f.logPeriod or "today") or { entries = {}, craftsTotal = 0, profit = 0 }
+		f.periodBtn:SetText((f.logPeriod == "today") and L["PROFIT_LOG_TODAY"] or L["PROFIT_LOG_ALL"])
+		f.logSummaryText:SetText(string.format(L["PROFIT_LOG_SUMMARY"], ns.FormatMoney(summary.profit or 0, true), summary.craftsTotal or 0))
+		f.entries = summary.entries or {}
+		local maxOff = math.max(0, #f.entries - VISIBLE_ROWS)
+		if f.offset > maxOff then
+			f.offset = maxOff
+		end
+		self:RenderRows()
+		return
+	end
 
 	if isSniper then
 		for _, t in ipairs(targets) do
@@ -601,6 +682,12 @@ function ProfitMod:OnAuctionStockUpdated(itemID)
 	end
 	if ns.RefreshSnipeUI then
 		ns:RefreshSnipeUI()
+	end
+end
+
+function ProfitMod:OnCraftSucceeded(spellID)
+	if ns.RecordCraftProfit then
+		ns:RecordCraftProfit(spellID)
 	end
 end
 

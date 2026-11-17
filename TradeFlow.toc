@@ -36,6 +36,7 @@ UI\QueueView.lua
 UI\MainFrame.lua
 
 Modules\Profit\ProfitEngine.lua
+Modules\Profit\ProfitLog.lua
 Modules\Profit\Sniper.lua
 Modules\Profit\ProfitView.lua
 

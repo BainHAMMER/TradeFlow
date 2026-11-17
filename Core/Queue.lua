@@ -406,6 +406,9 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 		return
 	end
 	if event == "UNIT_SPELLCAST_SUCCEEDED" and spellID then
+		if ns.NotifyModules then
+			ns:NotifyModules("OnCraftSucceeded", spellID)
+		end
 		local queue = ns:GetQueue()
 		for i, step in ipairs(queue) do
 			if step.recipeID == spellID then
