@@ -1,8 +1,16 @@
 # Changelog
 
-## v1.0.5-dev
-- **Disenchanting Value (`Core\Prices.lua`, `Core\Core.lua`, `UI\MainFrame.lua`):** When Enchanting (`333`) is learned and "Sell to vendor" is unchecked, calculates expected disenchant value (`-5%` AH cut) for crafted Uncommon/Rare/Epic armor & weapons based on `iLevel` and Enchanting skill, uses it in revenue/profit if higher than AH/vendor, and displays the full disenchant breakdown in recipe tooltips.
-- **Window Strata (`UI\MainFrame.lua`):** Lowered `TradeFlowMainFrame` strata from `HIGH` to `MEDIUM` so `DressUpFrame` (`Ctrl+Click`) and other standard frames are no longer hidden behind `TradeFlow`.
+## v1.0.5
+- **Disenchanting System (`Core\Prices.lua`, `Core\Planner.lua`, `UI\MainFrame.lua`):**
+  - Integrated exact Classic / Forever disenchant probability tables (armor & weapon brackets, min-max yields `x1-2`, dust/essence/shard breakdown) via PR #2 (`frostmx`).
+  - Added a dedicated Disenchant materials block below reagents in the Details view showing item icons, quantity ranges, drop chances, live Auctionator prices, and net expected value (`-5%`).
+  - Economy calculation now evaluates all available output sources (`vendor`, `ah`, `disenchant`) side-by-side in the Details economy panel (highlighting the best source) and includes disenchant return in cost per `+1` skill and the leveling route calculator.
+  - Recipes where crafting pays for itself or profits now show green `+amount` in Cost per `+1` skill and sort above zero-cost recipes.
+- **Settings Frame (`UI\MainFrame.lua`):** Added a clean **Settings** popup with toggles for `Include disenchant value` (works even without Enchanting on the current character), `Show economy & disenchant in tooltip` (off by default), and `Categories`.
+- **UI & Polish:**
+  - Lowered `TradeFlowMainFrame` strata to `MEDIUM` so `DressUpFrame` (`Ctrl+Click`) and standard panels open on top cleanly.
+  - Replaced the oversized inner economy frame border with a subtle vertical gold divider and verified zero UI overlaps across 0–6 reagents and 3 disenchant rows.
+- **Reliability & Performance:** Invalidated `recipeEconomyCache` on async item data loads, prevented partial `liveRecipes` schematic skips during rescan, reset `settingsFrame` on language switch, and precomputed NPC distances before sorting in `Core\Sources.lua`.
 
 ## v1.0.4
 - **Recipe Sources (`Core\Sources.lua`, `Data\Recipes.lua`):** Added `RecipeScrolls` lookup for unlearned non-trainer recipes, fixing false `trainer: 0c` tags. Shows clickable scroll item link, Auctionator price, client `sourceText`, and optional `QuestieDB` / `AtlasLootClassic` vendor, quest, and drop info (sorted by closest NPC to player).
