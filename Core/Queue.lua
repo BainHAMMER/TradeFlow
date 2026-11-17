@@ -19,7 +19,7 @@ local function BuildSimulatedInventory(queue)
 	local sim = {}
 	setmetatable(sim, {
 		__index = function(t, itemID)
-			local v = ns:GetBagCount(itemID)
+			local v = ns:GetBagCount(itemID) + (ns.GetBankCount and ns:GetBankCount(itemID) or 0)
 			rawset(t, itemID, v)
 			return v
 		end,
