@@ -4,7 +4,7 @@ local L = ns.L
 -------------------------------------------------------------------------------
 -- Модуль «Заработок»: UI-вкладка профитных рецептов по всем профессиям
 -------------------------------------------------------------------------------
-local ROW_H = 30
+local ROW_H = 27
 local VISIBLE_ROWS = 8
 local CHANNELS = { "all", "safe", "ah" }
 local SORTS = { "profit", "margin", "craftable" }
@@ -103,12 +103,40 @@ function ProfitMod:CreateView(parent)
 	f:SetAllPoints()
 	f.offset = 0
 	f.entries = {}
+	f.subMode = "profit"
 	f:Hide()
 
+	-- Подвкладки модуля: «Профит» | «Снайпер (N)»
+	local subBar = CreateFrame("Frame", nil, f)
+	subBar:SetPoint("TOPLEFT", 8, -2)
+	subBar:SetPoint("TOPRIGHT", -8, -2)
+	subBar:SetHeight(24)
+
+	local subProfitBtn = ns.CreateTabButton(subBar, 148, 22, L["PROFIT_SUBTAB_SCAN"])
+	subProfitBtn:SetPoint("TOPLEFT", 0, 0)
+
+	local subSniperBtn = ns.CreateTabButton(subBar, 132, 22, string.format(L["PROFIT_SUBTAB_SNIPER"], 0))
+	subSniperBtn:SetPoint("LEFT", subProfitBtn, "RIGHT", 6, 0)
+
+	local function SelectSubMode(mode)
+		f.subMode = mode
+		f.offset = 0
+		ns.SetTabButtonActive(subProfitBtn, mode == "profit")
+		ns.SetTabButtonActive(subSniperBtn, mode == "sniper")
+		ProfitMod:OnRefresh()
+	end
+	subProfitBtn:SetScript("OnClick", function() SelectSubMode("profit") end)
+	subSniperBtn:SetScript("OnClick", function() SelectSubMode("sniper") end)
+	f.subProfitBtn = subProfitBtn
+	f.subSniperBtn = subSniperBtn
+	ns.SetTabButtonActive(subProfitBtn, true)
+	ns.SetTabButtonActive(subSniperBtn, false)
+
 	local top = CreateFrame("Frame", nil, f)
-	top:SetPoint("TOPLEFT", 8, -2)
-	top:SetPoint("TOPRIGHT", -8, -2)
-	top:SetHeight(50)
+	top:SetPoint("TOPLEFT", 8, -28)
+	top:SetPoint("TOPRIGHT", -8, -28)
+	top:SetHeight(48)
+	f.profitTop = top
 
 	local channelBtn = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
 	channelBtn:SetSize(160, 20)
@@ -183,13 +211,51 @@ function ProfitMod:CreateView(parent)
 	f.freshBtn = freshBtn
 
 	local countText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	countText:SetPoint("TOPRIGHT", -2, -29)
+	countText:SetPoint("TOPRIGHT", -2, -28)
 	countText:SetJustifyH("RIGHT")
 	f.countText = countText
 
+	local sniperTop = CreateFrame("Frame", nil, f)
+	sniperTop:SetPoint("TOPLEFT", 8, -28)
+	sniperTop:SetPoint("TOPRIGHT", -8, -28)
+	sniperTop:SetHeight(24)
+	sniperTop:Hide()
+	f.sniperTop = sniperTop
+
+	local importShopBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
+	importShopBtn:SetSize(156, 20)
+	importShopBtn:SetPoint("LEFT", 0, 0)
+	importShopBtn:SetText(L["SNIPE_IMPORT_SHOP"])
+	importShopBtn:SetScript("OnClick", function()
+		if ns.ImportShoppingToSnipe then
+			ns:ImportShoppingToSnipe(0.80)
+		end
+	end)
+
+	local scanSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
+	scanSnipeBtn:SetSize(104, 20)
+	scanSnipeBtn:SetPoint("LEFT", importShopBtn, "RIGHT", 4, 0)
+	scanSnipeBtn:SetText(L["SNIPE_SCAN_BTN"])
+	scanSnipeBtn:SetScript("OnClick", function()
+		if ns.SearchSnipeTargetsOnAH then
+			ns:SearchSnipeTargetsOnAH()
+		end
+	end)
+
+	local clearSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
+	clearSnipeBtn:SetSize(82, 20)
+	clearSnipeBtn:SetPoint("LEFT", scanSnipeBtn, "RIGHT", 4, 0)
+	clearSnipeBtn:SetText(L["QUEUE_CLEAR"])
+	clearSnipeBtn:SetScript("OnClick", function()
+		if ns.ClearSnipeTargets then
+			ns:ClearSnipeTargets()
+		end
+	end)
+
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
-	listBox:SetPoint("TOPLEFT", 8, -54)
+	listBox:SetPoint("TOPLEFT", 8, -78)
 	listBox:SetPoint("BOTTOMRIGHT", -8, 6)
+	f.listBox = listBox
 	listBox:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -228,14 +294,72 @@ function ProfitMod:CreateView(parent)
 		row.icon:SetPoint("LEFT", 4, 0)
 		row.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 
+		row.snipeBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		row.snipeBtn:SetSize(48, 20)
+		row.snipeBtn:SetPoint("RIGHT", -2, 0)
+		row.snipeBtn:SetText(L["PROFIT_BTN_SNIPE"])
+		row.snipeBtn:SetScript("OnClick", function()
+			local e = row.entryData
+			if e and e.recipeID and ns.AddRecipeReagentsToSnipe then
+				local cnt = ns:AddRecipeReagentsToSnipe(e.recipeID, 0.80)
+				if cnt > 0 then
+					ns:Print(string.format(L["SNIPE_ADDED_MSG"], cnt))
+				end
+			end
+		end)
+
 		row.queueBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-		row.queueBtn:SetSize(64, 20)
-		row.queueBtn:SetPoint("RIGHT", -2, 0)
+		row.queueBtn:SetSize(60, 20)
+		row.queueBtn:SetPoint("RIGHT", row.snipeBtn, "LEFT", -3, 0)
 		row.queueBtn:SetText(L["PLANNER_BTN_QUEUE_STEP"])
 		row.queueBtn:SetScript("OnClick", function()
 			local e = row.entryData
 			if e and not e.isAlt and ns.QueueAddRecipe then
 				ns:QueueAddRecipe(e.recipeID, 1)
+			end
+		end)
+
+		row.delBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		row.delBtn:SetSize(20, 20)
+		row.delBtn:SetPoint("RIGHT", -2, 0)
+		row.delBtn:SetText("X")
+		row.delBtn:SetScript("OnClick", function()
+			local e = row.entryData
+			if e and e.itemID and ns.RemoveSnipeTarget then
+				ns:RemoveSnipeTarget(e.itemID)
+			end
+		end)
+
+		row.findBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		row.findBtn:SetSize(44, 20)
+		row.findBtn:SetPoint("RIGHT", row.delBtn, "LEFT", -2, 0)
+		row.findBtn:SetText(L["SNIPE_FIND_SHORT"])
+		row.findBtn:SetScript("OnClick", function()
+			local e = row.entryData
+			if e and e.itemID and ns.SearchSnipeTargetsOnAH then
+				ns:SearchSnipeTargetsOnAH(e.itemID)
+			end
+		end)
+
+		row.plusBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		row.plusBtn:SetSize(32, 20)
+		row.plusBtn:SetPoint("RIGHT", row.findBtn, "LEFT", -2, 0)
+		row.plusBtn:SetText("+10%")
+		row.plusBtn:SetScript("OnClick", function()
+			local e = row.entryData
+			if e and e.itemID and ns.AdjustSnipeTarget then
+				ns:AdjustSnipeTarget(e.itemID, 1.10)
+			end
+		end)
+
+		row.minusBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		row.minusBtn:SetSize(32, 20)
+		row.minusBtn:SetPoint("RIGHT", row.plusBtn, "LEFT", -2, 0)
+		row.minusBtn:SetText("-10%")
+		row.minusBtn:SetScript("OnClick", function()
+			local e = row.entryData
+			if e and e.itemID and ns.AdjustSnipeTarget then
+				ns:AdjustSnipeTarget(e.itemID, 0.90)
 			end
 		end)
 
@@ -264,6 +388,10 @@ function ProfitMod:CreateView(parent)
 			if not e then
 				return
 			end
+			if f.subMode == "sniper" then
+				ns:HandleItemClick(e.itemID)
+				return
+			end
 			if ns:HandleItemClick(e.outItemID, e.recipeID) then
 				return
 			end
@@ -288,7 +416,14 @@ function ProfitMod:CreateView(parent)
 
 		row:SetScript("OnEnter", function(self)
 			local e = self.entryData
-			if e and e.recipeID and ns.ShowRecipeTooltip then
+			if not e then
+				return
+			end
+			if f.subMode == "sniper" and e.itemID and ns.ShowItemTooltip then
+				ns:ShowItemTooltip(self, e.itemID)
+				return
+			end
+			if e.recipeID and ns.ShowRecipeTooltip then
 				ns:ShowRecipeTooltip(self, e.recipeID)
 				if e.isAlt and e.ownerName and GameTooltip and GameTooltip.IsShown and GameTooltip:IsShown() then
 					GameTooltip:AddLine(" ")
@@ -312,6 +447,8 @@ function ProfitMod:RenderRows()
 		return
 	end
 	local list = f.entries or {}
+	local isSniper = (f.subMode == "sniper")
+	f.emptyLabel:SetText(isSniper and L["SNIPE_EMPTY"] or L["PROFIT_EMPTY"])
 	f.emptyLabel:SetShown(#list == 0)
 
 	for i = 1, VISIBLE_ROWS do
@@ -320,17 +457,55 @@ function ProfitMod:RenderRows()
 		row.entryData = e
 		if e then
 			row:Show()
-			row.icon:SetTexture(e.icon)
-			local profTag = string.format("|cff66ccff[%s]|r", GetShortProfName(e.skillLine))
-			local altTag = (e.isAlt and e.ownerName) and string.format(" |cffffa040[%s]|r", e.ownerName) or ""
-			local cntTag = (e.craftNow and e.craftNow > 0) and string.format(" |cff40ff40[%d]|r", e.craftNow) or ""
-			row.title:SetText(string.format("%s%s|r %s%s%s", e.qualityHex or "|cffffffff", e.name, profTag, cntTag, altTag))
+			if isSniper then
+				local name, icon, _, _, _, hex = ns:GetItemDisplay(e.itemID)
+				row.icon:SetTexture(icon)
+				local hit = ns.snipeHits and ns.snipeHits[e.itemID]
+				local statusTag = hit
+					and string.format(" |cff40ff40[%dx @ %s]|r", hit.qty or 0, ns.FormatMoney(hit.bestPrice))
+					or ""
+				row.title:SetText(string.format("%s%s|r%s", hex or "|cffffffff", name, statusTag))
+				local curP = ns:GetAuctionPrice(e.itemID)
+				local curStr = curP and ns.FormatMoney(curP) or "|cff888888-|r"
+				row.sub:SetText(string.format(L["SNIPE_ROW_SUB"], ns.FormatMoney(e.maxPrice), curStr))
+				row.profitText:SetText("")
+				row.marginText:SetText("")
+				row.snipeBtn:Hide()
+				row.queueBtn:Hide()
+				row.minusBtn:Show()
+				row.plusBtn:Show()
+				row.findBtn:Show()
+				row.delBtn:Show()
+				row.title:ClearAllPoints()
+				row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
+				row.title:SetPoint("RIGHT", row.minusBtn, "LEFT", -6, 0)
+				row.sub:ClearAllPoints()
+				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
+				row.sub:SetPoint("RIGHT", row.minusBtn, "LEFT", -6, 0)
+			else
+				row.icon:SetTexture(e.icon)
+				local profTag = string.format("|cff66ccff[%s]|r", GetShortProfName(e.skillLine))
+				local altTag = (e.isAlt and e.ownerName) and string.format(" |cffffa040[%s]|r", e.ownerName) or ""
+				local cntTag = (e.craftNow and e.craftNow > 0) and string.format(" |cff40ff40[%d]|r", e.craftNow) or ""
+				row.title:SetText(string.format("%s%s|r %s%s%s", e.qualityHex or "|cffffffff", e.name, profTag, cntTag, altTag))
 
-			local srcText = FormatChannelTag(e.source, e.ageDays)
-			row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], srcText, ns.FormatMoney(e.craftCost), ns.FormatMoney(e.outputValue)))
-			row.profitText:SetText("|cff40ff40+" .. ns.FormatMoney(e.profit) .. "|r")
-			row.marginText:SetText(string.format("|cffaaaaaa+%d%%|r", e.margin or 0))
-			row.queueBtn:SetShown(not e.isAlt)
+				local srcText = FormatChannelTag(e.source, e.ageDays)
+				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], srcText, ns.FormatMoney(e.craftCost), ns.FormatMoney(e.outputValue)))
+				row.profitText:SetText("|cff40ff40+" .. ns.FormatMoney(e.profit) .. "|r")
+				row.marginText:SetText(string.format("|cffaaaaaa+%d%%|r", e.margin or 0))
+				row.snipeBtn:Show()
+				row.queueBtn:SetShown(not e.isAlt)
+				row.minusBtn:Hide()
+				row.plusBtn:Hide()
+				row.findBtn:Hide()
+				row.delBtn:Hide()
+				row.title:ClearAllPoints()
+				row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
+				row.title:SetPoint("RIGHT", row.profitText, "LEFT", -8, 0)
+				row.sub:ClearAllPoints()
+				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
+				row.sub:SetPoint("RIGHT", row.marginText, "LEFT", -8, 0)
+			end
 		else
 			row:Hide()
 		end
@@ -342,6 +517,31 @@ function ProfitMod:OnRefresh()
 	if not f or not f:IsVisible() then
 		return
 	end
+	local targets = ns.GetSnipeTargetList and ns:GetSnipeTargetList() or {}
+	f.subSniperBtn:SetText(string.format(L["PROFIT_SUBTAB_SNIPER"], #targets))
+
+	local isSniper = (f.subMode == "sniper")
+	f.profitTop:SetShown(not isSniper)
+	f.sniperTop:SetShown(isSniper)
+	f.listBox:ClearAllPoints()
+	f.listBox:SetPoint("TOPLEFT", 8, isSniper and -56 or -78)
+	f.listBox:SetPoint("BOTTOMRIGHT", -8, 6)
+
+	if isSniper then
+		for _, t in ipairs(targets) do
+			if ns.EvaluateSnipeItem then
+				ns:EvaluateSnipeItem(t.itemID, true)
+			end
+		end
+		f.entries = targets
+		local maxOff = math.max(0, #f.entries - VISIBLE_ROWS)
+		if f.offset > maxOff then
+			f.offset = maxOff
+		end
+		self:RenderRows()
+		return
+	end
+
 	local filters = self:GetFilters()
 	local profs = GetAvailableProfFilters(filters.includeAlts)
 	local validProf = false
@@ -395,6 +595,15 @@ function ProfitMod:OnPricesInvalidated()
 	end
 end
 
+function ProfitMod:OnAuctionStockUpdated(itemID)
+	if ns.EvaluateSnipeItem then
+		ns:EvaluateSnipeItem(itemID, false)
+	end
+	if ns.RefreshSnipeUI then
+		ns:RefreshSnipeUI()
+	end
+end
+
 function ProfitMod:OnFrameDestroyed()
 	self.view = nil
 end
@@ -402,6 +611,9 @@ end
 function ProfitMod:OnDisable()
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
+	end
+	if ns.RefreshSnipeBar then
+		ns:RefreshSnipeBar()
 	end
 end
 
