@@ -181,6 +181,9 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше
 					local effectiveDeduct = ns.GetSkillUpReturn(alts, deductVendor)
 					local unitReturn = deductVendor and effectiveDeduct or math.max(outVal or 0, vendorSell)
+					-- Выручка при оптимизации: при отмеченной «Продажа торговцу» — только гарантированная (вендор/распыл),
+					-- иначе совпадает с отображаемым возвратом маршрута (unitReturn)
+					local scoreDeduct = deductVendor and effectiveDeduct or unitReturn
 					candidates[#candidates + 1] = {
 						recipeID = recipeID,
 						learned = learned or isBasic,
@@ -190,6 +193,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						craftCost = craftCost,
 						unitReturn = unitReturn,
 						vendorDeduct = effectiveDeduct,
+						scoreDeduct = scoreDeduct,
 						reagents = breakdown or {},
 						netCost = math.max(0, craftCost - effectiveDeduct),
 					}
@@ -202,27 +206,32 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	local totalCost = 0
 	local totalGrossCost = 0
 	local totalReturn = 0
-	local learnedInSim = {}
-	local simPool = {}
-	local ahBoughtPool = {}
-	local function GetSimHave(itemID)
-		if simPool[itemID] == nil then
-			simPool[itemID] = self:GetBagCount(itemID) + self:GetBankCount(itemID)
+	local baseHaveCache = {}
+	local function GetBaseHave(itemID)
+		if baseHaveCache[itemID] == nil then
+			baseHaveCache[itemID] = self:GetBagCount(itemID) + self:GetBankCount(itemID)
 		end
-		return simPool[itemID]
+		return baseHaveCache[itemID]
 	end
-	local function EvalBuyCost(cand, craftsCount)
+	local function CopyMap(src)
+		local dst = {}
+		for k, v in pairs(src) do
+			dst[k] = v
+		end
+		return dst
+	end
+	local function EvalStateBuyCost(state, cand, craftsCount)
 		local n = craftsCount or 1
 		local cost = 0
 		local ahPenalty = 0
 		for _, b in ipairs(cand.reagents) do
-			local have = GetSimHave(b.itemID)
+			local have = math.max(0, GetBaseHave(b.itemID) - (state.used[b.itemID] or 0))
 			local need = b.quantity * n
 			if have < need then
 				local toBuy = need - have
 				local unitPrice = b.unitPrice or 0
 				if checkAhStock and b.source == "ah" and self.EvalAuctionBuyCost then
-					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, ahBoughtPool[b.itemID] or 0, toBuy, unitPrice)
+					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, state.ahBought[b.itemID] or 0, toBuy, unitPrice)
 					cost = cost + lineCost
 					if shortage > 0 then
 						ahPenalty = ahPenalty + shortage * math.max(500, unitPrice * 0.5)
@@ -244,16 +253,22 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	elseif currentCap > 90 then
 		activeCap = 150
 	end
-	local prevRecipeID = nil
+
+	-- Лучевой поиск (Beam Search) по [startSkill .. goalSkill-1] с сохранением разнообразия по последнему рецепту,
+	-- чтобы стоимость обучения у тренера оценивалась по всему отрезку, а не жадно по 1 очку
+	local BEAM_WIDTH = ((goalSkill - startSkill) > 120) and 8 or 12
+	local beams = {
+		{ score = 0, used = {}, ahBought = {}, learned = {}, prevID = nil, tail = nil },
+	}
+	local milestonesAtSkill = {}
 
 	for s = startSkill, goalSkill - 1 do
-		-- Проверяем, не пора ли поднять потолок ранга профессии (при 50/75, 125/150, 200/225)
 		if s >= activeCap - 15 and activeCap < goalSkill then
 			local nextCap = activeCap + 75
 			if nextCap <= 300 then
 				local milestone = GetRankMilestone(skillLine, nextCap)
 				if milestone and s >= milestone.reqSkill then
-					steps[#steps + 1] = milestone
+					milestonesAtSkill[s] = milestone
 					totalCost = totalCost + (milestone.fee or 0)
 					totalGrossCost = totalGrossCost + (milestone.fee or 0)
 					activeCap = nextCap
@@ -261,104 +276,178 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			end
 		end
 
-		local bestCand = nil
-		local bestScore = math.huge
-		local bestChance = 0
-		local bestColor = "orange"
-
-		for _, c in ipairs(candidates) do
-			if s >= c.reqSkill and c.th and s < c.th[4] then
-				local chance, color = ns.CalculateSkillUpChance(s, c.th)
-				if chance > 0.05 then
-					local craftsPerPoint = 1 / chance
-					local buyCostForPoint, ahPenalty = EvalBuyCost(c, craftsPerPoint)
-					local returnForPoint = (c.vendorDeduct or 0) * craftsPerPoint
-					local netTotal = buyCostForPoint - returnForPoint
-					-- В режиме скорости жёстко приоритезируем высокий шанс (оранжевые/жёлтые);
-					-- в режиме прибыли минимизируем цену/максимизируем прибыль за крафт без раздувания 1/chance
-					local rngPenalty
-					if priority == "profit" then
-						rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 500 + 100) or 0
-					else
-						rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 20000 + 5000) or 0
-					end
-					local expectedCost
-					if netTotal <= 0 then
-						expectedCost = (netTotal / craftsPerPoint) + rngPenalty
-					else
-						expectedCost = netTotal + rngPenalty
-					end
-					expectedCost = expectedCost + (ahPenalty or 0)
-					-- Амортизируем цену обучения у тренера на ~10 очков, чтобы не учить рецепт ради 1 крафта,
-					-- и даём небольшой бонус рецепту предыдущего шага, чтобы не дробить маршрут без выгоды
-					if not c.learned and not learnedInSim[c.recipeID] and c.trainerFee > 0 then
-						local horizon = math.max(1, math.min(12, c.th[4] - s, goalSkill - s))
-						expectedCost = expectedCost + (c.trainerFee / horizon)
-					end
-					if c.recipeID == prevRecipeID then
-						expectedCost = expectedCost - math.max(50, math.abs(expectedCost) * 0.04)
-					end
-					if expectedCost < bestScore then
-						bestScore = expectedCost
-						bestCand = c
-						bestChance = chance
-						bestColor = color
+		local transitions = {}
+		for _, state in ipairs(beams) do
+			for _, c in ipairs(candidates) do
+				if s >= c.reqSkill and c.th and s < c.th[4] then
+					local chance, color = ns.CalculateSkillUpChance(s, c.th)
+					if chance > 0.05 then
+						local craftsPerPoint = 1 / chance
+						local buyCostForPoint, ahPenalty = EvalStateBuyCost(state, c, craftsPerPoint)
+						local returnForPoint = (c.scoreDeduct or 0) * craftsPerPoint
+						local netTotal = buyCostForPoint - returnForPoint
+						local rngPenalty
+						if priority == "profit" then
+							rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 500 + 100) or 0
+						else
+							rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 20000 + 5000) or 0
+						end
+						local stepScore
+						if netTotal <= 0 then
+							stepScore = (netTotal / craftsPerPoint) + rngPenalty
+						else
+							stepScore = netTotal + rngPenalty
+						end
+						local learnFee = (not c.learned and not state.learned[c.recipeID] and c.trainerFee > 0) and c.trainerFee or 0
+						stepScore = stepScore + (ahPenalty or 0) + learnFee
+						if c.recipeID == state.prevID then
+							stepScore = stepScore - 50
+						end
+						transitions[#transitions + 1] = {
+							score = state.score + stepScore,
+							-- При промежуточном отсеве на шаге s даём новому рецепту тренера шанс окупиться на следующих очках,
+							-- при этом итоговый выбор beams[1] и сравнение идут строго по точному score
+							pruneScore = state.score + stepScore - learnFee * 0.75,
+							state = state,
+							cand = c,
+							chance = chance,
+							color = color,
+							learnFee = learnFee,
+							craftsPerPoint = craftsPerPoint,
+						}
 					end
 				end
 			end
 		end
 
-		if not bestCand then
+		if #transitions == 0 then
 			break
 		end
 
-		-- Если рецепт нужно выучить у тренера на этом шаге
-		local learnFee = 0
-		if not bestCand.learned and not learnedInSim[bestCand.recipeID] and bestCand.trainerFee > 0 then
-			learnedInSim[bestCand.recipeID] = true
-			learnFee = bestCand.trainerFee
-			totalCost = totalCost + learnFee
-			totalGrossCost = totalGrossCost + learnFee
-		end
+		table.sort(transitions, function(a, b)
+			return a.pruneScore < b.pruneScore
+		end)
 
-		-- Списываем израсходованные в симуляции материалы из виртуального инвентаря и остатков аукциона
-		local craftsPerPoint = 1 / bestChance
-		for _, b in ipairs(bestCand.reagents) do
-			local have = GetSimHave(b.itemID)
-			local need = b.quantity * craftsPerPoint
-			if have > 0 then
-				simPool[b.itemID] = math.max(0, have - need)
-			end
-			if checkAhStock and b.source == "ah" and need > have then
-				ahBoughtPool[b.itemID] = (ahBoughtPool[b.itemID] or 0) + (need - have)
+		local chosen = {}
+		local pickedIdx = {}
+		local seenRecipe = {}
+		-- Сначала берём лучший вариант для каждого уникального следующего рецепта (чтобы дорогой рецепт у тренера дожил до окупаемости)
+		for idx, tr in ipairs(transitions) do
+			local rid = tr.cand.recipeID
+			if not seenRecipe[rid] then
+				seenRecipe[rid] = true
+				pickedIdx[idx] = true
+				chosen[#chosen + 1] = tr
+				if #chosen >= BEAM_WIDTH then
+					break
+				end
 			end
 		end
+		if #chosen < BEAM_WIDTH then
+			for idx, tr in ipairs(transitions) do
+				if not pickedIdx[idx] then
+					chosen[#chosen + 1] = tr
+					if #chosen >= BEAM_WIDTH then
+						break
+					end
+				end
+			end
+		end
 
-		prevRecipeID = bestCand.recipeID
-		local lastStep = steps[#steps]
-		if lastStep and lastStep.kind == "craft" and lastStep.recipeID == bestCand.recipeID then
-			lastStep.toSkill = s + 1
-			lastStep.expectedCrafts = lastStep.expectedCrafts + (1 / bestChance)
-			lastStep.chanceSum = lastStep.chanceSum + bestChance
-			lastStep.points = lastStep.points + 1
-		else
-			steps[#steps + 1] = {
-				kind = "craft",
-				recipeID = bestCand.recipeID,
-				fromSkill = s,
-				toSkill = s + 1,
-				points = 1,
-				expectedCrafts = 1 / bestChance,
-				chanceSum = bestChance,
-				colorKey = bestColor,
-				unitNetCost = bestCand.netCost,
-				unitCraftCost = bestCand.craftCost,
-				unitReturn = bestCand.unitReturn or 0,
-				vendorDeduct = bestCand.vendorDeduct or 0,
-				reagents = bestCand.reagents,
-				learnFee = learnFee,
-				reqSkill = bestCand.reqSkill,
+		local nextBeams = {}
+		for _, tr in ipairs(chosen) do
+			local prevState = tr.state
+			local cand = tr.cand
+			local newUsed = CopyMap(prevState.used)
+			local newAhBought = prevState.ahBought
+			local ahCopied = false
+			for _, b in ipairs(cand.reagents) do
+				local avail = math.max(0, GetBaseHave(b.itemID) - (newUsed[b.itemID] or 0))
+				local need = b.quantity * tr.craftsPerPoint
+				if avail > 0 then
+					local consume = math.min(avail, need)
+					newUsed[b.itemID] = (newUsed[b.itemID] or 0) + consume
+				end
+				if checkAhStock and b.source == "ah" and need > avail then
+					if not ahCopied then
+						newAhBought = CopyMap(prevState.ahBought)
+						ahCopied = true
+					end
+					newAhBought[b.itemID] = (newAhBought[b.itemID] or 0) + (need - avail)
+				end
+			end
+			local newLearned = prevState.learned
+			if tr.learnFee > 0 then
+				newLearned = CopyMap(prevState.learned)
+				newLearned[cand.recipeID] = true
+			end
+			nextBeams[#nextBeams + 1] = {
+				score = tr.score,
+				used = newUsed,
+				ahBought = newAhBought,
+				learned = newLearned,
+				prevID = cand.recipeID,
+				tail = {
+					parent = prevState.tail,
+					s = s,
+					cand = cand,
+					chance = tr.chance,
+					color = tr.color,
+					learnFee = tr.learnFee,
+				},
 			}
+		end
+		beams = nextBeams
+	end
+
+	-- Выбираем лучший финишный путь строго по точному итоговому score
+	table.sort(beams, function(a, b)
+		return a.score < b.score
+	end)
+	local bestState = beams[1]
+	if bestState and bestState.tail then
+		local path = {}
+		local node = bestState.tail
+		while node do
+			path[#path + 1] = node
+			node = node.parent
+		end
+		for i = #path, 1, -1 do
+			local p = path[i]
+			local ms = milestonesAtSkill[p.s]
+			if ms then
+				steps[#steps + 1] = ms
+			end
+			local c = p.cand
+			if p.learnFee > 0 then
+				totalCost = totalCost + p.learnFee
+				totalGrossCost = totalGrossCost + p.learnFee
+			end
+			local lastStep = steps[#steps]
+			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID then
+				lastStep.toSkill = p.s + 1
+				lastStep.expectedCrafts = lastStep.expectedCrafts + (1 / p.chance)
+				lastStep.chanceSum = lastStep.chanceSum + p.chance
+				lastStep.points = lastStep.points + 1
+			else
+				steps[#steps + 1] = {
+					kind = "craft",
+					recipeID = c.recipeID,
+					fromSkill = p.s,
+					toSkill = p.s + 1,
+					points = 1,
+					expectedCrafts = 1 / p.chance,
+					chanceSum = p.chance,
+					colorKey = p.color,
+					unitNetCost = c.netCost,
+					unitCraftCost = c.craftCost,
+					unitReturn = c.unitReturn or 0,
+					vendorDeduct = c.vendorDeduct or 0,
+					reagents = c.reagents,
+					learnFee = p.learnFee,
+					reqSkill = c.reqSkill,
+				}
+			end
 		end
 	end
 
