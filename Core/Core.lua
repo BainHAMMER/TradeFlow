@@ -666,10 +666,38 @@ end
 
 -- Скрывает нативный ProfessionsFrame (уводит за экран и делает прозрачным),
 -- сохраняя сессию C_TradeSkillUI открытой для крафта в WoW Forever
-function ns:SuppressBlizzardFrame()
+-- WoW Forever: внутри ProfessionsFrame есть общая вкладка профессий (BookPage). На неё окно
+-- открывается по K и кнопке микроменю, если последней была общая вкладка или профессия без
+-- окна создания (рыбалка). Профессия при этом не открыта и TradeFlow не показывается,
+-- поэтому окно Blizzard прятать нельзя. С TRADE_SKILL_SHOW Blizzard сама убирает BookPage,
+-- там передаётся force.
+local function IsBlizzardBookPageShown()
+	local page = ProfessionsFrame and ProfessionsFrame.BookPage
+	return page and page:IsShown() or false
+end
+
+function ns:SuppressBlizzardFrame(force)
 	if not ProfessionsFrame or self.bypassIntercept then
 		return
 	end
+	if not force and IsBlizzardBookPageShown() then
+		self:RestoreBlizzardFrame()
+		if not self.blizzFrameHooked then
+			self:HookBlizzardFrame()
+		end
+		return
+	end
+	if not self.blizzFrameHooked then
+		self:HookBlizzardFrame()
+	end
+	ProfessionsFrame:SetAlpha(0)
+	if not InCombatLockdown() then
+		ProfessionsFrame:ClearAllPoints()
+		ProfessionsFrame:SetPoint("BOTTOMRIGHT", UIParent, "TOPLEFT", -500, 500)
+	end
+end
+
+function ns:HookBlizzardFrame()
 	if not self.blizzFrameHooked then
 		self.blizzFrameHooked = true
 		ProfessionsFrame:HookScript("OnShow", function()
@@ -688,11 +716,6 @@ function ns:SuppressBlizzardFrame()
 				end
 			end
 		end)
-	end
-	ProfessionsFrame:SetAlpha(0)
-	if not InCombatLockdown() then
-		ProfessionsFrame:ClearAllPoints()
-		ProfessionsFrame:SetPoint("BOTTOMRIGHT", UIParent, "TOPLEFT", -500, 500)
 	end
 end
 
@@ -906,21 +929,19 @@ function ns:EnsureBlizzardReturnButton()
 end
 
 function ns:OpenBlizzardProfessions()
+	-- WoW Forever: C_TradeSkillUI.OpenTradeSkill защищена, вызов из аддона блокируется
+	-- (ADDON_ACTION_BLOCKED). Окно Blizzard можно только вернуть на экран, если профессия
+	-- уже открыта (TradeFlow открыт из профессии, а не через /tf или значок).
+	if not (ProfessionsFrame and ProfessionsFrame:IsShown()) then
+		self:Print(L["BLIZZARD_UI_NEED_PROF"])
+		return
+	end
 	self.bypassIntercept = true
 	if self.HideMainWindow then
 		self:HideMainWindow()
 	end
 	self:RestoreBlizzardFrame()
-	if ProfessionsFrame then
-		self:EnsureBlizzardReturnButton()
-		if not ProfessionsFrame:IsShown() then
-			if self.currentSkillLine and C_TradeSkillUI and C_TradeSkillUI.OpenTradeSkill then
-				pcall(C_TradeSkillUI.OpenTradeSkill, self.currentSkillLine)
-			elseif not InCombatLockdown() then
-				ShowUIPanel(ProfessionsFrame)
-			end
-		end
-	end
+	self:EnsureBlizzardReturnButton()
 end
 
 -------------------------------------------------------------------------------
@@ -1002,7 +1023,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		ns:ScanPlayerProfessions()
 		local ok = ns:ScanActiveTradeSkill()
 		if ok and not ns.bypassIntercept then
-			ns:SuppressBlizzardFrame()
+			ns:SuppressBlizzardFrame(true)
 			if C_Timer and C_Timer.After then
 				C_Timer.After(0, function()
 					if not ns.bypassIntercept and ProfessionsFrame and ProfessionsFrame:IsShown() then
