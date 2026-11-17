@@ -39,7 +39,14 @@ function ns:RecordCraftProfit(spellID)
 	if not rec or not rec.reagents or #rec.reagents == 0 or not rec.outputItemID or rec.outputItemID <= 0 then
 		return
 	end
-	local craftCost, outVal, _, _, outSource = self:GetRecipeEconomy(spellID)
+	local craftCost, outVal, _, _, outSource, alts = self:GetRecipeEconomy(spellID)
+	if ns.EvalRecipeChannel and craftCost ~= nil then
+		local evalOut, _, evalSrc = ns.EvalRecipeChannel(rec, craftCost, alts, "all")
+		if evalOut ~= nil then
+			outVal = evalOut
+			outSource = evalSrc
+		end
+	end
 	if craftCost == nil or outVal == nil then
 		return
 	end

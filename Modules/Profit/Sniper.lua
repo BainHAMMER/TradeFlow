@@ -279,8 +279,8 @@ function ns:SearchSnipeTargetsOnAH(onlyItemID)
 					searchString = name,
 					isExact = true,
 				}
-				-- При точечном переходе к найденному лоту фильтруем по maxPrice; при общем скане получаем актуальную цену рынка
-				if onlyItemID and t.maxPrice and t.maxPrice > 0 then
+				-- Фильтруем по maxPrice только для лота с активным хитом; иначе запрашиваем все лоты для обновления цены рынка
+				if onlyItemID and self.snipeHits and self.snipeHits[t.itemID] and t.maxPrice and t.maxPrice > 0 then
 					q.maxPrice = t.maxPrice
 				end
 				advanced[#advanced + 1] = q

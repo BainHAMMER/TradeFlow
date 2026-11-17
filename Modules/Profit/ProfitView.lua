@@ -455,7 +455,9 @@ function ProfitMod:CreateView(parent)
 					ns.selectedRecipeBySkill[sl] = e.recipeID
 					ns.preserveSelectedRecipe = true
 					ns.scrollToSelectedRecipe = true
-					ns:SwitchToProfession(sl)
+					ns:SwitchToProfession(sl, e.recipeID)
+					ns.scrollToSelectedRecipe = false
+					ns.preserveSelectedRecipe = false
 				elseif ns.SelectRecipeID then
 					ns:SelectRecipeID(e.recipeID)
 				end
@@ -726,6 +728,11 @@ end
 function ProfitMod:OnEnable()
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
+	end
+	if ns.GetSnipeTargetList and ns.EvaluateSnipeItem then
+		for _, t in ipairs(ns:GetSnipeTargetList()) do
+			ns:EvaluateSnipeItem(t.itemID, true)
+		end
 	end
 	if ns.RefreshSnipeBar then
 		ns:RefreshSnipeBar()

@@ -57,6 +57,7 @@ local function EvalRecipeForChannel(rec, craftCost, alts, channel)
 	end
 	return nil
 end
+ns.EvalRecipeChannel = EvalRecipeForChannel
 
 local function MergeAge(curMax, itemID)
 	if not itemID then
