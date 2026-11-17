@@ -1171,9 +1171,13 @@ function ns:RefreshDetailsView()
 				or (b.source == "ah" and L["SOURCE_AH"])
 				or L["SOURCE_UNKNOWN"]
 			if b.source == "ah" and self.db and self.db.options and self.db.options.checkAuctionStock and self.GetAuctionSeenQty then
-				local ahQty = self:GetAuctionSeenQty(b.itemID, b.unitPrice)
+				local ahQty, ahTotal = self:GetAuctionSeenQty(b.itemID, b.unitPrice)
 				if ahQty then
-					srcTag = srcTag .. ": " .. ahQty
+					if ahTotal and ahTotal > ahQty then
+						srcTag = srcTag .. ": " .. ahQty .. "/" .. ahTotal
+					else
+						srcTag = srcTag .. ": " .. ahQty
+					end
 				end
 			end
 

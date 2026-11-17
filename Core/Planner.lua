@@ -204,19 +204,12 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	local totalReturn = 0
 	local learnedInSim = {}
 	local simPool = {}
-	local ahSimPool = {}
+	local ahBoughtPool = {}
 	local function GetSimHave(itemID)
 		if simPool[itemID] == nil then
 			simPool[itemID] = self:GetBagCount(itemID) + self:GetBankCount(itemID)
 		end
 		return simPool[itemID]
-	end
-	local function GetSimAhStock(itemID, expectedPrice)
-		if ahSimPool[itemID] == nil then
-			local qty = self.GetAuctionSeenQty and self:GetAuctionSeenQty(itemID, expectedPrice) or nil
-			ahSimPool[itemID] = qty or -1
-		end
-		return ahSimPool[itemID]
 	end
 	local function EvalBuyCost(cand, craftsCount)
 		local n = craftsCount or 1
@@ -228,12 +221,14 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			if have < need then
 				local toBuy = need - have
 				local unitPrice = b.unitPrice or 0
-				cost = cost + toBuy * unitPrice
-				if checkAhStock and b.source == "ah" then
-					local stock = GetSimAhStock(b.itemID, unitPrice)
-					if stock >= 0 and toBuy > stock then
-						ahPenalty = ahPenalty + (toBuy - stock) * math.max(500, unitPrice * 1.5)
+				if checkAhStock and b.source == "ah" and self.EvalAuctionBuyCost then
+					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, ahBoughtPool[b.itemID] or 0, toBuy, unitPrice)
+					cost = cost + lineCost
+					if shortage > 0 then
+						ahPenalty = ahPenalty + shortage * math.max(500, unitPrice * 0.5)
 					end
+				else
+					cost = cost + toBuy * unitPrice
 				end
 			end
 		end
@@ -335,11 +330,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				simPool[b.itemID] = math.max(0, have - need)
 			end
 			if checkAhStock and b.source == "ah" and need > have then
-				local toBuy = need - have
-				local stock = GetSimAhStock(b.itemID, b.unitPrice)
-				if stock > 0 then
-					ahSimPool[b.itemID] = math.max(0, stock - toBuy)
-				end
+				ahBoughtPool[b.itemID] = (ahBoughtPool[b.itemID] or 0) + (need - have)
 			end
 		end
 
@@ -373,7 +364,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 
 	-- Финализируем округление количества крафтов и стоимость каждого шага с учётом имеющихся материалов
 	local finalPool = {}
-	local finalAhPool = {}
+	local finalAhBought = {}
 	for _, st in ipairs(steps) do
 		if st.kind == "craft" then
 			st.crafts = math.max(st.points, math.ceil(st.expectedCrafts - 0.05))
@@ -388,18 +379,15 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				local take = math.min(have, need)
 				finalPool[b.itemID] = have - take
 				local toBuy = need - take
-				stepBuyCost = stepBuyCost + toBuy * (b.unitPrice or 0)
-				if checkAhStock and b.source == "ah" and toBuy > 0 then
-					if finalAhPool[b.itemID] == nil then
-						local qty = self.GetAuctionSeenQty and self:GetAuctionSeenQty(b.itemID, b.unitPrice) or nil
-						finalAhPool[b.itemID] = qty or -1
+				if checkAhStock and b.source == "ah" and toBuy > 0 and self.EvalAuctionBuyCost then
+					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, finalAhBought[b.itemID] or 0, toBuy, b.unitPrice)
+					stepBuyCost = stepBuyCost + lineCost
+					finalAhBought[b.itemID] = (finalAhBought[b.itemID] or 0) + toBuy
+					if shortage > 0 then
+						st.lowStock = true
 					end
-					if finalAhPool[b.itemID] >= 0 then
-						if toBuy > finalAhPool[b.itemID] then
-							st.lowStock = true
-						end
-						finalAhPool[b.itemID] = math.max(0, finalAhPool[b.itemID] - toBuy)
-					end
+				else
+					stepBuyCost = stepBuyCost + toBuy * (b.unitPrice or 0)
 				end
 			end
 			st.grossCost = stepBuyCost + (st.learnFee or 0)

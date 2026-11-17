@@ -427,7 +427,31 @@ function ns:GetRecipeEconomy(recipeID)
 	return craftCost, outputValue, netProfit, breakdown, outputSource, alts
 end
 
-local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty)
+local MAX_AH_TIERS = 25
+
+local function BuildAuctionTiers(qtyByPrice)
+	local prices = {}
+	local total = 0
+	for p, q in pairs(qtyByPrice) do
+		if p > 0 and q > 0 then
+			prices[#prices + 1] = p
+			total = total + q
+		end
+	end
+	if #prices == 0 then
+		return nil, nil, 0, 0
+	end
+	table.sort(prices)
+	local tiers = {}
+	local count = math.min(#prices, MAX_AH_TIERS)
+	for i = 1, count do
+		local p = prices[i]
+		tiers[i] = { p, qtyByPrice[p] }
+	end
+	return tiers, tiers[1][1], tiers[1][2], total
+end
+
+local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty, tiers)
 	if not (ns.realmDB and itemID and itemID > 0 and minPrice and minPrice > 0) then
 		return
 	end
@@ -436,6 +460,7 @@ local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty)
 		price = minPrice,
 		qty = qtyAtMin or totalQty or 0,
 		total = totalQty or qtyAtMin or 0,
+		tiers = tiers,
 		ts = time and time() or 0,
 	}
 end
@@ -449,6 +474,50 @@ function ns:GetAuctionSeenQty(itemID, expectedPrice)
 		return stock.qty, stock.total, true
 	end
 	return stock.total, stock.total, false
+end
+
+-- Расчёт стоимости покупки needQty единиц с аукциона с учётом уже выкупленных в маршруте boughtOffset единиц и ценовых уровней
+function ns:EvalAuctionBuyCost(itemID, boughtOffset, needQty, fallbackPrice)
+	local n = needQty or 0
+	if n <= 0 then
+		return 0, 0
+	end
+	local fb = fallbackPrice or 0
+	local stock = self.realmDB and self.realmDB.ahStock and self.realmDB.ahStock[itemID]
+	if not stock then
+		return n * fb, 0
+	end
+	local tiers = (stock.tiers and #stock.tiers > 0 and stock.tiers)
+		or (stock.price and { { stock.price, stock.total or stock.qty or 0 } })
+	if not tiers or #tiers == 0 then
+		return n * fb, 0
+	end
+	local skip = boughtOffset or 0
+	local rem = n
+	local cost = 0
+	local lastPrice = fb
+	for _, tier in ipairs(tiers) do
+		local p, q = tier[1] or fb, tier[2] or 0
+		lastPrice = p
+		if q > 0 then
+			if skip >= q then
+				skip = skip - q
+			else
+				local avail = q - skip
+				skip = 0
+				local take = math.min(rem, avail)
+				cost = cost + take * p
+				rem = rem - take
+				if rem <= 0 then
+					break
+				end
+			end
+		end
+	end
+	if rem > 0 then
+		cost = cost + rem * math.max(fb, lastPrice)
+	end
+	return cost, rem
 end
 
 -- Подписка на обновления базы Auctionator + запись живых цен у вендоров, тренеров и остатков AH
@@ -481,22 +550,17 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				for dbKey, list in pairs(priceInfo) do
 					local itemID = tonumber(dbKey) or tonumber(tostring(dbKey):match("^(%d+)$"))
 					if itemID and type(list) == "table" and #list > 0 then
-						local minP, qtyMin, total = nil, 0, 0
+						local qtyByPrice = {}
 						for _, e in ipairs(list) do
 							local p = e and tonumber(e.price)
 							local q = e and tonumber(e.available) or 0
 							if p and p > 0 and q > 0 then
-								total = total + q
-								if not minP or p < minP then
-									minP = p
-									qtyMin = q
-								elseif p == minP then
-									qtyMin = qtyMin + q
-								end
+								qtyByPrice[p] = (qtyByPrice[p] or 0) + q
 							end
 						end
+						local tiers, minP, qtyMin, total = BuildAuctionTiers(qtyByPrice)
 						if minP and total > 0 then
-							RecordAuctionStock(itemID, minP, qtyMin, total)
+							RecordAuctionStock(itemID, minP, qtyMin, total, tiers)
 						end
 					end
 				end
@@ -506,21 +570,16 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 		local itemID = tonumber(arg1)
 		local n = itemID and C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
 		if n and n > 0 and C_AuctionHouse.GetCommoditySearchResultInfo then
-			local minP, qtyMin, total = nil, 0, 0
-			for i = 1, math.min(n, 30) do
+			local qtyByPrice = {}
+			for i = 1, math.min(n, 50) do
 				local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
 				if info and info.unitPrice and info.unitPrice > 0 and (info.quantity or 0) > 0 then
-					total = total + info.quantity
-					if not minP or info.unitPrice < minP then
-						minP = info.unitPrice
-						qtyMin = info.quantity
-					elseif info.unitPrice == minP then
-						qtyMin = qtyMin + info.quantity
-					end
+					qtyByPrice[info.unitPrice] = (qtyByPrice[info.unitPrice] or 0) + info.quantity
 				end
 			end
+			local tiers, minP, qtyMin, total = BuildAuctionTiers(qtyByPrice)
 			if minP and total > 0 then
-				RecordAuctionStock(itemID, minP, qtyMin, total)
+				RecordAuctionStock(itemID, minP, qtyMin, total, tiers)
 				ns:InvalidatePrices()
 			end
 		end
@@ -532,7 +591,8 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				local itemID = r and r.itemKey and r.itemKey.itemID
 				if itemID and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
 					local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
-					if not prev or (now - (prev.ts or 0)) > 5 then
+					local keepTiers = prev and prev.tiers and #prev.tiers > 1 and (now - (prev.ts or 0)) <= 60
+					if not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then
 						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity)
 					end
 				end
