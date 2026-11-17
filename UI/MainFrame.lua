@@ -782,11 +782,10 @@ function ns:CreateDetailsView(parent)
 		d.reagentRows[i] = rRow
 	end
 
-	-- Блок экономики справа от реагентов
-	local econBox = CreateFrame("Frame", nil, d, "BackdropTemplate")
+	-- Блок экономики справа от реагентов (без внутренней рамки, в одном стиле с левой частью деталей)
+	local econBox = CreateFrame("Frame", nil, d)
 	econBox:SetSize(226, 122)
 	econBox:SetPoint("TOPRIGHT", -8, -66)
-	StylePanel(econBox, 0.05, 0.05, 0.05, 0.85)
 
 	-- Строки «подпись — сумма» в одну линию: себестоимость, выручка по каждому источнику (тот, по
 	-- которому считается прибыль, ярко, остальные серым), чистая прибыль, цена за +1. Заполняет UpdateEconBox.
