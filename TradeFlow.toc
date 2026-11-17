@@ -23,6 +23,7 @@ Data\Trainer.lua
 Data\Recipes.lua
 
 Core\Core.lua
+Core\Modules.lua
 Core\Inventory.lua
 Core\Prices.lua
 Core\Planner.lua
@@ -33,4 +34,7 @@ UI\VendorAuction.lua
 UI\RouteView.lua
 UI\QueueView.lua
 UI\MainFrame.lua
+
+Modules\Profit\ProfitEngine.lua
+Modules\Profit\ProfitView.lua
 

@@ -171,10 +171,17 @@ function ns:GetItemDisenchantInfo(itemID)
 	return expectedNet, yields, reqSkill
 end
 
+function ns:GetPriceRevision()
+	return priceRev
+end
+
 function ns:InvalidatePrices()
 	priceRev = priceRev + 1
 	wipe(reagentPriceCache)
 	wipe(recipeEconomyCache)
+	if self.NotifyModules then
+		self:NotifyModules("OnPricesInvalidated")
+	end
 	if self.RefreshVisibleUI then
 		self:RefreshVisibleUI()
 	end
@@ -463,6 +470,9 @@ local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty, tiers)
 		tiers = tiers,
 		ts = time and time() or 0,
 	}
+	if ns.NotifyModules then
+		ns:NotifyModules("OnAuctionStockUpdated", itemID)
+	end
 end
 
 function ns:GetAuctionSeenQty(itemID, expectedPrice)

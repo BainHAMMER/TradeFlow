@@ -644,11 +644,8 @@ function ns:CreateMainFrame()
 	StylePanel(topRight, 0.07, 0.065, 0.055, 0.95)
 	f.topRight = topRight
 
-	local tabDetailsBtn = ns.CreateTabButton(topRight, 175, 22, L["TAB_DETAILS"])
-	tabDetailsBtn:SetPoint("TOPLEFT", 8, -6)
-
-	local tabPlannerBtn = ns.CreateTabButton(topRight, 185, 22, L["TAB_PLANNER"])
-	tabPlannerBtn:SetPoint("LEFT", tabDetailsBtn, "RIGHT", 6, 0)
+	local tabDetailsBtn = ns.CreateTabButton(topRight, 146, 22, L["TAB_DETAILS"])
+	local tabPlannerBtn = ns.CreateTabButton(topRight, 170, 22, L["TAB_PLANNER"])
 
 	local topContent = CreateFrame("Frame", nil, topRight)
 	topContent:SetPoint("TOPLEFT", 4, -30)
@@ -657,24 +654,67 @@ function ns:CreateMainFrame()
 	local detailsView = self:CreateDetailsView(topContent)
 	local routeView = self:CreateRouteView(topContent)
 
+	local topTabs = {
+		{ key = "details", btn = tabDetailsBtn, view = detailsView, width = 146 },
+		{ key = "planner", btn = tabPlannerBtn, view = routeView, width = 170 },
+	}
+	local modTabsByKey = {}
+	for _, mod in ipairs((self.GetTopTabModules and self:GetTopTabModules()) or {}) do
+		local w = mod.tabWidth or 148
+		local btn = ns.CreateTabButton(topRight, w, 22, L[mod.tabTitleKey] or mod.id)
+		local mView = mod:CreateView(topContent)
+		local entry = { key = mod.id, btn = btn, view = mView, width = w, mod = mod }
+		topTabs[#topTabs + 1] = entry
+		modTabsByKey[mod.id] = entry
+	end
+
 	f.topTab = "details"
 	local function SelectTopTab(tabKey)
+		if modTabsByKey[tabKey] and not ns:IsModuleEnabled(tabKey) then
+			tabKey = "details"
+		end
 		f.topTab = tabKey
-		ns.SetTabButtonActive(tabDetailsBtn, tabKey == "details")
-		ns.SetTabButtonActive(tabPlannerBtn, tabKey == "planner")
-		detailsView:SetShown(tabKey == "details")
-		routeView:SetShown(tabKey == "planner")
+		for _, t in ipairs(topTabs) do
+			local active = (t.key == tabKey)
+			ns.SetTabButtonActive(t.btn, active)
+			if t.view then
+				t.view:SetShown(active)
+			end
+		end
 		if tabKey == "details" then
 			ns:RefreshDetailsView()
-		else
+		elseif tabKey == "planner" then
 			ns:RefreshRouteView()
+		elseif modTabsByKey[tabKey] and modTabsByKey[tabKey].mod.OnRefresh then
+			modTabsByKey[tabKey].mod:OnRefresh()
 		end
 	end
-	ns.SetTabButtonActive(tabDetailsBtn, true)
-	ns.SetTabButtonActive(tabPlannerBtn, false)
+
+	local function RefreshTopTabs()
+		local prevBtn = nil
+		for _, t in ipairs(topTabs) do
+			local shown = (not t.mod) or ns:IsModuleEnabled(t.mod.id)
+			t.btn:SetShown(shown)
+			if shown then
+				t.btn:ClearAllPoints()
+				if not prevBtn then
+					t.btn:SetPoint("TOPLEFT", 8, -6)
+				else
+					t.btn:SetPoint("LEFT", prevBtn, "RIGHT", 6, 0)
+				end
+				prevBtn = t.btn
+			end
+		end
+		SelectTopTab(f.topTab or "details")
+	end
+
+	for _, t in ipairs(topTabs) do
+		local key = t.key
+		t.btn:SetScript("OnClick", function() SelectTopTab(key) end)
+	end
 	f.SelectTopTab = SelectTopTab
-	tabDetailsBtn:SetScript("OnClick", function() SelectTopTab("details") end)
-	tabPlannerBtn:SetScript("OnClick", function() SelectTopTab("planner") end)
+	f.RefreshTopTabs = RefreshTopTabs
+	RefreshTopTabs()
 
 	---------------------------------------------------------------------------
 	-- Правая нижняя панель: «Очередь крафта» | «Список покупок»
@@ -1433,6 +1473,11 @@ function ns:RefreshRecipeList()
 	self:RefreshDetailsView()
 	if f.topTab == "planner" then
 		self:RefreshRouteView()
+	elseif f.topTab ~= "details" and self.modules and self.modules.byId[f.topTab] then
+		local mod = self.modules.byId[f.topTab]
+		if self:IsModuleEnabled(f.topTab) and mod.OnRefresh then
+			mod:OnRefresh()
+		end
 	end
 end
 
@@ -1494,6 +1539,9 @@ function ns:RefreshMainWindow()
 	if f.cbVendor then
 		f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
 	end
+	if f.RefreshTopTabs then
+		f.RefreshTopTabs()
+	end
 
 	self:RefreshRecipeList()
 	self:RefreshQueueAndShoppingView()
@@ -1522,8 +1570,18 @@ end
 
 function ns:ToggleSettingsFrame()
 	if not self.settingsFrame then
+		local opts = {
+			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
+			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
+			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
+			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      defaultTrue = false, invalidatePrices = false },
+		}
+		for _, mSpec in ipairs((self.GetModuleSettingsSpecs and self:GetModuleSettingsSpecs()) or {}) do
+			opts[#opts + 1] = mSpec
+		end
+
 		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(310, 162)
+		sf:SetSize(310, 50 + #opts * 28)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1543,13 +1601,6 @@ function ns:ToggleSettingsFrame()
 		close:SetPoint("TOPRIGHT", -2, -2)
 		close:SetScript("OnClick", function() sf:Hide() end)
 
-		local opts = {
-			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
-			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
-			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
-			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      defaultTrue = false, invalidatePrices = false },
-		}
-
 		sf.checks = {}
 		for i, o in ipairs(opts) do
 			local cb = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
@@ -1560,11 +1611,16 @@ function ns:ToggleSettingsFrame()
 			cb.text:SetText(o.label)
 			cb:SetHitRectInsets(0, -240, 0, 0)
 			cb:SetScript("OnClick", function(self)
-				ns.db.options[o.key] = self:GetChecked() and true or false
-				if o.invalidatePrices and ns.InvalidatePrices then
-					ns:InvalidatePrices()
-				elseif ns.RefreshMainWindow then
-					ns:RefreshMainWindow()
+				local checked = self:GetChecked() and true or false
+				if o.moduleId and ns.SetModuleEnabled then
+					ns:SetModuleEnabled(o.moduleId, checked)
+				else
+					ns.db.options[o.key] = checked
+					if o.invalidatePrices and ns.InvalidatePrices then
+						ns:InvalidatePrices()
+					elseif ns.RefreshMainWindow then
+						ns:RefreshMainWindow()
+					end
 				end
 			end)
 			sf.checks[i] = { cb = cb, opt = o }
@@ -1629,12 +1685,15 @@ function ns:RebuildMainFrame()
 		self.detailsView = nil
 		self.routeView = nil
 		self.queueView = nil
+		if self.NotifyModules then
+			self:NotifyModules("OnFrameDestroyed")
+		end
 	end
 	if wasShown then
 		local f = self:CreateMainFrame()
-		f.topTab = topTab
-		self.detailsView:SetShown(topTab == "details")
-		self.routeView:SetShown(topTab == "planner")
+		if f.SelectTopTab then
+			f.SelectTopTab(topTab)
+		end
 		if self.queueView then
 			self.queueView.activeMode = bottomMode
 		end

@@ -993,6 +993,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		if ns.InitInventoryIndex then
 			ns:InitInventoryIndex()
 		end
+		if ns.InitModules then
+			ns:InitModules()
+		end
 	elseif event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
 		ns:ScanPlayerProfessions()
 		if ns.ScanBagsNow then
