@@ -56,9 +56,10 @@ function ns:SyncAuctionatorShoppingList(silent)
 	local ahItems = {}
 	local sigParts = {}
 	for _, item in ipairs(shopping) do
-		if item.source ~= "vendor" and item.missing > 0 then
+		local buyQty = item.toBuy ~= nil and item.toBuy or item.missing
+		if item.source ~= "vendor" and buyQty > 0 then
 			ahItems[#ahItems + 1] = item
-			sigParts[#sigParts + 1] = item.itemID .. ":" .. item.missing
+			sigParts[#sigParts + 1] = item.itemID .. ":" .. buyQty
 		end
 	end
 
@@ -87,7 +88,7 @@ function ns:SyncAuctionatorShoppingList(silent)
 				local ok, str = pcall(api.ConvertToSearchString, ADDON_NAME, {
 					searchString = name,
 					isExact = true,
-					quantity = item.missing,
+					quantity = item.toBuy ~= nil and item.toBuy or item.missing,
 				})
 				if ok and str then
 					searches[#searches + 1] = str
@@ -120,7 +121,8 @@ function ns:SearchShoppingListOnAH()
 	local shopping = self:GetShoppingList()
 	local ahItems = {}
 	for _, item in ipairs(shopping) do
-		if item.source ~= "vendor" and item.missing > 0 then
+		local buyQty = item.toBuy ~= nil and item.toBuy or item.missing
+		if item.source ~= "vendor" and buyQty > 0 then
 			ahItems[#ahItems + 1] = item
 		end
 	end
@@ -137,7 +139,7 @@ function ns:SearchShoppingListOnAH()
 				advanced[#advanced + 1] = {
 					searchString = name,
 					isExact = true,
-					quantity = item.missing,
+					quantity = item.toBuy ~= nil and item.toBuy or item.missing,
 				}
 			end
 		end
@@ -205,8 +207,9 @@ local function CollectMerchantMatches()
 	local shopping = ns:GetShoppingList()
 	local needByItem = {}
 	for _, item in ipairs(shopping) do
-		if item.missing > 0 then
-			needByItem[item.itemID] = item.missing
+		local buyQty = item.toBuy ~= nil and item.toBuy or item.missing
+		if buyQty > 0 then
+			needByItem[item.itemID] = buyQty
 		end
 	end
 	if not next(needByItem) then

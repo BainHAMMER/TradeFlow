@@ -304,7 +304,8 @@ function ns:GetShoppingList()
 			local isVendor = self:IsVendorItem(itemID)
 			local unitPrice = isVendor and self:GetVendorPrice(itemID) or self:GetAuctionPrice(itemID)
 			local source = isVendor and "vendor" or (unitPrice and "ah" or "unknown")
-			local cost = unitPrice and (unitPrice * missing) or nil
+			local toBuy = math.max(0, missing - inBank)
+			local cost = (unitPrice and toBuy > 0) and (unitPrice * toBuy) or nil
 			if cost then
 				totalCost = totalCost + cost
 			end
@@ -313,6 +314,7 @@ function ns:GetShoppingList()
 				itemID = itemID,
 				need = inBags + missing,
 				missing = missing,
+				toBuy = toBuy,
 				inBags = inBags,
 				inBank = inBank,
 				altTotal = altTotal,

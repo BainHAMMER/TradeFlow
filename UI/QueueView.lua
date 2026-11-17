@@ -372,7 +372,8 @@ function ns:RenderQueueOrShoppingRows()
 				-- Отображение реального предмета из клиента по его itemID
 				local name, icon, _, _, _, hex = self:GetItemDisplay(item.itemID)
 				row.icon:SetTexture(icon)
-				row.title:SetText(string.format("%s%s|r |cffff6666x%d|r", hex or "|cffffffff", name, item.missing))
+				local buyCount = item.toBuy or item.missing
+				row.title:SetText(string.format("%s%s|r |cffff6666x%d|r", hex or "|cffffffff", name, buyCount))
 
 				local altText = ""
 				if item.altTotal and item.altTotal > 0 and item.alts and item.alts[1] then
@@ -406,7 +407,14 @@ function ns:RefreshQueueAndShoppingView()
 	end
 
 	local queue = self:GetQueue()
-	local shopping, totalShopCost = self:GetShoppingList()
+	local fullShopping, totalShopCost = self:GetShoppingList()
+	local shopping = {}
+	for _, item in ipairs(fullShopping) do
+		local buyQty = item.toBuy ~= nil and item.toBuy or item.missing
+		if buyQty > 0 then
+			shopping[#shopping + 1] = item
+		end
+	end
 	f.shoppingCache = shopping
 
 	f.tabQueue:SetText(string.format(L["TAB_QUEUE"], #queue))
