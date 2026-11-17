@@ -332,7 +332,7 @@ function ns:CreateMainFrame()
 	-- Полоса прогресса навыка текущей профессии
 	local rankBar = CreateFrame("StatusBar", nil, header, "BackdropTemplate")
 	rankBar:SetSize(195, 18)
-	rankBar:SetPoint("CENTER", header, "CENTER", -15, 0)
+	rankBar:SetPoint("CENTER", header, "CENTER", -28, 0)
 	rankBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
 	rankBar:SetStatusBarColor(0.20, 0.55, 0.90, 0.9)
 	rankBar.bg = rankBar:CreateTexture(nil, "BACKGROUND")
@@ -731,9 +731,9 @@ function ns:CreateDetailsView(parent)
 	d.reagentRows = {}
 	for i = 1, 6 do
 		local rRow = CreateFrame("Button", nil, d)
-		rRow:SetHeight(19)
-		rRow:SetPoint("TOPLEFT", 8, -66 - (i - 1) * 19)
-		rRow:SetPoint("TOPRIGHT", -242, -66 - (i - 1) * 19)
+		rRow:SetHeight(18)
+		rRow:SetPoint("TOPLEFT", 8, -64 - (i - 1) * 18)
+		rRow:SetPoint("TOPRIGHT", -244, -64 - (i - 1) * 18)
 
 		rRow.hl = rRow:CreateTexture(nil, "HIGHLIGHT")
 		rRow.hl:SetAllPoints()
@@ -1273,10 +1273,10 @@ function ns:UpdateDisenchantBlock(d, outItemID, numReagents)
 		return
 	end
 
-	local top = -66 - (numReagents or 0) * 19 - 4
+	local top = -64 - (numReagents or 0) * 18 - 4
 	b:ClearAllPoints()
 	b:SetPoint("TOPLEFT", d, "TOPLEFT", 8, top)
-	b:SetPoint("TOPRIGHT", d, "TOPRIGHT", -242, top)
+	b:SetPoint("TOPRIGHT", d, "TOPRIGHT", -244, top)
 	b.header:SetText(string.format(L["DE_BLOCK_HEADER"], reqEnch or 1))
 
 	local shown = 0
