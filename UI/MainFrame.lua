@@ -464,7 +464,9 @@ function ns:CreateMainFrame()
 	sortMenu:SetSize(156, #SORT_MODES * 22 + 8)
 	sortMenu:SetPoint("TOPLEFT", sortBtn, "BOTTOMLEFT", 0, -2)
 	sortMenu:SetFrameStrata("DIALOG")
-	sortMenu:SetFrameLevel(leftPane:GetFrameLevel() + 20)
+	sortMenu:SetFrameLevel(leftPane:GetFrameLevel() + 50)
+	sortMenu:SetToplevel(true)
+	sortMenu:EnableMouse(true)
 	StylePanel(sortMenu, 0.08, 0.07, 0.06, 0.98)
 	sortMenu:Hide()
 	f.sortMenu = sortMenu
@@ -472,7 +474,7 @@ function ns:CreateMainFrame()
 	local sortMenuButtons = {}
 	for i, m in ipairs(SORT_MODES) do
 		local item = CreateFrame("Button", nil, sortMenu)
-		item:SetHeight(20)
+		item:SetHeight(22)
 		item:SetPoint("TOPLEFT", 5, -4 - (i - 1) * 22)
 		item:SetPoint("TOPRIGHT", -5, -4 - (i - 1) * 22)
 		item.hl = item:CreateTexture(nil, "HIGHLIGHT")
@@ -594,6 +596,9 @@ function ns:CreateMainFrame()
 		if row.nameText.SetMaxLines then row.nameText:SetMaxLines(1) end
 
 		row:SetScript("OnClick", function(self, button)
+			if f.sortMenu then
+				f.sortMenu:Hide()
+			end
 			local e = self.entryData
 			if not e then
 				return
@@ -1486,9 +1491,6 @@ function ns:RefreshMainWindow()
 	f.rankBar:SetValue(rank)
 	f.rankBar.text:SetText(string.format("%s  %d / %d", profName, rank, maxRank))
 	f.langBtn:SetText(self.lang == "ru" and "RU" or "EN")
-	if f.sortMenu then
-		f.sortMenu:Hide()
-	end
 	if f.cbVendor then
 		f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
 	end
