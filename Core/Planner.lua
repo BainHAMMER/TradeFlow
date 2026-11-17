@@ -208,12 +208,14 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		end
 		return simPool[itemID]
 	end
-	local function EvalBuyCost(cand)
+	local function EvalBuyCost(cand, craftsCount)
+		local n = craftsCount or 1
 		local cost = 0
 		for _, b in ipairs(cand.reagents) do
 			local have = GetSimHave(b.itemID)
-			if have < b.quantity then
-				cost = cost + (b.quantity - have) * (b.unitPrice or 0)
+			local need = b.quantity * n
+			if have < need then
+				cost = cost + (need - have) * (b.unitPrice or 0)
 			end
 		end
 		return cost
@@ -254,9 +256,13 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			if s >= c.reqSkill and c.th and s < c.th[4] then
 				local chance, color = ns.CalculateSkillUpChance(s, c.th)
 				if chance > 0.05 then
-					local buyCost = EvalBuyCost(c)
-					local effectiveNet = math.max(0, buyCost - (c.vendorDeduct or 0))
-					local expectedCost = effectiveNet / chance
+					local craftsPerPoint = 1 / chance
+					local buyCostForPoint = EvalBuyCost(c, craftsPerPoint)
+					local returnForPoint = (c.vendorDeduct or 0) * craftsPerPoint
+					-- Считаем чистую стоимость +1 навыка по полному ожидаемому числу крафтов (без обрезки по 0)
+					-- и штрафуем негарантированный рост (шанс < 100%), чтобы 100% оранжевые рецепты имели приоритет над рандомом
+					local rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 250 + 50) or 0
+					local expectedCost = buyCostForPoint - returnForPoint + rngPenalty
 					-- Амортизируем цену обучения у тренера на ~10 очков, чтобы не учить рецепт ради 1 крафта,
 					-- и даём небольшой бонус рецепту предыдущего шага, чтобы не дробить маршрут без выгоды
 					if not c.learned and not learnedInSim[c.recipeID] and c.trainerFee > 0 then
@@ -264,7 +270,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						expectedCost = expectedCost + (c.trainerFee / horizon)
 					end
 					if c.recipeID == prevRecipeID then
-						expectedCost = expectedCost * 0.96
+						expectedCost = expectedCost - math.max(50, math.abs(expectedCost) * 0.04)
 					end
 					if expectedCost < bestScore then
 						bestScore = expectedCost
