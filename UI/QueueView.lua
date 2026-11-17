@@ -351,7 +351,7 @@ function ns:RenderQueueOrShoppingRows()
 		end
 	else
 		local list = f.shoppingCache or {}
-		f.emptyLabel:SetText(L["SHOPPING_EMPTY"])
+		f.emptyLabel:SetText(f.shoppingBankOnly and L["SHOPPING_ONLY_BANK"] or L["SHOPPING_EMPTY"])
 		f.emptyLabel:SetShown(#list == 0)
 
 		for i = 1, VISIBLE_ROWS do
@@ -372,7 +372,7 @@ function ns:RenderQueueOrShoppingRows()
 				-- Отображение реального предмета из клиента по его itemID
 				local name, icon, _, _, _, hex = self:GetItemDisplay(item.itemID)
 				row.icon:SetTexture(icon)
-				local buyCount = item.toBuy or item.missing
+				local buyCount = (item.toBuy ~= nil) and item.toBuy or item.missing
 				row.title:SetText(string.format("%s%s|r |cffff6666x%d|r", hex or "|cffffffff", name, buyCount))
 
 				local altText = ""
@@ -416,6 +416,7 @@ function ns:RefreshQueueAndShoppingView()
 		end
 	end
 	f.shoppingCache = shopping
+	f.shoppingBankOnly = (#shopping == 0 and #fullShopping > 0)
 
 	f.tabQueue:SetText(string.format(L["TAB_QUEUE"], #queue))
 	f.tabShop:SetText(string.format(L["TAB_SHOPPING"], #shopping))
@@ -423,6 +424,11 @@ function ns:RefreshQueueAndShoppingView()
 	ns.SetTabButtonActive(f.tabShop, f.activeMode == "shopping")
 
 	local isQueue = (f.activeMode == "queue")
+	local activeCount = isQueue and #queue or #shopping
+	local maxOff = math.max(0, activeCount - VISIBLE_ROWS)
+	if f.offset > maxOff then
+		f.offset = maxOff
+	end
 	local vendorMatches = (self.GetMerchantShoppingMatches and self:GetMerchantShoppingMatches()) or {}
 	local hasVendorMatches = (#vendorMatches > 0)
 	local bankMatches = (self.GetBankShoppingMatches and self:GetBankShoppingMatches()) or {}

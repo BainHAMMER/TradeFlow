@@ -108,6 +108,7 @@ ns.Locales.en = {
 
 	-- Shopping List & Integrations
 	["SHOPPING_EMPTY"] = "Your bags already hold all reagents needed for the queue!",
+	["SHOPPING_ONLY_BANK"] = "Nothing to buy - all missing reagents are in your bank.",
 	["SHOPPING_ROW_DETAIL"] = "Need: %d (Bags: %d | Bank: %d%s) | %s | %s/ea",
 	["SHOPPING_ALT_INFO"] = " | Alts: %d [%s]",
 	["SHOPPING_TOTAL"] = "Est. total: %s",
