@@ -458,7 +458,7 @@ local function BuildAuctionTiers(qtyByPrice)
 	return tiers, tiers[1][1], tiers[1][2], total
 end
 
-local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty, tiers)
+local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty, tiers, isAggregate)
 	if not (ns.realmDB and itemID and itemID > 0 and minPrice and minPrice > 0) then
 		return
 	end
@@ -468,6 +468,7 @@ local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty, tiers)
 		qty = qtyAtMin or totalQty or 0,
 		total = totalQty or qtyAtMin or 0,
 		tiers = tiers,
+		isAggregate = isAggregate and true or false,
 		ts = time and time() or 0,
 	}
 	if ns.NotifyModules then
@@ -589,8 +590,13 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 			end
 			local tiers, minP, qtyMin, total = BuildAuctionTiers(qtyByPrice)
 			if minP and total > 0 then
-				RecordAuctionStock(itemID, minP, qtyMin, total, tiers)
+				RecordAuctionStock(itemID, minP, qtyMin, total, tiers, false)
 				ns:InvalidatePrices()
+			end
+		elseif itemID and ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID] then
+			ns.realmDB.ahStock[itemID] = nil
+			if ns.NotifyModules then
+				ns:NotifyModules("OnAuctionStockUpdated", itemID)
 			end
 		end
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" and C_AuctionHouse and C_AuctionHouse.GetBrowseResults then
@@ -603,7 +609,7 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 					local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
 					local keepTiers = prev and prev.tiers and #prev.tiers > 1 and (now - (prev.ts or 0)) <= 60
 					if not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then
-						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity)
+						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity, nil, true)
 					end
 				end
 			end

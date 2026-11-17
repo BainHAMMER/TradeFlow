@@ -662,24 +662,29 @@ function ns:CreateMainFrame()
 	for _, mod in ipairs((self.GetTopTabModules and self:GetTopTabModules()) or {}) do
 		local w = mod.tabWidth or 148
 		local btn = ns.CreateTabButton(topRight, w, 22, L[mod.tabTitleKey] or mod.id)
-		local mView = mod:CreateView(topContent)
-		local entry = { key = mod.id, btn = btn, view = mView, width = w, mod = mod }
+		local entry = { key = mod.id, btn = btn, view = nil, width = w, mod = mod }
 		topTabs[#topTabs + 1] = entry
 		modTabsByKey[mod.id] = entry
 	end
 
 	f.topTab = "details"
-	local function SelectTopTab(tabKey)
+	local function SelectTopTab(tabKey, skipRefresh)
 		if modTabsByKey[tabKey] and not ns:IsModuleEnabled(tabKey) then
 			tabKey = "details"
 		end
 		f.topTab = tabKey
 		for _, t in ipairs(topTabs) do
 			local active = (t.key == tabKey)
+			if active and t.mod and not t.view then
+				t.view = t.mod:CreateView(topContent)
+			end
 			ns.SetTabButtonActive(t.btn, active)
 			if t.view then
 				t.view:SetShown(active)
 			end
+		end
+		if skipRefresh then
+			return
 		end
 		if tabKey == "details" then
 			ns:RefreshDetailsView()
@@ -690,7 +695,7 @@ function ns:CreateMainFrame()
 		end
 	end
 
-	local function RefreshTopTabs()
+	local function RefreshTopTabs(skipRefresh)
 		local prevBtn = nil
 		for _, t in ipairs(topTabs) do
 			local shown = (not t.mod) or ns:IsModuleEnabled(t.mod.id)
@@ -705,7 +710,7 @@ function ns:CreateMainFrame()
 				prevBtn = t.btn
 			end
 		end
-		SelectTopTab(f.topTab or "details")
+		SelectTopTab(f.topTab or "details", skipRefresh)
 	end
 
 	for _, t in ipairs(topTabs) do
@@ -714,7 +719,7 @@ function ns:CreateMainFrame()
 	end
 	f.SelectTopTab = SelectTopTab
 	f.RefreshTopTabs = RefreshTopTabs
-	RefreshTopTabs()
+	RefreshTopTabs(true)
 
 	---------------------------------------------------------------------------
 	-- Правая нижняя панель: «Очередь крафта» | «Список покупок»
@@ -1540,7 +1545,7 @@ function ns:RefreshMainWindow()
 		f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
 	end
 	if f.RefreshTopTabs then
-		f.RefreshTopTabs()
+		f.RefreshTopTabs(true)
 	end
 
 	self:RefreshRecipeList()
@@ -1685,14 +1690,17 @@ function ns:RebuildMainFrame()
 		self.detailsView = nil
 		self.routeView = nil
 		self.queueView = nil
-		if self.NotifyModules then
-			self:NotifyModules("OnFrameDestroyed")
+		if self.NotifyAllModules then
+			self:NotifyAllModules("OnFrameDestroyed")
 		end
+	end
+	if self.NotifyModules then
+		self:NotifyModules("OnLanguageChanged")
 	end
 	if wasShown then
 		local f = self:CreateMainFrame()
 		if f.SelectTopTab then
-			f.SelectTopTab(topTab)
+			f.SelectTopTab(topTab, true)
 		end
 		if self.queueView then
 			self.queueView.activeMode = bottomMode

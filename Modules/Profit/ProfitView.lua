@@ -34,7 +34,7 @@ end
 
 local function GetShortProfName(skillLine)
 	local name = ns:GetProfessionName(skillLine) or ""
-	return Utf8Prefix(name, 10)
+	return (Utf8Prefix(name, 10):gsub("%s+$", ""))
 end
 
 local function CycleValue(list, cur)
@@ -68,6 +68,7 @@ local function GetAvailableProfFilters(includeAlts)
 		end
 	end
 	table.sort(list, function(a, b)
+		if a == b then return false end
 		if a == 0 then return true end
 		if b == 0 then return false end
 		return a < b
@@ -417,12 +418,14 @@ function ProfitMod:CreateView(parent)
 		row.title:SetPoint("RIGHT", row.profitText, "LEFT", -8, 0)
 		row.title:SetJustifyH("LEFT")
 		row.title:SetWordWrap(false)
+		if row.title.SetMaxLines then row.title:SetMaxLines(1) end
 
 		row.sub = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
 		row.sub:SetPoint("RIGHT", row.marginText, "LEFT", -8, 0)
 		row.sub:SetJustifyH("LEFT")
 		row.sub:SetWordWrap(false)
+		if row.sub.SetMaxLines then row.sub:SetMaxLines(1) end
 
 		row:SetScript("OnClick", function(self, button)
 			local e = self.entryData
@@ -436,19 +439,23 @@ function ProfitMod:CreateView(parent)
 			if ns:HandleItemClick(e.outItemID, e.recipeID) then
 				return
 			end
+			local canCraftHere = (not e.isAlt) and (not e.charKey or e.charKey == ns:CharKey()) and ns:IsRecipeLearned(e.recipeID)
 			if button == "RightButton" then
-				if not e.isAlt and ns.QueueAddRecipe then
+				if canCraftHere and ns.QueueAddRecipe then
 					ns:QueueAddRecipe(e.recipeID, 1)
 				end
 				return
 			end
-			if not e.isAlt and e.skillLine and ns.playerProfessions[e.skillLine] then
+			local sl = e.skillLine or (ns.GetRecipeRecord and (ns:GetRecipeRecord(e.recipeID) or {}).skillLine)
+			if canCraftHere and sl and ns.playerProfessions[sl] then
 				if ns.mainFrame and ns.mainFrame.SelectTopTab then
-					ns.mainFrame.SelectTopTab("details")
+					ns.mainFrame.SelectTopTab("details", true)
 				end
-				if e.skillLine ~= ns.currentSkillLine and ns.SwitchToProfession then
-					ns.selectedRecipeBySkill[e.skillLine] = e.recipeID
-					ns:SwitchToProfession(e.skillLine)
+				if sl ~= ns.currentSkillLine and ns.SwitchToProfession then
+					ns.selectedRecipeBySkill[sl] = e.recipeID
+					ns.preserveSelectedRecipe = true
+					ns.scrollToSelectedRecipe = true
+					ns:SwitchToProfession(sl)
 				elseif ns.SelectRecipeID then
 					ns:SelectRecipeID(e.recipeID)
 				end
@@ -507,6 +514,8 @@ function ProfitMod:RenderRows()
 					and (" |cff66ccff[" .. e.charKey .. "]|r") or ""
 				row.title:SetText(string.format("%s%s|r |cffffd100x%d|r |cff888888%s|r%s", hex or "|cffffffff", name, e.count or 1, timeStr, charTag))
 				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], FormatChannelTag(e.source, nil), ns.FormatMoney(e.cost), ns.FormatMoney(e.revenue)))
+				row.profitText:ClearAllPoints()
+				row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
 				row.profitText:SetText(ns.FormatMoney(e.profit or 0, true))
 				row.marginText:SetText("")
 				row.snipeBtn:Hide()
@@ -525,8 +534,9 @@ function ProfitMod:RenderRows()
 				local name, icon, _, _, _, hex = ns:GetItemDisplay(e.itemID)
 				row.icon:SetTexture(icon)
 				local hit = ns.snipeHits and ns.snipeHits[e.itemID]
+				local qtyStr = hit and (hit.qty and (hit.qty .. "x") or L["SNIPE_LOT_ANY"]) or nil
 				local statusTag = hit
-					and string.format(" |cff40ff40[%dx @ %s]|r", hit.qty or 0, ns.FormatMoney(hit.bestPrice))
+					and string.format(" |cff40ff40[%s @ %s]|r", qtyStr, ns.FormatMoney(hit.bestPrice))
 					or ""
 				row.title:SetText(string.format("%s%s|r%s", hex or "|cffffffff", name, statusTag))
 				local curP = ns:GetAuctionPrice(e.itemID)
@@ -555,6 +565,11 @@ function ProfitMod:RenderRows()
 
 				local srcText = FormatChannelTag(e.source, e.ageDays)
 				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], srcText, ns.FormatMoney(e.craftCost), ns.FormatMoney(e.outputValue)))
+				local anchorRight = (not e.isAlt) and row.queueBtn or row.snipeBtn
+				row.profitText:ClearAllPoints()
+				row.profitText:SetPoint("RIGHT", anchorRight, "LEFT", -8, 6)
+				row.marginText:ClearAllPoints()
+				row.marginText:SetPoint("RIGHT", anchorRight, "LEFT", -8, -6)
 				row.profitText:SetText("|cff40ff40+" .. ns.FormatMoney(e.profit) .. "|r")
 				row.marginText:SetText(string.format("|cffaaaaaa+%d%%|r", e.margin or 0))
 				row.snipeBtn:Show()
@@ -677,6 +692,10 @@ function ProfitMod:OnPricesInvalidated()
 end
 
 function ProfitMod:OnAuctionStockUpdated(itemID)
+	local targets = ns.GetSnipeTargets and ns:GetSnipeTargets()
+	if not (targets and targets[itemID]) then
+		return
+	end
 	if ns.EvaluateSnipeItem then
 		ns:EvaluateSnipeItem(itemID, false)
 	end
@@ -695,10 +714,29 @@ function ProfitMod:OnFrameDestroyed()
 	self.view = nil
 end
 
+function ProfitMod:OnLanguageChanged()
+	if ns.InvalidateProfitCache then
+		ns.InvalidateProfitCache()
+	end
+	if ns.RefreshSnipeBar then
+		ns:RefreshSnipeBar()
+	end
+end
+
+function ProfitMod:OnEnable()
+	if ns.InvalidateProfitCache then
+		ns.InvalidateProfitCache()
+	end
+	if ns.RefreshSnipeBar then
+		ns:RefreshSnipeBar()
+	end
+end
+
 function ProfitMod:OnDisable()
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
 	end
+	ns.snipeHits = {}
 	if ns.RefreshSnipeBar then
 		ns:RefreshSnipeBar()
 	end

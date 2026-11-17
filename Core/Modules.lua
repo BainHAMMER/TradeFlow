@@ -107,3 +107,12 @@ function ns:NotifyModules(hookName, ...)
 		end
 	end
 end
+
+function ns:NotifyAllModules(hookName, ...)
+	for _, id in ipairs(self.modules.order) do
+		local mod = self.modules.byId[id]
+		if mod and type(mod[hookName]) == "function" then
+			mod[hookName](mod, ...)
+		end
+	end
+end

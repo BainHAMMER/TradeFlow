@@ -21,6 +21,7 @@ local function GetTodayStartTimestamp()
 			dt.hour = 0
 			dt.min = 0
 			dt.sec = 0
+			dt.isdst = nil
 			local ts = time(dt)
 			if ts then
 				return ts
@@ -35,25 +36,27 @@ function ns:RecordCraftProfit(spellID)
 		return
 	end
 	local rec = self.GetRecipeRecord and self:GetRecipeRecord(spellID)
-	if not rec or not rec.reagents or #rec.reagents == 0 then
+	if not rec or not rec.reagents or #rec.reagents == 0 or not rec.outputItemID or rec.outputItemID <= 0 then
 		return
 	end
 	local craftCost, outVal, _, _, outSource = self:GetRecipeEconomy(spellID)
-	if not craftCost and not outVal then
+	if craftCost == nil or outVal == nil then
 		return
 	end
 
-	local unitCost = craftCost or 0
-	local unitRev = outVal or 0
-	local unitProfit = (craftCost and outVal) and (unitRev - unitCost) or 0
+	local unitCost = craftCost
+	local unitRev = outVal
+	local unitProfit = unitRev - unitCost
 	local src = outSource or "unknown"
 	local now = time and time() or 0
+	local dayKey = (date and now > 0) and date("%Y-%m-%d", now) or nil
 	local charKey = self.CharKey and self:CharKey() or ""
 
 	local log = EnsureLogDB()
 	local top = log[1]
 	if top and top.recipeID == spellID and top.charKey == charKey and top.source == src
-		and math.abs(now - (top.ts or 0)) <= COALESCE_SECONDS
+		and top.dayKey == dayKey
+		and now >= (top.ts or 0) and (now - (top.ts or 0)) <= COALESCE_SECONDS
 	then
 		top.count = (top.count or 1) + 1
 		top.cost = (top.cost or 0) + unitCost
@@ -63,7 +66,9 @@ function ns:RecordCraftProfit(spellID)
 	else
 		table.insert(log, 1, {
 			ts = now,
+			dayKey = dayKey,
 			charKey = charKey,
+			skillLine = rec.skillLine,
 			recipeID = spellID,
 			outItemID = rec.outputItemID,
 			count = 1,
