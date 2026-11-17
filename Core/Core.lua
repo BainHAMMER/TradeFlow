@@ -39,7 +39,7 @@ ns.PROF_ICONS = {
 	[202] = "Interface\\Icons\\Trade_Engineering",
 	[129] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
 	[165] = "Interface\\Icons\\INV_Misc_ArmorKit_17",
-	[186] = "Interface\\Icons\\Spell_Fire_FlameBlades",
+	[186] = "Interface\\Icons\\Trade_Mining",
 	[197] = "Interface\\Icons\\Trade_Tailoring",
 }
 
@@ -573,7 +573,9 @@ function ns:ScanActiveTradeSkill()
 		name = rawName or self:GetProfessionName(skillLine),
 		rank = rank > 0 and rank or ((prevProf and prevProf.rank) or 1),
 		maxRank = maxRank > 0 and maxRank or ((prevProf and prevProf.maxRank) or 75),
-		icon = self.PROF_ICONS[skillLine],
+		-- Значок из GetProfessionInfo (ScanPlayerProfessions) не заменяем: у горного дела
+		-- открывается «Выплавка металлов», и значок в шапке менялся с кирки на выплавку
+		icon = (prevProf and prevProf.icon) or self.PROF_ICONS[skillLine],
 		spellID = self.PROF_SPELLS[skillLine],
 	}
 
