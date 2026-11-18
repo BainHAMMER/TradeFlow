@@ -91,6 +91,7 @@ ns.Locales.ru = {
 	["SNIPE_BAR_IDLE"] = "TradeFlow Снайпер: %d поз. в наблюдении",
 	["SNIPE_BAR_HIT"] = "Снайп (%d)! %s %s по %s (-%d%%)",
 	["SNIPE_LOT_ANY"] = "лот",
+	["SNIPE_QTY_RANGE"] = "x%d (всего <=: %d)",
 	["SNIPE_HITS_HEADER"] = "Найденные дешёвые лоты:",
 	["PROFIT_SUBTAB_LOG"] = "Лог (%d)",
 	["PROFIT_LOG_TODAY"] = "Период: Сегодня",

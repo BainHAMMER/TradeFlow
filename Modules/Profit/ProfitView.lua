@@ -631,7 +631,7 @@ function ProfitMod:RenderRows()
 				local name, icon, _, _, _, hex = ns:GetItemDisplay(e.itemID)
 				row.icon:SetTexture(icon)
 				local hit = ns.snipeHits and ns.snipeHits[e.itemID]
-				local qtyStr = hit and (hit.qty and (hit.qty .. "x") or L["SNIPE_LOT_ANY"]) or nil
+				local qtyStr = hit and (ns.FormatSnipeHitQty and ns.FormatSnipeHitQty(hit) or L["SNIPE_LOT_ANY"]) or nil
 				local statusTag = hit
 					and string.format(" |cff40ff40[%s @ %s (-%d%%)]|r", qtyStr, ns.FormatMoney(hit.bestPrice), hit.discountPct or 0)
 					or ""

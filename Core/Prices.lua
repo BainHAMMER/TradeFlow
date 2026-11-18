@@ -571,7 +571,14 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 						end
 						local tiers, minP, qtyMin, total = BuildAuctionTiers(qtyByPrice)
 						if minP and total > 0 then
-							RecordAuctionStock(itemID, minP, qtyMin, total, tiers)
+							-- Сводный скан Auctionator (ProcessScan) часто отдаёт 1 запись со всем остатком по minPrice
+							local isAgg = (#tiers <= 1)
+							local now = time and time() or 0
+							local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
+							local keepDetailed = isAgg and prev and not prev.isAggregate and prev.tiers and #prev.tiers > 1 and (now - (prev.ts or 0)) <= 120
+							if not keepDetailed then
+								RecordAuctionStock(itemID, minP, qtyMin, total, tiers, isAgg)
+							end
 						end
 					end
 				end
@@ -582,7 +589,7 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 		local n = itemID and C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
 		if n and n > 0 and C_AuctionHouse.GetCommoditySearchResultInfo then
 			local qtyByPrice = {}
-			for i = 1, math.min(n, 50) do
+			for i = 1, math.min(n, 200) do
 				local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
 				if info and info.unitPrice and info.unitPrice > 0 and (info.quantity or 0) > 0 then
 					qtyByPrice[info.unitPrice] = (qtyByPrice[info.unitPrice] or 0) + info.quantity

@@ -219,6 +219,16 @@ function ns:ClearSnipeTargets()
 	self:RefreshSnipeUI()
 end
 
+function ns.FormatSnipeHitQty(hit)
+	if not hit or not hit.qty then
+		return L["SNIPE_LOT_ANY"]
+	end
+	if hit.totalCheapQty and hit.totalCheapQty > hit.qty then
+		return string.format(L["SNIPE_QTY_RANGE"], hit.qty, hit.totalCheapQty)
+	end
+	return "x" .. hit.qty
+end
+
 -- Сверяем актуальный снимок ahStock для itemID со снайп-целью
 function ns:EvaluateSnipeItem(itemID, silent)
 	self.snipeHits = self.snipeHits or {}
@@ -239,12 +249,14 @@ function ns:EvaluateSnipeItem(itemID, silent)
 		return nil
 	end
 
+	local bestQty = nil
 	local cheapQty = nil
 	local bestPrice = nil
 	if stock.isAggregate then
 		if stock.price and stock.price > 0 and stock.price <= target.maxPrice then
 			bestPrice = stock.price
-			cheapQty = nil -- сводка BrowseResults не даёт точное кол-во на минимальной цене
+			bestQty = nil -- сводка BrowseResults / ProcessScan не даёт точное кол-во на минимальной цене
+			cheapQty = nil
 		end
 	else
 		local tiers = (stock.tiers and #stock.tiers > 0 and stock.tiers)
@@ -257,6 +269,9 @@ function ns:EvaluateSnipeItem(itemID, silent)
 					sumQty = sumQty + q
 					if not bestPrice or p < bestPrice then
 						bestPrice = p
+						bestQty = q
+					elseif p == bestPrice then
+						bestQty = (bestQty or 0) + q
 					end
 				end
 			end
@@ -268,19 +283,21 @@ function ns:EvaluateSnipeItem(itemID, silent)
 
 	if bestPrice then
 		local prev = self.snipeHits[itemID]
-		local isNewHit = not prev or prev.bestPrice ~= bestPrice or prev.qty ~= cheapQty
+		local isPriceAlert = not prev or bestPrice < prev.bestPrice
 		local discountPct = (target.maxPrice > 0)
 			and math.max(0, math.floor((target.maxPrice - bestPrice) / target.maxPrice * 100 + 0.5))
 			or 0
-		self.snipeHits[itemID] = {
+		local hit = {
 			itemID = itemID,
 			bestPrice = bestPrice,
-			qty = cheapQty,
+			qty = bestQty,
+			totalCheapQty = cheapQty,
 			maxPrice = target.maxPrice,
 			discountPct = discountPct,
 			ts = stock.ts or now,
 		}
-		if not silent and isNewHit and IsAuctionHouseOpen() then
+		self.snipeHits[itemID] = hit
+		if not silent and isPriceAlert and IsAuctionHouseOpen() then
 			local tNow = GetTime and GetTime() or 0
 			if PlaySound and (tNow - lastSoundAt) > 5 then
 				lastSoundAt = tNow
@@ -290,18 +307,17 @@ function ns:EvaluateSnipeItem(itemID, silent)
 				lastChatHitAt[itemID] = tNow
 				local name, _, _, link, _, hex = self:GetItemDisplay(itemID)
 				local label = link or ((hex or "|cffffffff") .. name .. "|r")
-				local qtyStr = cheapQty and ("x" .. cheapQty) or L["SNIPE_LOT_ANY"]
 				self:Print(string.format(
 					L["SNIPE_HIT_CHAT"],
 					label,
-					qtyStr,
+					ns.FormatSnipeHitQty(hit),
 					ns.FormatMoney(bestPrice),
 					ns.FormatMoney(target.maxPrice),
 					discountPct
 				))
 			end
 		end
-		return self.snipeHits[itemID]
+		return hit
 	end
 
 	self.snipeHits[itemID] = nil
@@ -514,9 +530,8 @@ function ns:RefreshSnipeBar()
 			GameTooltip:AddLine(L["SNIPE_HITS_HEADER"], 0.25, 1, 0.25)
 			for _, h in ipairs(hits) do
 				local name, _, _, _, _, hex = ns:GetItemDisplay(h.itemID)
-				local qtyStr = h.qty and ("x" .. h.qty) or L["SNIPE_LOT_ANY"]
 				GameTooltip:AddDoubleLine(
-					string.format("%s%s|r %s (-%d%%)", hex or "|cffffffff", name, qtyStr, h.discountPct or 0),
+					string.format("%s%s|r %s (-%d%%)", hex or "|cffffffff", name, ns.FormatSnipeHitQty(h), h.discountPct or 0),
 					string.format("%s (<= %s)", ns.FormatMoney(h.bestPrice), ns.FormatMoney(h.maxPrice)),
 					1, 1, 1, 0.4, 1, 0.4
 				)
@@ -547,13 +562,12 @@ function ns:RefreshSnipeBar()
 	if #hits > 0 then
 		local first = hits[1]
 		local name = self:GetItemDisplay(first.itemID)
-		local qtyStr = first.qty and ("x" .. first.qty) or L["SNIPE_LOT_ANY"]
 		snipeBar:SetBackdropBorderColor(0.25, 0.90, 0.35, 1)
 		snipeBar.label:SetText(string.format(
 			L["SNIPE_BAR_HIT"],
 			#hits,
 			name,
-			qtyStr,
+			ns.FormatSnipeHitQty(first),
 			ns.FormatMoney(first.bestPrice),
 			first.discountPct or 0
 		))

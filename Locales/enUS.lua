@@ -91,6 +91,7 @@ ns.Locales.en = {
 	["SNIPE_BAR_IDLE"] = "TradeFlow Sniper: watching %d item(s)",
 	["SNIPE_BAR_HIT"] = "Snipe (%d)! %s %s @ %s (-%d%%)",
 	["SNIPE_LOT_ANY"] = "lot",
+	["SNIPE_QTY_RANGE"] = "x%d (total <=: %d)",
 	["SNIPE_HITS_HEADER"] = "Cheap lots spotted:",
 	["PROFIT_SUBTAB_LOG"] = "Log (%d)",
 	["PROFIT_LOG_TODAY"] = "Period: Today",
