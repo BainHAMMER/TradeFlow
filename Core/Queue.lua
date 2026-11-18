@@ -104,9 +104,9 @@ local function InsertOrMergeStep(queue, step)
 		end
 	end
 
-	-- 3. Если в допустимом диапазоне [minIndex .. maxIndex] уже есть такой же рецепт — сливаем с ним
+	-- 3. Если в допустимом диапазоне [minIndex .. maxIndex] уже есть такой же рецепт — сливаем с ним (не смешивая этапы с целевыми)
 	for i = maxIndex, minIndex, -1 do
-		if queue[i] and queue[i].recipeID == step.recipeID then
+		if queue[i] and queue[i].recipeID == step.recipeID and (queue[i].isSubcraft == true) == (step.isSubcraft == true) then
 			queue[i].count = queue[i].count + step.count
 			return
 		end
@@ -189,10 +189,40 @@ function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent)
 	end
 end
 
+local function PromoteOrphanSubcrafts(queue)
+	for i, s in ipairs(queue) do
+		if s.isSubcraft then
+			local sRec = ns:GetRecipeRecord(s.recipeID)
+			local outID = sRec and sRec.outputItemID
+			local hasConsumer = false
+			if outID and outID > 0 then
+				for j = i + 1, #queue do
+					local nextRec = ns:GetRecipeRecord(queue[j].recipeID)
+					if nextRec and nextRec.reagents then
+						for _, rg in ipairs(nextRec.reagents) do
+							if rg.itemID == outID then
+								hasConsumer = true
+								break
+							end
+						end
+					end
+					if hasConsumer then
+						break
+					end
+				end
+			end
+			if not hasConsumer then
+				s.isSubcraft = nil
+			end
+		end
+	end
+end
+
 function ns:QueueRemoveIndex(index)
 	local queue = self:GetQueue()
 	if queue[index] then
 		table.remove(queue, index)
+		PromoteOrphanSubcrafts(queue)
 		self:OnQueueUpdated()
 	end
 end
@@ -202,6 +232,7 @@ function ns:QueueMove(index, delta)
 	local target = index + delta
 	if index >= 1 and index <= #queue and target >= 1 and target <= #queue then
 		queue[index], queue[target] = queue[target], queue[index]
+		PromoteOrphanSubcrafts(queue)
 		self:OnQueueUpdated()
 	end
 end
@@ -416,28 +447,7 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 		for i, step in ipairs(queue) do
 			if step.recipeID == spellID then
 				matchedIndex = i
-				if step.isSubcraft == true then
-					isSubcraft = true
-				else
-					local rec = ns:GetRecipeRecord(spellID)
-					local outID = rec and rec.outputItemID
-					if outID and outID > 0 then
-						for j = i + 1, #queue do
-							local nextRec = ns:GetRecipeRecord(queue[j].recipeID)
-							if nextRec and nextRec.reagents then
-								for _, rg in ipairs(nextRec.reagents) do
-									if rg.itemID == outID then
-										isSubcraft = true
-										break
-									end
-								end
-							end
-							if isSubcraft then
-								break
-							end
-						end
-					end
-				end
+				isSubcraft = (step.isSubcraft == true)
 				break
 			end
 		end
@@ -449,6 +459,7 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 			step.count = (step.count or 1) - 1
 			if step.count <= 0 then
 				table.remove(queue, matchedIndex)
+				PromoteOrphanSubcrafts(queue)
 			end
 			ns:OnQueueUpdated()
 		end

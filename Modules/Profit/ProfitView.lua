@@ -227,13 +227,13 @@ function ProfitMod:CreateView(parent)
 	local sniperTop = CreateFrame("Frame", nil, f)
 	sniperTop:SetPoint("TOPLEFT", 8, -28)
 	sniperTop:SetPoint("TOPRIGHT", -8, -28)
-	sniperTop:SetHeight(24)
+	sniperTop:SetHeight(46)
 	sniperTop:Hide()
 	f.sniperTop = sniperTop
 
 	local importShopBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
 	importShopBtn:SetSize(124, 20)
-	importShopBtn:SetPoint("LEFT", 0, 0)
+	importShopBtn:SetPoint("TOPLEFT", 0, 0)
 	importShopBtn:SetText(L["SNIPE_IMPORT_SHOP"])
 	importShopBtn:SetScript("OnClick", function()
 		if ns.ImportShoppingToSnipe then
@@ -242,7 +242,7 @@ function ProfitMod:CreateView(parent)
 	end)
 
 	local scanSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	scanSnipeBtn:SetSize(88, 20)
+	scanSnipeBtn:SetSize(100, 20)
 	scanSnipeBtn:SetPoint("LEFT", importShopBtn, "RIGHT", 4, 0)
 	scanSnipeBtn:SetText(L["SNIPE_SCAN_BTN"])
 	scanSnipeBtn:SetScript("OnClick", function()
@@ -259,7 +259,7 @@ function ProfitMod:CreateView(parent)
 	scanSnipeBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	local repriceBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	repriceBtn:SetSize(80, 20)
+	repriceBtn:SetSize(98, 20)
 	repriceBtn:SetPoint("LEFT", scanSnipeBtn, "RIGHT", 4, 0)
 	repriceBtn:SetText(L["SNIPE_REPRICE_BTN"])
 	repriceBtn:SetScript("OnClick", function()
@@ -276,7 +276,7 @@ function ProfitMod:CreateView(parent)
 	repriceBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	local clearSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	clearSnipeBtn:SetSize(68, 20)
+	clearSnipeBtn:SetSize(78, 20)
 	clearSnipeBtn:SetPoint("LEFT", repriceBtn, "RIGHT", 4, 0)
 	clearSnipeBtn:SetText(L["QUEUE_CLEAR"])
 	clearSnipeBtn:SetScript("OnClick", function()
@@ -287,11 +287,11 @@ function ProfitMod:CreateView(parent)
 
 	local cbAutoScan = CreateFrame("CheckButton", nil, sniperTop, "UICheckButtonTemplate")
 	cbAutoScan:SetSize(20, 20)
-	cbAutoScan:SetPoint("LEFT", clearSnipeBtn, "RIGHT", 6, 0)
+	cbAutoScan:SetPoint("TOPLEFT", 0, -24)
 	cbAutoScan.text = cbAutoScan:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 1, 0)
+	cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 2, 0)
 	cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
-	cbAutoScan:SetHitRectInsets(0, -105, 0, 0)
+	cbAutoScan:SetHitRectInsets(0, -math.max(60, math.ceil((cbAutoScan.text:GetStringWidth() or 80) + 4)), 0, 0)
 	cbAutoScan:SetScript("OnClick", function(self)
 		if ns.db and ns.db.options then
 			ns.db.options.snipeAutoScan = self:GetChecked() and true or false
@@ -474,7 +474,7 @@ function ProfitMod:CreateView(parent)
 		row.findBtn:SetScript("OnClick", function()
 			local e = row.entryData
 			if e and e.itemID and ns.SearchSnipeTargetsOnAH then
-				ns:SearchSnipeTargetsOnAH(e.itemID)
+				ns:SearchSnipeTargetsOnAH(e.itemID, true)
 			end
 		end)
 
@@ -547,11 +547,8 @@ function ProfitMod:CreateView(parent)
 					ns.mainFrame.SelectTopTab("details", true)
 				end
 				if sl ~= ns.currentSkillLine and ns.SwitchToProfession then
-					ns.selectedRecipeBySkill[sl] = e.recipeID
 					ns.preserveSelectedRecipe = true
-					ns.scrollToSelectedRecipe = true
 					ns:SwitchToProfession(sl, e.recipeID)
-					ns.scrollToSelectedRecipe = false
 					ns.preserveSelectedRecipe = false
 				elseif ns.SelectRecipeID then
 					ns:SelectRecipeID(e.recipeID)
@@ -609,7 +606,14 @@ function ProfitMod:RenderRows()
 				local timeStr = (date and e.ts and e.ts > 0) and date("%H:%M", e.ts) or ""
 				local charTag = (e.charKey and e.charKey ~= "" and e.charKey ~= ns:CharKey())
 					and (" |cff66ccff[" .. e.charKey .. "]|r") or ""
-				row.title:SetText(string.format("%s%s|r |cffffd100x%d|r |cff888888%s|r%s", hex or "|cffffffff", name, e.count or 1, timeStr, charTag))
+				local cnt = e.count or 1
+				local cntStr
+				if math.abs(cnt - math.floor(cnt + 0.5)) >= 0.01 then
+					cntStr = (cnt < 0.1) and string.format("x%.2f", cnt) or string.format("x%.1f", cnt)
+				else
+					cntStr = string.format("x%d", math.floor(cnt + 0.5))
+				end
+				row.title:SetText(string.format("%s%s|r |cffffd100%s|r |cff888888%s|r%s", hex or "|cffffffff", name, cntStr, timeStr, charTag))
 				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], FormatChannelTag(e.source, nil), ns.FormatMoney(e.cost), ns.FormatMoney(e.revenue)))
 				row.profitText:ClearAllPoints()
 				row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
@@ -712,7 +716,7 @@ function ProfitMod:OnRefresh()
 	f.sniperTop:SetShown(isSniper)
 	f.logTop:SetShown(isLog)
 	f.listBox:ClearAllPoints()
-	f.listBox:SetPoint("TOPLEFT", 8, (isSniper or isLog) and -56 or -78)
+	f.listBox:SetPoint("TOPLEFT", 8, isLog and -56 or -78)
 	f.listBox:SetPoint("BOTTOMRIGHT", -8, 6)
 
 	if isLog then
@@ -837,6 +841,9 @@ end
 function ProfitMod:OnLanguageChanged()
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
+	end
+	if ns.SyncSnipeShoppingList then
+		ns:SyncSnipeShoppingList(true)
 	end
 	if ns.RefreshSnipeBar then
 		ns:RefreshSnipeBar()

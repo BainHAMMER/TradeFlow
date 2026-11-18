@@ -3,7 +3,7 @@ local _, ns = ...
 -------------------------------------------------------------------------------
 -- Движок сканера профита по всем изученным профессиям персонажа (и альтов)
 -------------------------------------------------------------------------------
-local AUCTION_CUT = 0.05
+local AUCTION_CUT = ns.AUCTION_CUT or 0.05
 local profitCache = nil
 local profitCacheKey = nil
 local profitCachePriceRev = -1

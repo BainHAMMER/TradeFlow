@@ -56,7 +56,7 @@ local function ConsumeIntermediateFromLog(log, rec, charKey, dayKey)
 						local rem = avail - need
 						local ratio = rem / avail
 						e.itemQty = rem
-						e.count = math.max(1, math.ceil(rem / perCraft))
+						e.count = math.max(0.01, math.floor((rem / perCraft) * 100 + 0.5) / 100)
 						e.cost = math.floor((e.cost or 0) * ratio + 0.5)
 						e.revenue = math.floor((e.revenue or 0) * ratio + 0.5)
 						e.profit = e.revenue - e.cost
@@ -162,7 +162,7 @@ function ns:GetProfitLogSummary(period)
 
 	return {
 		entries = entries,
-		craftsTotal = craftsTotal,
+		craftsTotal = (craftsTotal > 0) and math.max(1, math.floor(craftsTotal + 0.5)) or 0,
 		cost = totalCost,
 		revenue = totalRev,
 		profit = totalProfit,

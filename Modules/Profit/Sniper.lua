@@ -6,8 +6,8 @@ local L = ns.L
 -------------------------------------------------------------------------------
 local MAX_SNIPE_STOCK_AGE = 3600 -- не сигналим по вчерашнему кэшу (> 1 часа)
 local snipeBar = nil
-local lastSoundAt = 0
-local lastAutoScanAt = 0
+local lastSoundAt = -10
+local lastAutoScanAt = -30
 local lastChatHitAt = {}
 local lastSnipeListSig = nil
 local pendingUiRefresh = false
@@ -33,35 +33,6 @@ local function GetActiveAuctionFrame()
 		return AuctionFrame
 	end
 	return nil
-end
-
-local function WithLoadedItems(items, callback)
-	if #items == 0 then
-		callback()
-		return
-	end
-	if ContinuableContainer and Item and Item.CreateFromItemID then
-		local container = ContinuableContainer:Create()
-		for _, entry in ipairs(items) do
-			container:AddContinuable(Item:CreateFromItemID(entry.itemID))
-		end
-		container:ContinueOnLoad(callback)
-		return
-	end
-	local allLoaded = true
-	for _, entry in ipairs(items) do
-		local _, _, _, _, loaded = ns:GetItemDisplay(entry.itemID)
-		if not loaded then
-			allLoaded = false
-		end
-	end
-	if allLoaded then
-		callback()
-	elseif C_Timer and C_Timer.After then
-		C_Timer.After(0.25, callback)
-	else
-		callback()
-	end
 end
 
 function ns:GetSnipeTargets()
@@ -283,7 +254,8 @@ function ns:EvaluateSnipeItem(itemID, silent)
 
 	if bestPrice then
 		local prev = self.snipeHits[itemID]
-		local isPriceAlert = not prev or bestPrice < prev.bestPrice
+		local isPriceAlert = (not prev) or (prev.silentOnly == true) or (bestPrice < prev.bestPrice)
+		local alerted = (not silent) and isPriceAlert and IsAuctionHouseOpen()
 		local discountPct = (target.maxPrice > 0)
 			and math.max(0, math.floor((target.maxPrice - bestPrice) / target.maxPrice * 100 + 0.5))
 			or 0
@@ -295,9 +267,10 @@ function ns:EvaluateSnipeItem(itemID, silent)
 			maxPrice = target.maxPrice,
 			discountPct = discountPct,
 			ts = stock.ts or now,
+			silentOnly = (not alerted) and ((not prev) or prev.silentOnly == true),
 		}
 		self.snipeHits[itemID] = hit
-		if not silent and isPriceAlert and IsAuctionHouseOpen() then
+		if alerted then
 			local tNow = GetTime and GetTime() or 0
 			if PlaySound and (tNow - lastSoundAt) > 5 then
 				lastSoundAt = tNow
@@ -338,15 +311,30 @@ function ns:GetSnipeHitList()
 	return res
 end
 
-local function SafeAuctionatorMaxPrice(p)
-	if not p or p <= 0 then
+local function SafeAuctionatorMaxPrice(target)
+	if not target or target <= 0 then
 		return nil
 	end
-	-- Auctionator при конвертации maxPrice через float (/100 или /10000) и floor усекает часть чисел (напр. 58 -> 57)
-	if math.floor((p / 100) * 100) < p or math.floor((p / 10000) * 10000) < p then
-		return p + 1
+	-- Auctionator раскладывает maxPrice на золото/серебро/медь через /100 и /10000 во float;
+	-- проверяем итоговую восстановленную цену против target (обычно до +1..+2c)
+	local q = target
+	for _ = 1, 10 do
+		local g = math.floor(q / 10000)
+		local s = math.floor(((q / 10000) - g) * 100)
+		local c = math.floor(((q / 100) - math.floor(q / 100)) * 100)
+		local remGold = math.floor(((q / 10000) - g) * 10000)
+		local rebuilt = g * 10000 + s * 100 + c
+		if math.floor((q / 100) * 100) < target
+			or math.floor((q / 10000) * 10000) < target
+			or (g * 10000 + remGold) < target
+			or rebuilt < target
+		then
+			q = q + 1
+		else
+			return q
+		end
 	end
-	return p
+	return q
 end
 
 function ns:SyncSnipeShoppingList(silent)
@@ -355,16 +343,16 @@ function ns:SyncSnipeShoppingList(silent)
 		return
 	end
 	local targets = self:GetSnipeTargetList()
+	local listName = L["SNIPE_LIST_NAME"]
 	local parts = {}
 	for _, t in ipairs(targets) do
 		parts[#parts + 1] = (t.itemID or 0) .. ":" .. (t.maxPrice or 0)
 	end
-	local sig = table.concat(parts, ",")
+	local sig = listName .. "|" .. table.concat(parts, ",")
 	if silent and sig == lastSnipeListSig then
 		return
 	end
 
-	local listName = L["SNIPE_LIST_NAME"]
 	if #targets == 0 then
 		lastSnipeListSig = sig
 		if api.GetShoppingListItems and api.DeleteShoppingList then
@@ -376,7 +364,7 @@ function ns:SyncSnipeShoppingList(silent)
 		return
 	end
 
-	WithLoadedItems(targets, function()
+	self:WithLoadedItems(targets, function()
 		local searches = {}
 		for _, t in ipairs(targets) do
 			local name, _, _, _, loaded = self:GetItemDisplay(t.itemID)
@@ -433,7 +421,7 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 		return
 	end
 
-	WithLoadedItems(items, function()
+	self:WithLoadedItems(items, function()
 		if not IsAuctionHouseOpen() then
 			return
 		end
@@ -560,9 +548,11 @@ function ns:RefreshSnipeBar()
 
 	snipeBar:SetParent(ah)
 	snipeBar:ClearAllPoints()
-	local ahTop = ah.GetTop and ah:GetTop() or 0
-	local screenTop = UIParent and UIParent.GetTop and UIParent:GetTop() or 768
-	if ahTop > 0 and (ahTop + 42) > screenTop then
+	local ahScale = (ah.GetEffectiveScale and ah:GetEffectiveScale()) or 1
+	local uiScale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+	local ahTop = (ah.GetTop and ah:GetTop() or 0) * ahScale
+	local screenTop = (UIParent and UIParent.GetTop and UIParent:GetTop() or 768) * uiScale
+	if ahTop > 0 and (ahTop + 42 * ahScale) > screenTop then
 		snipeBar:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 0, -2)
 		snipeBar:SetPoint("TOPRIGHT", ah, "BOTTOMRIGHT", 0, -2)
 	else
@@ -652,9 +642,10 @@ snipeEventFrame:SetScript("OnEvent", function(_, event)
 			if #targets > 0 and ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
 				local tNow = GetTime and GetTime() or 0
 				if (tNow - lastAutoScanAt) >= 30 then
-					lastAutoScanAt = tNow
 					C_Timer.After(0.45, function()
-						if IsAuctionHouseOpen() and ns.IsModuleEnabled and ns:IsModuleEnabled("profit") then
+						local cbNow = GetTime and GetTime() or 0
+						if IsAuctionHouseOpen() and ns.IsModuleEnabled and ns:IsModuleEnabled("profit") and (cbNow - lastAutoScanAt) >= 30 then
+							lastAutoScanAt = cbNow
 							ns:SearchSnipeTargetsOnAH()
 						end
 					end)
@@ -665,7 +656,7 @@ snipeEventFrame:SetScript("OnEvent", function(_, event)
 		if snipeBar then
 			snipeBar:Hide()
 		end
-	else
+	elseif next(ns:GetSnipeTargets()) ~= nil then
 		ns:RefreshSnipeUI()
 	end
 end)

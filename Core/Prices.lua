@@ -5,6 +5,7 @@ local L = ns.L
 -- Цены: Auctionator API v1, TSM (резерв), Вендоры и Тренеры
 -------------------------------------------------------------------------------
 local AUCTION_CUT = 0.05
+ns.AUCTION_CUT = AUCTION_CUT
 local priceRev = 1
 local reagentPriceCache = {}
 local recipeEconomyCache = {}
@@ -575,7 +576,7 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 							local isAgg = (#tiers <= 1)
 							local now = time and time() or 0
 							local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
-							local keepDetailed = isAgg and prev and not prev.isAggregate and prev.tiers and #prev.tiers > 1 and (now - (prev.ts or 0)) <= 120
+							local keepDetailed = isAgg and prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 120
 							if not keepDetailed then
 								RecordAuctionStock(itemID, minP, qtyMin, total, tiers, isAgg)
 							end
@@ -614,7 +615,7 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				local itemID = r and r.itemKey and r.itemKey.itemID
 				if itemID and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
 					local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
-					local keepTiers = prev and prev.tiers and #prev.tiers > 1 and (now - (prev.ts or 0)) <= 60
+					local keepTiers = prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 60
 					if not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then
 						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity, nil, true)
 					end
