@@ -338,6 +338,17 @@ function ns:GetSnipeHitList()
 	return res
 end
 
+local function SafeAuctionatorMaxPrice(p)
+	if not p or p <= 0 then
+		return nil
+	end
+	-- Auctionator при конвертации maxPrice через float (/100 или /10000) и floor усекает часть чисел (напр. 58 -> 57)
+	if math.floor((p / 100) * 100) < p or math.floor((p / 10000) * 10000) < p then
+		return p + 1
+	end
+	return p
+end
+
 function ns:SyncSnipeShoppingList(silent)
 	local api = Auctionator and Auctionator.API and Auctionator.API.v1
 	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then
@@ -373,7 +384,7 @@ function ns:SyncSnipeShoppingList(silent)
 				local ok, str = pcall(api.ConvertToSearchString, ADDON_NAME, {
 					searchString = name,
 					isExact = true,
-					maxPrice = t.maxPrice,
+					maxPrice = SafeAuctionatorMaxPrice(t.maxPrice),
 				})
 				if ok and str then
 					searches[#searches + 1] = str
@@ -404,6 +415,7 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 	self:SyncSnipeShoppingList(true)
 	local targets = EnsureSnipeDB()
 	local items = {}
+	local skipPriceFilter = (ignorePrice == true) or (targetOrFilter == "hits")
 	if targetOrFilter == "hits" then
 		for _, h in ipairs(self:GetSnipeHitList()) do
 			if targets[h.itemID] then
@@ -434,9 +446,9 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 					searchString = name,
 					isExact = true,
 				}
-				-- Передаём maxPrice, чтобы Auctionator сразу скрывал лоты дороже таргета
-				if not ignorePrice and t.maxPrice and t.maxPrice > 0 then
-					q.maxPrice = t.maxPrice
+				-- При общем скане передаём SafeAuctionatorMaxPrice; для уже найденных хитов открываем стакан целиком
+				if not skipPriceFilter and t.maxPrice and t.maxPrice > 0 then
+					q.maxPrice = SafeAuctionatorMaxPrice(t.maxPrice)
 				end
 				advanced[#advanced + 1] = q
 			end
