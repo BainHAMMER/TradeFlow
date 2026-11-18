@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.8
+- **Blizzard Professions Frame Integration & Mining Icon (via PR #5 by `frostmx`):**
+  - **First-Open Session Fix (`UI\MainFrame.lua`):** Hid newly created `TradeFlowMainFrame` before attaching `OnHide` so first open after `/reload` or `/tf lang` no longer triggers `CloseTradeSkill()`.
+  - **General Tab (`BookPage`) & Fishing (`Core\Core.lua`):** Stopped `SuppressBlizzardFrame()` from hiding Blizzard's general `BookPage` tab or non-TradeFlow professions (e.g. Fishing, tracked via `ns.blizzardOwnsTradeSkill`), and restored TradeFlow cleanly without closing the Blizzard skill.
+  - **Return Button & Blizzard UI Button (`Core\Core.lua`, `Locales\*.lua`):** Hooked `Blizzard_Professions` immediately on `ADDON_LOADED`/`PLAYER_LOGIN` so the `TradeFlow` return button is present from the very first `K` press (keeping `preferTradeFlow` intact), and updated `OpenBlizzardProfessions()` to check `GetOpenTradeSkillID()` and print `BLIZZARD_UI_NEED_PROF` when opened via `/tf` with no profession active.
+  - **Mining Icon (`Core\Core.lua`):** Updated Mining (`186`) fallback icon to `Trade_Mining` and preserved the `GetProfessionInfo` pickaxe icon across Smelting opens.
+
 ## v1.0.7
 - **Profit Scanner & AH Reagent Sniper (`Core\Modules.lua`, `Modules\Profit\*`):**
   - Added modular **Profit** tab (with enable/disable toggle in Settings) scanning profitable recipes across current character and alts by channel (`All`, `Safe: Vendor+DE`, `Auction`), margin, freshness, and craftability, with batch `+Queue` shortcuts (`+1 / +5 / +10 / all`).
