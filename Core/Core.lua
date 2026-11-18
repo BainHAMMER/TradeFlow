@@ -248,7 +248,10 @@ local function ScheduleTradeSkillRefresh()
 		C_Timer.After(0.15, function()
 			pendingTradeSkillRefresh = false
 			if ns.mainFrame and ns.mainFrame:IsShown() then
-				ns:ScanActiveTradeSkill()
+				ns:ScanActiveTradeSkill(true)
+				-- ScanPlayerProfessions читает актуальный rank/maxRank из GetProfessionInfo
+				-- (C_TradeSkillUI на 1.60.1 может отдавать устаревший skillLevel до переоткрытия)
+				ns:ScanPlayerProfessions()
 				if ns.RefreshVisibleUI then
 					ns:RefreshVisibleUI()
 				end
@@ -630,7 +633,7 @@ function ns:IsRecipeLearned(recipeID)
 	return false
 end
 
-function ns:ScanActiveTradeSkill()
+function ns:ScanActiveTradeSkill(preserveSkillLine)
 	if not C_TradeSkillUI then
 		return false
 	end
@@ -653,7 +656,9 @@ function ns:ScanActiveTradeSkill()
 		return false
 	end
 
-	self.currentSkillLine = skillLine
+	if not (preserveSkillLine and self.currentSkillLine and self.PROF_SPELLS[self.currentSkillLine]) then
+		self.currentSkillLine = skillLine
+	end
 	local prevProf = self.playerProfessions[skillLine]
 	self.playerProfessions[skillLine] = {
 		skillLine = skillLine,
@@ -1032,8 +1037,10 @@ for _, ev in ipairs({
 	"TRADE_SKILL_DATA_SOURCE_CHANGED",
 	"TRADE_SKILL_LIST_UPDATE",
 	"TRADE_SKILL_DETAILS_UPDATE",
+	"TRADE_SKILL_UPDATE",
 	"TRADE_SKILL_CLOSE",
 	"SKILL_LINES_CHANGED",
+	"CHAT_MSG_SKILL",
 	"NEW_RECIPE_LEARNED",
 	"GET_ITEM_INFO_RECEIVED",
 	"ITEM_DATA_LOAD_RESULT",
@@ -1137,7 +1144,15 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 				ns:ShowMainWindow()
 			end
 		end
-	elseif event == "TRADE_SKILL_LIST_UPDATE" or event == "TRADE_SKILL_DETAILS_UPDATE" or event == "SKILL_LINES_CHANGED" or event == "NEW_RECIPE_LEARNED" then
+	elseif event == "SKILL_LINES_CHANGED" or event == "CHAT_MSG_SKILL" or event == "TRADE_SKILL_UPDATE" then
+		ns:ScanPlayerProfessions()
+		if ns.mainFrame and ns.mainFrame:IsShown() then
+			if ns.RefreshVisibleUI then
+				ns:RefreshVisibleUI()
+			end
+			ScheduleTradeSkillRefresh()
+		end
+	elseif event == "TRADE_SKILL_LIST_UPDATE" or event == "TRADE_SKILL_DETAILS_UPDATE" or event == "NEW_RECIPE_LEARNED" then
 		if not ns.bypassIntercept then
 			ns:SuppressBlizzardFrame()
 		end
