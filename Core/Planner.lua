@@ -182,6 +182,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			if hasKnownAcquisition or isFallbackScroll then
 				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
 				if craftCost then
+					local rec = self:GetRecipeRecord(recipeID)
 					local vendorSell = (alts and alts.vendor) or 0
 					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше
 					local effectiveDeduct = ns.GetSkillUpReturn(alts, deductVendor)
@@ -204,6 +205,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						th = th,
 						craftCost = craftCost,
 						unitReturn = unitReturn,
+						outputItemID = rec and rec.outputItemID or nil,
+						numMade = (rec and rec.numMade and rec.numMade > 0) and rec.numMade or 1,
 						reagents = breakdown or {},
 						netCost = math.max(0, craftCost - effectiveDeduct),
 					}
@@ -235,10 +238,18 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		local cost = 0
 		local ahPenalty = 0
 		for _, b in ipairs(cand.reagents) do
-			local have = math.max(0, GetBaseHave(b.itemID) - (state.used[b.itemID] or 0))
+			local baseAvail = math.max(0, GetBaseHave(b.itemID) - (state.used[b.itemID] or 0))
+			local prodAvail = (state.produced and state.produced[b.itemID]) or 0
 			local need = b.quantity * n
-			if have < need then
-				local toBuy = need - have
+			local fromBase = math.min(baseAvail, need)
+			local rem = need - fromBase
+			local fromProd = math.min(prodAvail, rem)
+			if fromProd > 0 then
+				-- Потреблённый полуфабрикат не уйдёт вендору: снимаем его авансовую выручку
+				cost = cost + fromProd * ((state.prodReturn and state.prodReturn[b.itemID]) or 0)
+			end
+			local toBuy = rem - fromProd
+			if toBuy > 0 then
 				local unitPrice = b.unitPrice or 0
 				if checkAhStock and b.source == "ah" and self.EvalAuctionBuyCost then
 					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, state.ahBought[b.itemID] or 0, toBuy, unitPrice)
@@ -297,7 +308,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	local STARTER_SLOTS = 3
 	local MAIN_SLOTS = BEAM_WIDTH - STARTER_SLOTS
 	local beams = {
-		{ score = 0, used = {}, ahBought = {}, learned = {}, prevID = nil, tail = nil },
+		{ score = 0, used = {}, produced = {}, prodReturn = {}, ahBought = {}, learned = {}, prevID = nil, tail = nil },
 	}
 	local milestonesAtSkill = {}
 
@@ -435,26 +446,50 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local cand = tr.cand
 			local newUsed = prevState.used
 			local usedCopied = false
+			local newProduced = prevState.produced
+			local prodCopied = false
+			local newProdReturn = prevState.prodReturn
 			local newAhBought = prevState.ahBought
 			local ahCopied = false
 			for _, b in ipairs(cand.reagents) do
-				local avail = math.max(0, GetBaseHave(b.itemID) - (newUsed[b.itemID] or 0))
+				local baseAvail = math.max(0, GetBaseHave(b.itemID) - (newUsed[b.itemID] or 0))
+				local prodAvail = (newProduced and newProduced[b.itemID]) or 0
 				local need = b.quantity * tr.craftsPerPoint
-				if avail > 0 then
+				local fromBase = math.min(baseAvail, need)
+				if fromBase > 0 then
 					if not usedCopied then
 						newUsed = CopyMap(prevState.used)
 						usedCopied = true
 					end
-					local consume = math.min(avail, need)
-					newUsed[b.itemID] = (newUsed[b.itemID] or 0) + consume
+					newUsed[b.itemID] = (newUsed[b.itemID] or 0) + fromBase
 				end
-				if checkAhStock and b.source == "ah" and need > avail then
+				local rem = need - fromBase
+				local fromProd = math.min(prodAvail, rem)
+				if fromProd > 0 then
+					if not prodCopied then
+						newProduced = CopyMap(prevState.produced or {})
+						prodCopied = true
+					end
+					newProduced[b.itemID] = prodAvail - fromProd
+				end
+				local toBuy = rem - fromProd
+				if checkAhStock and b.source == "ah" and toBuy > 0 then
 					if not ahCopied then
 						newAhBought = CopyMap(prevState.ahBought)
 						ahCopied = true
 					end
-					newAhBought[b.itemID] = (newAhBought[b.itemID] or 0) + (need - avail)
+					newAhBought[b.itemID] = (newAhBought[b.itemID] or 0) + toBuy
 				end
+			end
+			if cand.outputItemID and cand.outputItemID > 0 then
+				if not prodCopied then
+					newProduced = CopyMap(prevState.produced or {})
+					prodCopied = true
+				end
+				local madeQty = (cand.numMade or 1) * tr.craftsPerPoint
+				newProduced[cand.outputItemID] = (newProduced[cand.outputItemID] or 0) + madeQty
+				newProdReturn = CopyMap(prevState.prodReturn or {})
+				newProdReturn[cand.outputItemID] = (cand.unitReturn or 0) / (cand.numMade or 1)
 			end
 			local newLearned = prevState.learned
 			if tr.learnFee > 0 then
@@ -464,6 +499,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			nextBeams[#nextBeams + 1] = {
 				score = tr.score,
 				used = newUsed,
+				produced = newProduced,
+				prodReturn = newProdReturn,
 				ahBought = newAhBought,
 				learned = newLearned,
 				prevID = cand.recipeID,
@@ -504,12 +541,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				totalGrossCost = totalGrossCost + (ms.fee or 0)
 			end
 			local c = p.cand
-			if p.learnFee > 0 then
-				totalCost = totalCost + p.learnFee
-				totalGrossCost = totalGrossCost + p.learnFee
-			end
 			local lastStep = steps[#steps]
-			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID then
+			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID and not (p.learnFee and p.learnFee > 0) and not c.scrollItemID then
 				lastStep.toSkill = p.s + 1
 				lastStep.expectedCrafts = lastStep.expectedCrafts + (1 / p.chance)
 				lastStep.chanceSum = lastStep.chanceSum + p.chance
@@ -527,6 +560,9 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					unitNetCost = c.netCost,
 					unitCraftCost = c.craftCost,
 					unitReturn = c.unitReturn or 0,
+					outputItemID = c.outputItemID,
+					numMade = c.numMade or 1,
+					th = c.th,
 					reagents = c.reagents,
 					learnFee = p.learnFee,
 					scrollItemID = c.scrollItemID,
@@ -536,8 +572,96 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		end
 	end
 
-	-- Финализируем округление количества крафтов и стоимость каждого шага с учётом имеющихся материалов
+	-- Упорядочиваем зависимые шаги: если позже крафтится полуфабрикат для более раннего рецепта
+	-- (например, рулон ткани перед сумками), ставим полуфабрикат раньше и склеиваем одинаковые шаги.
+	local function StepConsumesItem(step, itemID)
+		if not (itemID and step and step.reagents) then
+			return false
+		end
+		for _, b in ipairs(step.reagents) do
+			if b.itemID == itemID then
+				return true
+			end
+		end
+		return false
+	end
+
+	local function EvalStepRange(step, sStart, points)
+		if not (step.th and step.th[4]) or sStart < (step.reqSkill or 1) then
+			return nil
+		end
+		local expC, chSum, firstColor = 0, 0, nil
+		for sk = sStart, sStart + points - 1 do
+			if sk >= step.th[4] then
+				return nil
+			end
+			local ch, col = ns.CalculateSkillUpChance(sk, step.th)
+			if ch <= 0.05 then
+				return nil
+			end
+			if not firstColor then
+				firstColor = col
+			end
+			expC = expC + (1 / ch)
+			chSum = chSum + ch
+		end
+		return { expectedCrafts = expC, chanceSum = chSum, colorKey = firstColor }
+	end
+
+	local changed = true
+	local guard = 0
+	while changed and guard < 64 do
+		changed = false
+		guard = guard + 1
+		for i = 1, #steps - 1 do
+			local a, b = steps[i], steps[i + 1]
+			if a.kind == "craft" and b.kind == "craft"
+				and b.outputItemID and StepConsumesItem(a, b.outputItemID)
+				and not StepConsumesItem(b, a.outputItemID)
+				and (not a.learnFee or a.learnFee == 0) and not a.scrollItemID
+				and (not b.learnFee or b.learnFee == 0) and not b.scrollItemID
+				and a.fromSkill >= (b.reqSkill or 1)
+			then
+				local evB = EvalStepRange(b, a.fromSkill, b.points)
+				local evA = evB and EvalStepRange(a, a.fromSkill + b.points, a.points) or nil
+				if evA and (evB.expectedCrafts + evA.expectedCrafts) <= ((a.expectedCrafts or 0) + (b.expectedCrafts or 0) + 1.0) then
+					b.fromSkill = a.fromSkill
+					b.toSkill = a.fromSkill + b.points
+					b.expectedCrafts = evB.expectedCrafts
+					b.chanceSum = evB.chanceSum
+					b.colorKey = evB.colorKey
+					a.fromSkill = b.toSkill
+					a.toSkill = b.toSkill + a.points
+					a.expectedCrafts = evA.expectedCrafts
+					a.chanceSum = evA.chanceSum
+					a.colorKey = evA.colorKey
+					steps[i], steps[i + 1] = b, a
+					changed = true
+				end
+			end
+		end
+		local merged = {}
+		for _, st in ipairs(steps) do
+			local prev = merged[#merged]
+			if prev and prev.kind == "craft" and st.kind == "craft"
+				and prev.recipeID == st.recipeID and prev.toSkill == st.fromSkill
+				and (not st.learnFee or st.learnFee == 0) and not st.scrollItemID
+			then
+				prev.toSkill = st.toSkill
+				prev.points = prev.points + st.points
+				prev.expectedCrafts = prev.expectedCrafts + st.expectedCrafts
+				prev.chanceSum = prev.chanceSum + st.chanceSum
+				changed = true
+			else
+				merged[#merged + 1] = st
+			end
+		end
+		steps = merged
+	end
+
+	-- Финализируем округление количества крафтов, учёт произведённых полуфабрикатов и стоимость шагов
 	local finalPool = {}
+	local producedLots = {}
 	local finalAhBought = {}
 	for _, st in ipairs(steps) do
 		if st.kind == "craft" then
@@ -548,11 +672,25 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				if finalPool[b.itemID] == nil then
 					finalPool[b.itemID] = self:GetBagCount(b.itemID) + self:GetBankCount(b.itemID)
 				end
-				local have = finalPool[b.itemID]
+				local haveBase = finalPool[b.itemID]
 				local need = b.quantity * st.crafts
-				local take = math.min(have, need)
-				finalPool[b.itemID] = have - take
-				local toBuy = need - take
+				local takeBase = math.min(haveBase, need)
+				finalPool[b.itemID] = haveBase - takeBase
+				local rem = need - takeBase
+				if rem > 0 and producedLots[b.itemID] then
+					for _, lot in ipairs(producedLots[b.itemID]) do
+						if rem <= 0 then
+							break
+						end
+						if lot.avail > 0 then
+							local takeProd = math.min(lot.avail, rem)
+							lot.avail = lot.avail - takeProd
+							rem = rem - takeProd
+							lot.step.returnVal = math.max(0, (lot.step.returnVal or 0) - takeProd * lot.perUnitReturn)
+						end
+					end
+				end
+				local toBuy = rem
 				if checkAhStock and b.source == "ah" and toBuy > 0 and self.EvalAuctionBuyCost then
 					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, finalAhBought[b.itemID] or 0, toBuy, b.unitPrice)
 					stepBuyCost = stepBuyCost + lineCost
@@ -564,13 +702,39 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					stepBuyCost = stepBuyCost + toBuy * (b.unitPrice or 0)
 				end
 			end
-			st.grossCost = stepBuyCost + (st.learnFee or 0)
+			st._stepBuyCost = stepBuyCost
 			st.returnVal = st.crafts * (st.unitReturn or 0)
-			local stepNet = math.max(0, stepBuyCost - st.crafts * (st.unitReturn or 0))
+			if st.outputItemID and st.outputItemID > 0 then
+				local madeTotal = st.crafts * (st.numMade or 1)
+				if madeTotal > 0 then
+					producedLots[st.outputItemID] = producedLots[st.outputItemID] or {}
+					producedLots[st.outputItemID][#producedLots[st.outputItemID] + 1] = {
+						step = st,
+						avail = madeTotal,
+						perUnitReturn = (st.unitReturn or 0) / (st.numMade or 1),
+					}
+				end
+			end
+		end
+	end
+
+	totalCost = 0
+	totalGrossCost = 0
+	totalReturn = 0
+	for _, st in ipairs(steps) do
+		if st.kind == "craft" then
+			local buyCost = st._stepBuyCost or 0
+			st._stepBuyCost = nil
+			st.returnVal = math.max(0, math.floor((st.returnVal or 0) + 0.5))
+			st.grossCost = buyCost + (st.learnFee or 0)
+			local stepNet = math.max(0, buyCost - st.returnVal)
 			st.stepCost = stepNet + (st.learnFee or 0)
-			totalCost = totalCost + stepNet
-			totalGrossCost = totalGrossCost + stepBuyCost
+			totalCost = totalCost + stepNet + (st.learnFee or 0)
+			totalGrossCost = totalGrossCost + buyCost + (st.learnFee or 0)
 			totalReturn = totalReturn + st.returnVal
+		else
+			totalCost = totalCost + (st.fee or 0)
+			totalGrossCost = totalGrossCost + (st.fee or 0)
 		end
 	end
 
