@@ -145,5 +145,12 @@ ns.Locales.en = {
 	["PROF_165"] = "Leatherworking",
 	["PROF_186"] = "Mining",
 	["PROF_197"] = "Tailoring",
+
+	-- Debug Log
+	["OPT_DEBUG_LOG_BTN"] = "Error Log (/tf log)",
+	["DEBUG_LOG_TITLE"] = "TradeFlow: Diagnostic Log (/tf log)",
+	["DEBUG_LOG_EMPTY"] = "No Lua errors or blocked interface actions recorded.",
+	["DEBUG_LOG_REFRESH"] = "Refresh",
+	["DEBUG_BLOCKED_CHAT"] = "Recorded [%s] (%s: %s) - type /tf log",
 }
 

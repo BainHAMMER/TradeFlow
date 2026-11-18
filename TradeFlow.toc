@@ -23,6 +23,7 @@ Data\Trainer.lua
 Data\Recipes.lua
 
 Core\Core.lua
+Core\DebugLog.lua
 Core\Inventory.lua
 Core\Prices.lua
 Core\Planner.lua
