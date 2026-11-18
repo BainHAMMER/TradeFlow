@@ -215,6 +215,7 @@ for _, ev in ipairs({
 	"MACRO_ACTION_BLOCKED",
 	"MACRO_ACTION_FORBIDDEN",
 	"LUA_WARNING",
+	"UI_ERROR_MESSAGE",
 }) do
 	pcall(debugFrame.RegisterEvent, debugFrame, ev)
 end
@@ -260,6 +261,15 @@ debugFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		local msg = tostring(arg2 or arg1 or "")
 		if msg:find(ADDON_NAME, 1, true) or stack:find(ADDON_NAME, 1, true) then
 			AppendEntry("WARNING", ADDON_NAME, msg, stack)
+		end
+	elseif event == "UI_ERROR_MESSAGE" then
+		local last = breadcrumbs[#breadcrumbs]
+		local nowT = GetTime and GetTime() or 0
+		if ns.bankWithdrawJob or (last and nowT > 0 and (nowT - last.t) <= 2.0 and last.msg:find("Bank", 1, true)) then
+			local errMsg = tostring(arg2 or arg1 or "")
+			if errMsg ~= "" then
+				AppendEntry("UI_ERROR", ADDON_NAME, errMsg, "")
+			end
 		end
 	end
 end)
