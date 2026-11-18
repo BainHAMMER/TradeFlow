@@ -152,5 +152,6 @@ ns.Locales.en = {
 	["DEBUG_LOG_EMPTY"] = "No Lua errors or blocked interface actions recorded.",
 	["DEBUG_LOG_REFRESH"] = "Refresh",
 	["DEBUG_BLOCKED_CHAT"] = "Recorded [%s] (%s: %s) - type /tf log",
+	["CRAFT_OPEN_PROF_MSG"] = "Open %s in-game (or click the Switch button in Queue) before crafting.",
 }
 

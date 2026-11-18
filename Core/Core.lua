@@ -777,58 +777,8 @@ function ns:FindFirstLearnedRecipe(skillLine)
 end
 
 function ns:OpenClientTradeSkill(skillLine, recipeID)
-	if not skillLine or (InCombatLockdown and InCombatLockdown()) then
-		return false
-	end
-	if self.LogTrace then
-		self:LogTrace("OpenClientTradeSkill", tostring(skillLine) .. (recipeID and (":" .. recipeID) or ""))
-	end
-	self.isSwitchingProfession = true
-	self:SuppressBlizzardFrame()
-	local profInfo = self.playerProfessions[skillLine]
-	local opened = false
-
-	-- 1. C_TradeSkillUI.OpenTradeSkill с родным professionID Forever или классическим skillLine
-	if C_TradeSkillUI and C_TradeSkillUI.OpenTradeSkill then
-		if profInfo and profInfo.professionID then
-			local ok, res = pcall(C_TradeSkillUI.OpenTradeSkill, profInfo.professionID)
-			if ok and res then
-				opened = true
-			end
-		end
-		if not opened and (not profInfo or profInfo.professionID ~= skillLine) then
-			local ok, res = pcall(C_TradeSkillUI.OpenTradeSkill, skillLine)
-			if ok and res then
-				opened = true
-			end
-		end
-	end
-
-	-- 2. C_TradeSkillUI.OpenRecipe открывает окно нужной профессии напрямую по рецепту в WoW Forever
-	local targetRecipe = recipeID or self.selectedRecipeBySkill[skillLine] or self:FindFirstLearnedRecipe(skillLine)
-	if not opened and targetRecipe and C_TradeSkillUI and C_TradeSkillUI.OpenRecipe then
-		local ok = pcall(C_TradeSkillUI.OpenRecipe, targetRecipe)
-		if ok and self:GetActiveClientSkillLine() == skillLine then
-			opened = true
-		end
-	end
-
-	-- 3. Fallback через заклинание профессии (для Горного дела 186 — Выплавка металлов 2656)
-	if not opened and self:GetActiveClientSkillLine() ~= skillLine then
-		local spellID = (skillLine == 186 and 2656) or (profInfo and profInfo.spellID) or self.PROF_SPELLS[skillLine]
-		if spellID then
-			local spellName = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID))
-				or (profInfo and profInfo.name)
-			if spellName and CastSpellByName then
-				pcall(CastSpellByName, spellName)
-			elseif CastSpellByID then
-				pcall(CastSpellByID, spellID)
-			end
-		end
-	end
-
-	self:SuppressBlizzardFrame()
-	self.isSwitchingProfession = false
+	-- В WoW 1.60.1 вызов OpenTradeSkill / CastSpellByName из обычного скрипта блокируется Blizzard (ADDON_ACTION_BLOCKED).
+	-- Переключение профессии в клиенте выполняется только через SecureActionButtonTemplate.
 	return self:GetActiveClientSkillLine() == skillLine
 end
 
@@ -847,16 +797,17 @@ function ns:ExecuteCraftRecipe(recipeID, count)
 	self:SuppressBlizzardFrame()
 
 	if not self:IsClientRecipeReady(recipeID) then
-		self:OpenClientTradeSkill(skillLine, recipeID)
-	end
-	if C_TradeSkillUI and C_TradeSkillUI.OpenRecipe then
-		pcall(C_TradeSkillUI.OpenRecipe, recipeID)
+		if self.Print and skillLine then
+			self:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], self:GetProfessionName(skillLine)))
+		end
+		return false
 	end
 	self:SuppressBlizzardFrame()
 
 	if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
-		pcall(C_TradeSkillUI.CraftRecipe, recipeID, count)
-		return true
+		local ok = ns.SafeCall and ns:SafeCall("CraftRecipe", C_TradeSkillUI.CraftRecipe, recipeID, count)
+			or pcall(C_TradeSkillUI.CraftRecipe, recipeID, count)
+		return ok and true or false
 	end
 	return false
 end
@@ -866,16 +817,18 @@ function ns:SwitchToProfession(skillLine, recipeID)
 		return
 	end
 	self.currentSkillLine = skillLine
-	self.bypassIntercept = false
-	self:SuppressBlizzardFrame()
-
-	if self:GetActiveClientSkillLine() ~= skillLine then
-		self:OpenClientTradeSkill(skillLine, recipeID)
+	if recipeID then
+		self.selectedRecipeBySkill[skillLine] = recipeID
+		self.pinnedRecipeBySkill = self.pinnedRecipeBySkill or {}
+		self.pinnedRecipeBySkill[skillLine] = recipeID
+		self.scrollToSelectedRecipe = true
 	end
+	self.bypassIntercept = false
 	self:SuppressBlizzardFrame()
 	if self.RefreshMainWindow then
 		self:RefreshMainWindow()
 	end
+	self.scrollToSelectedRecipe = false
 end
 
 function ns:EnsureBlizzardReturnButton()
@@ -919,12 +872,8 @@ function ns:OpenBlizzardProfessions()
 	self:RestoreBlizzardFrame()
 	if ProfessionsFrame then
 		self:EnsureBlizzardReturnButton()
-		if not ProfessionsFrame:IsShown() then
-			if self.currentSkillLine and C_TradeSkillUI and C_TradeSkillUI.OpenTradeSkill then
-				pcall(C_TradeSkillUI.OpenTradeSkill, self.currentSkillLine)
-			elseif not InCombatLockdown() then
-				ShowUIPanel(ProfessionsFrame)
-			end
+		if not ProfessionsFrame:IsShown() and not InCombatLockdown() then
+			ShowUIPanel(ProfessionsFrame)
 		end
 	end
 end

@@ -209,12 +209,25 @@ function ns:CreateQueueAndShoppingView(parent)
 		f.rows[i] = row
 	end
 
-	-- Нижняя панель кнопок режима «Очередь»
-	local processBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	-- Нижняя панель кнопок режима «Очередь» (SecureActionButton для легального переключения профессии без taint)
+	local processBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	processBtn:SetSize(180, 24)
 	processBtn:SetPoint("BOTTOMLEFT", 8, 5)
-	processBtn:SetScript("OnClick", function()
-		ns:ProcessQueue()
+	processBtn:RegisterForClicks("AnyUp")
+	if not (InCombatLockdown and InCombatLockdown()) then
+		processBtn:SetAttribute("useOnKeyDown", false)
+	end
+	processBtn:SetScript("PreClick", function(self)
+		self._wasSwitchSkill = self.pendingSkillLine
+	end)
+	processBtn:SetScript("PostClick", function(self)
+		local sw = self._wasSwitchSkill
+		self._wasSwitchSkill = nil
+		if sw then
+			ns:SwitchToProfession(sw)
+		else
+			ns:ProcessQueue()
+		end
 	end)
 	f.processBtn = processBtn
 
@@ -475,23 +488,44 @@ function ns:RefreshQueueAndShoppingView()
 	if isQueue then
 		local switchProf = nil
 		local canCraftAny = false
+		local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
 		for _, step in ipairs(queue) do
 			local ready, state = self:GetQueueStepStatus(step)
 			if ready > 0 then
-				if state == "other_prof" then
-					switchProf = step.skillLine
+				local stepSL = step.skillLine or (self:GetRecipeRecord(step.recipeID) or {}).skillLine
+				if state == "other_prof" or (stepSL and activeClientSL ~= stepSL) then
+					switchProf = stepSL
 				elseif state == "ready" or state == "partial" then
 					canCraftAny = true
 				end
 				break
 			end
 		end
+		local inCombat = InCombatLockdown and InCombatLockdown()
 		if switchProf then
 			f.processBtn:SetText(string.format(L["QUEUE_SWITCH_PROF"], self:GetProfessionName(switchProf)))
 			f.processBtn:SetEnabled(true)
+			f.processBtn.pendingSkillLine = switchProf
+			if not inCombat then
+				local profInfo = self.playerProfessions and self.playerProfessions[switchProf]
+				local spellID = (switchProf == 186 and 2656) or (profInfo and profInfo.spellID) or (self.PROF_SPELLS and self.PROF_SPELLS[switchProf])
+				local spellName = spellID and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
+				if spellName or spellID then
+					f.processBtn:SetAttribute("type", "spell")
+					f.processBtn:SetAttribute("spell", spellName or spellID)
+				else
+					f.processBtn:SetAttribute("type", nil)
+					f.processBtn:SetAttribute("spell", nil)
+				end
+			end
 		else
 			f.processBtn:SetText(L["QUEUE_PROCESS"])
 			f.processBtn:SetEnabled(canCraftAny)
+			f.processBtn.pendingSkillLine = nil
+			if not inCombat then
+				f.processBtn:SetAttribute("type", nil)
+				f.processBtn:SetAttribute("spell", nil)
+			end
 		end
 		f.clearBtn:SetEnabled(#queue > 0)
 	else
