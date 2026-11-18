@@ -123,6 +123,101 @@ local function DisenchantYields(row)
 	return yields
 end
 
+-- Предметы и слоты, которые в игре распылить нельзя (крафтовые жезлы Наложения чар, рубашки, накидки, удочки и т.п.)
+local NON_DISENCHANTABLE_ITEMS = {
+	[11287] = true,  -- Lesser Magic Wand
+	[11288] = true,  -- Greater Magic Wand
+	[11289] = true,  -- Lesser Mystic Wand
+	[11290] = true,  -- Greater Mystic Wand
+	[217287] = true, -- Greater Mystic Wand (WoW Forever)
+}
+
+local NON_DISENCHANTABLE_EQUIP = {
+	INVTYPE_NON_EQUIP = true,
+	INVTYPE_BODY = true,
+	INVTYPE_TABARD = true,
+	INVTYPE_BAG = true,
+	INVTYPE_QUIVER = true,
+	INVTYPE_AMMO = true,
+	INVTYPE_PROFESSION_TOOL = true,
+	INVTYPE_PROFESSION_GEAR = true,
+}
+
+local function IsDisenchantableItem(itemID, quality, iLevel, equipLoc, classID, subclassID, bindType)
+	if NON_DISENCHANTABLE_ITEMS[itemID] then
+		return false
+	end
+	if not (quality and quality >= 2 and quality <= 4 and iLevel and iLevel > 0) then
+		return false
+	end
+	if not (classID == 2 or classID == 4) then
+		return false
+	end
+	if equipLoc and NON_DISENCHANTABLE_EQUIP[equipLoc] then
+		return false
+	end
+	if classID == 2 and subclassID == 20 then -- Удочки
+		return false
+	end
+	if classID == 4 and subclassID == 5 then -- Декоративные
+		return false
+	end
+	if bindType == 4 then -- Предмет задания
+		return false
+	end
+	return true
+end
+
+local function ConvertDisenchantBuddyResults(results)
+	if type(results) ~= "table" or #results == 0 then
+		return nil
+	end
+	local totalProb = 0
+	for _, entry in ipairs(results) do
+		totalProb = totalProb + (tonumber(entry and entry.probability) or 0)
+	end
+	if totalProb <= 0 then
+		return nil
+	end
+	local scale = (totalProb > 1.5) and 100 or 1
+	local yields, byID = {}, {}
+	for _, entry in ipairs(results) do
+		local id = entry and tonumber(entry.itemId)
+		local share = (tonumber(entry and entry.probability) or 0) / scale
+		local minQ = tonumber(entry and entry.minQuantity) or 1
+		local maxQ = tonumber(entry and entry.maxQuantity) or minQ
+		if maxQ < minQ then
+			maxQ = minQ
+		end
+		if id and id > 0 and share > 0 then
+			local avgQ = (minQ + maxQ) / 2
+			local y = byID[id]
+			if not y then
+				y = { itemID = id, chance = 0, avg = 0, min = minQ, max = maxQ }
+				byID[id] = y
+				yields[#yields + 1] = y
+			end
+			y.chance = y.chance + share
+			y.avg = y.avg + share * avgQ
+			if minQ < y.min then y.min = minQ end
+			if maxQ > y.max then y.max = maxQ end
+		end
+	end
+	if #yields == 0 then
+		return nil
+	end
+	for _, y in ipairs(yields) do
+		y.avg = y.avg / y.chance
+	end
+	table.sort(yields, function(a, b)
+		if math.abs((a.chance or 0) - (b.chance or 0)) > 1e-6 then
+			return (a.chance or 0) > (b.chance or 0)
+		end
+		return (a.itemID or 0) < (b.itemID or 0)
+	end)
+	return yields
+end
+
 -- «x1-2» или «x3» для строки выхода распыления
 function ns.FormatDisenchantCount(y)
 	if y.min and y.max and y.min ~= y.max then
@@ -138,23 +233,36 @@ function ns:GetItemDisenchantInfo(itemID)
 	if not (itemID and itemID > 0 and C_Item and C_Item.GetItemInfo) then
 		return nil
 	end
-	local _, _, quality, iLevel, _, _, _, _, _, _, _, classID = C_Item.GetItemInfo(itemID)
+	local _, itemLink, quality, iLevel, _, _, _, _, equipLoc, _, _, classID, subclassID, bindType = C_Item.GetItemInfo(itemID)
 	if not quality then
 		if self.RequestItemData then
 			self:RequestItemData(itemID)
 		end
 		return nil
 	end
-	if not (iLevel and iLevel > 0 and (classID == 2 or classID == 4)) then
-		return nil
-	end
-	local row = DisenchantRow(classID, quality, iLevel)
-	if not row then
+	if not IsDisenchantableItem(itemID, quality, iLevel, equipLoc, classID, subclassID, bindType) then
 		return nil
 	end
 	-- Навык только для показа: Наложение чар у персонажа не требуем, распылять может и другой (bf97f2e)
 	local reqSkill = DisenchantSkill(quality, iLevel)
-	local yields = DisenchantYields(row)
+	local yields = nil
+	local deApi = _G.DisenchantBuddy and _G.DisenchantBuddy.API and _G.DisenchantBuddy.API.v1
+	if deApi and type(deApi.GetDisenchantResults) == "function" then
+		local ok, dbResults = pcall(deApi.GetDisenchantResults, ADDON_NAME, itemLink or itemID)
+		if ok then
+			yields = ConvertDisenchantBuddyResults(dbResults)
+			if not yields then
+				return nil
+			end
+		end
+	end
+	if not yields then
+		local row = DisenchantRow(classID, quality, iLevel)
+		if not row then
+			return nil
+		end
+		yields = DisenchantYields(row)
+	end
 
 	local expectedGross = 0
 	local pricedAny = false
