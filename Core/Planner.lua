@@ -171,21 +171,36 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		if not skipped[recipeID] then
 			local learned = self:IsRecipeLearned(recipeID)
 			local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
+			local scroll = self.RecipeScrolls and self.RecipeScrolls[recipeID]
+			local scrollItemID = scroll and scroll[1] or nil
+			local scrollPrice = (not learned and not isTrainer and scrollItemID) and self:GetAuctionPrice(scrollItemID) or nil
 			local th = self:GetRecipeThresholds(recipeID)
 			-- Базовые стартовые рецепты (оранжевые с 1, без свитка и тренера) тоже доступны
 			local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
-			if learned or isBasic or (includeTrainer and isTrainer) then
+			local hasKnownAcquisition = learned or isBasic or (includeTrainer and (isTrainer or (scrollPrice and scrollPrice > 0)))
+			local isFallbackScroll = (not hasKnownAcquisition) and includeTrainer and (scrollItemID ~= nil)
+			if hasKnownAcquisition or isFallbackScroll then
 				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
 				if craftCost then
 					local vendorSell = (alts and alts.vendor) or 0
 					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше
 					local effectiveDeduct = ns.GetSkillUpReturn(alts, deductVendor)
 					local unitReturn = deductVendor and effectiveDeduct or math.max(outVal or 0, vendorSell)
+					local acquireFee = 0
+					if not learned and not isBasic then
+						if isTrainer then
+							acquireFee = trainerFee or 0
+						elseif scrollPrice and scrollPrice > 0 then
+							acquireFee = scrollPrice
+						end
+					end
 					candidates[#candidates + 1] = {
 						recipeID = recipeID,
 						learned = learned or isBasic,
 						reqSkill = learned and 1 or (reqSkill or 1),
-						trainerFee = (not learned and not isBasic and trainerFee) or 0,
+						trainerFee = acquireFee,
+						scrollItemID = (not learned and not isBasic and not isTrainer) and scrollItemID or nil,
+						isFallback = isFallbackScroll,
 						th = th,
 						craftCost = craftCost,
 						unitReturn = unitReturn,
@@ -251,17 +266,19 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 
 	-- Предварительно индексируем активных кандидатов по очкам навыка [startSkill .. goalSkill-1]
 	local recipesAtSkill = {}
+	local fallbackAtSkill = {}
 	for _, c in ipairs(candidates) do
 		if c.th and c.th[4] then
+			local targetMap = c.isFallback and fallbackAtSkill or recipesAtSkill
 			local lo = math.max(startSkill, c.reqSkill or 1)
 			local hi = math.min(goalSkill - 1, c.th[4] - 1)
 			for sk = lo, hi do
 				local chance, color = ns.CalculateSkillUpChance(sk, c.th)
 				if chance > 0.05 then
-					local bucket = recipesAtSkill[sk]
+					local bucket = targetMap[sk]
 					if not bucket then
 						bucket = {}
-						recipesAtSkill[sk] = bucket
+						targetMap[sk] = bucket
 					end
 					bucket[#bucket + 1] = {
 						cand = c,
@@ -294,6 +311,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		return a.cand.recipeID < b.cand.recipeID
 	end
 
+	local stoppedAt = nil
 	for s = startSkill, goalSkill - 1 do
 		if s >= activeCap - 15 and activeCap < goalSkill then
 			local nextCap = activeCap + 75
@@ -307,7 +325,11 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		end
 
 		local bucket = recipesAtSkill[s]
+		if (not bucket or #bucket == 0) and fallbackAtSkill[s] then
+			bucket = fallbackAtSkill[s]
+		end
 		if not bucket or #bucket == 0 then
+			stoppedAt = s
 			break
 		end
 
@@ -321,10 +343,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				local buyCostForPoint, ahPenalty = EvalStateBuyCost(state, c, craftsPerPoint)
 				local returnForPoint = (c.unitReturn or 0) * craftsPerPoint
 				local netTotal = buyCostForPoint - returnForPoint
-				local rngPenalty
-				if priority == "profit" then
-					rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 500 + 100) or 0
-				else
+				local rngPenalty = 0
+				if priority ~= "profit" then
 					rngPenalty = (chance < 0.999) and ((craftsPerPoint - 1) * 20000 + 5000) or 0
 				end
 				local stepScore
@@ -509,6 +529,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					unitReturn = c.unitReturn or 0,
 					reagents = c.reagents,
 					learnFee = p.learnFee,
+					scrollItemID = c.scrollItemID,
 					reqSkill = c.reqSkill,
 				}
 			end
@@ -560,6 +581,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		totalReturn = totalReturn,
 		startSkill = startSkill,
 		goalSkill = goalSkill,
+		stoppedAt = stoppedAt,
 	}
 end
 

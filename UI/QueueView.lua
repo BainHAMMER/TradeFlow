@@ -313,6 +313,13 @@ function ns:CreateQueueAndShoppingView(parent)
 	learnTrainerBtn:Hide()
 	f.learnTrainerBtn = learnTrainerBtn
 
+	f:RegisterEvent("PLAYER_REGEN_ENABLED")
+	f:SetScript("OnEvent", function(_, ev)
+		if ev == "PLAYER_REGEN_ENABLED" and f:IsVisible() then
+			ns:RefreshQueueAndShoppingView()
+		end
+	end)
+
 	self.queueView = f
 	return f
 end
@@ -485,7 +492,10 @@ function ns:RefreshQueueAndShoppingView()
 	local trainerMatches = (self.GetTrainerQueueMatches and self:GetTrainerQueueMatches()) or {}
 	local hasTrainerMatches = (#trainerMatches > 0)
 
-	f.processBtn:SetShown(isQueue)
+	local inCombat = InCombatLockdown and InCombatLockdown()
+	if not inCombat then
+		f.processBtn:SetShown(isQueue)
+	end
 	f.clearBtn:SetShown(isQueue)
 	f.shopTotal:SetShown(not isQueue)
 	f.syncAtrBtn:SetShown(not isQueue)
@@ -540,9 +550,9 @@ function ns:RefreshQueueAndShoppingView()
 		local inCombat = InCombatLockdown and InCombatLockdown()
 		if switchProf then
 			f.processBtn:SetText(string.format(L["QUEUE_SWITCH_PROF"], self:GetProfessionName(switchProf)))
-			f.processBtn:SetEnabled(true)
 			f.processBtn.pendingSkillLine = switchProf
 			if not inCombat then
+				f.processBtn:SetEnabled(true)
 				local profInfo = self.playerProfessions and self.playerProfessions[switchProf]
 				local spellID = (switchProf == 186 and 2656) or (profInfo and profInfo.spellID) or (self.PROF_SPELLS and self.PROF_SPELLS[switchProf])
 				local spellName = spellID and ((C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or (GetSpellInfo and GetSpellInfo(spellID)))
@@ -556,9 +566,9 @@ function ns:RefreshQueueAndShoppingView()
 			end
 		else
 			f.processBtn:SetText(L["QUEUE_PROCESS"])
-			f.processBtn:SetEnabled(canCraftAny)
 			f.processBtn.pendingSkillLine = nil
 			if not inCombat then
+				f.processBtn:SetEnabled(canCraftAny)
 				f.processBtn:SetAttribute("type", nil)
 				f.processBtn:SetAttribute("spell", nil)
 			end
