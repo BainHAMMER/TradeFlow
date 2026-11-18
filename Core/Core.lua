@@ -914,9 +914,284 @@ function ns:OpenClientTradeSkill(skillLine, recipeID)
 	return self:GetActiveClientSkillLine() == skillLine
 end
 
+-------------------------------------------------------------------------------
+-- Наложение чар: автоопределение цели (CraftEnchant) и подтверждение замены Пробелом
+-------------------------------------------------------------------------------
+local ENCHANT_RECIPE_TYPE = (Enum and Enum.TradeskillRecipeType and Enum.TradeskillRecipeType.Enchant) or 2
+local ENCHANT_VELLUM_ID = 38682
+
+ns.enchantTargets = ns.enchantTargets or {}
+
+local ENCHANT_SLOT_PATTERNS = {
+	{ pattern = "нагрудник", slots = { 5 } },
+	{ pattern = "chest",     slots = { 5 } },
+	{ pattern = "наруч",     slots = { 9 } },
+	{ pattern = "браслет",   slots = { 9 } },
+	{ pattern = "bracer",    slots = { 9 } },
+	{ pattern = "wrist",     slots = { 9 } },
+	{ pattern = "плащ",      slots = { 15 } },
+	{ pattern = "cloak",     slots = { 15 } },
+	{ pattern = "back",      slots = { 15 } },
+	{ pattern = "обув",      slots = { 8 } },
+	{ pattern = "сапог",     slots = { 8 } },
+	{ pattern = "ботин",     slots = { 8 } },
+	{ pattern = "boots",     slots = { 8 } },
+	{ pattern = "feet",      slots = { 8 } },
+	{ pattern = "перчат",    slots = { 10 } },
+	{ pattern = "gloves",    slots = { 10 } },
+	{ pattern = "щит",       slots = { 17 } },
+	{ pattern = "shield",    slots = { 17 } },
+	{ pattern = "двуруч",    slots = { 16 } },
+	{ pattern = "оружи",     slots = { 16 } },
+	{ pattern = "weapon",    slots = { 16 } },
+	{ pattern = "кольц",     slots = { 11, 12 } },
+	{ pattern = "ring",      slots = { 11, 12 } },
+}
+
+local function BuildItemLocationFromSaved(entry)
+	if not (entry and ItemLocation) then
+		return nil
+	end
+	local loc = nil
+	if entry.equipSlot and ItemLocation.CreateFromEquipmentSlot then
+		loc = ItemLocation:CreateFromEquipmentSlot(entry.equipSlot)
+	elseif entry.bag ~= nil and entry.slot ~= nil and ItemLocation.CreateFromBagAndSlot then
+		loc = ItemLocation:CreateFromBagAndSlot(entry.bag, entry.slot)
+	elseif entry.guid and C_Item and C_Item.GetItemLocation then
+		loc = C_Item.GetItemLocation(entry.guid)
+	end
+	if loc and loc.IsValid and loc:IsValid() then
+		if not (C_Item and C_Item.DoesItemExist) or C_Item.DoesItemExist(loc) then
+			return loc
+		end
+	end
+	return nil
+end
+
+local function BuildTargetMeta(loc, isManual)
+	if not loc then
+		return nil
+	end
+	local itemID = C_Item and C_Item.GetItemID and C_Item.GetItemID(loc) or nil
+	local itemLink = C_Item and C_Item.GetItemLink and C_Item.GetItemLink(loc) or nil
+	local icon = C_Item and C_Item.GetItemIcon and C_Item.GetItemIcon(loc) or nil
+	local name = C_Item and C_Item.GetItemName and C_Item.GetItemName(loc) or nil
+	if (not name or not icon) and itemID and ns.GetItemDisplay then
+		local dName, dIcon, _, dLink = ns:GetItemDisplay(itemID)
+		name = name or dName
+		icon = icon or dIcon
+		itemLink = itemLink or dLink
+	end
+	return {
+		itemID = itemID,
+		itemLink = itemLink,
+		icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+		name = name or (itemID and ("#" .. itemID)) or "?",
+		isManual = isManual and true or false,
+		isEquipped = loc.IsEquipmentSlot and loc:IsEquipmentSlot() or false,
+	}
+end
+
+function ns:IsEnchantRecipe(recipeID)
+	if not recipeID then
+		return false
+	end
+	local live = self.liveRecipes and self.liveRecipes[recipeID]
+	if live and live.recipeType ~= nil then
+		return live.recipeType == ENCHANT_RECIPE_TYPE
+	end
+	if C_TradeSkillUI and C_TradeSkillUI.GetRecipeSchematic then
+		local ok, sch = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+		if ok and sch and sch.recipeType ~= nil then
+			return sch.recipeType == ENCHANT_RECIPE_TYPE
+		end
+	end
+	local rec = self:GetRecipeRecord(recipeID)
+	return rec ~= nil and rec.skillLine == 333 and not rec.outputItemID
+end
+
+function ns:SetEnchantTargetFromCursor(recipeID)
+	if not (recipeID and CursorHasItem and CursorHasItem()) then
+		return false
+	end
+	local loc = C_Cursor and C_Cursor.GetCursorItem and C_Cursor.GetCursorItem() or nil
+	if not (loc and loc.IsValid and loc:IsValid()) then
+		return false
+	end
+	local saved = nil
+	if loc.IsEquipmentSlot and loc:IsEquipmentSlot() and loc.GetEquipmentSlot then
+		saved = { equipSlot = loc:GetEquipmentSlot() }
+	elseif loc.IsBagAndSlot and loc:IsBagAndSlot() and loc.GetBagAndSlot then
+		local bag, slot = loc:GetBagAndSlot()
+		saved = { bag = bag, slot = slot }
+	elseif C_Item and C_Item.GetItemGUID then
+		local guid = C_Item.GetItemGUID(loc)
+		if guid then
+			saved = { guid = guid }
+		end
+	end
+	if not saved then
+		return false
+	end
+	self.enchantTargets[recipeID] = saved
+	if ClearCursor then
+		ClearCursor()
+	end
+	return true
+end
+
+function ns:ClearEnchantTarget(recipeID)
+	if recipeID then
+		self.enchantTargets[recipeID] = nil
+	end
+end
+
+function ns:ResolveEnchantTarget(recipeID)
+	if not recipeID then
+		return nil, nil
+	end
+	local manualEntry = self.enchantTargets and self.enchantTargets[recipeID]
+	if manualEntry then
+		local loc = BuildItemLocationFromSaved(manualEntry)
+		if loc then
+			return loc, BuildTargetMeta(loc, true)
+		end
+		self.enchantTargets[recipeID] = nil
+	end
+
+	-- 1. Штатный список целей от Blizzard (предпочитаем надетую экипировку, затем вещи в сумках, затем свиток)
+	if C_TradeSkillUI and C_TradeSkillUI.GetEnchantItems and C_Item and C_Item.GetItemLocation then
+		local ok, items = pcall(C_TradeSkillUI.GetEnchantItems, recipeID)
+		if ok and type(items) == "table" and #items > 0 then
+			local eqLoc, bagLoc, vellumLoc = nil, nil, nil
+			for _, entry in ipairs(items) do
+				local guid = (type(entry) == "string" and entry) or (type(entry) == "table" and entry.itemGUID)
+				if guid then
+					local loc = C_Item.GetItemLocation(guid)
+					if loc and loc.IsValid and loc:IsValid() then
+						if loc.IsEquipmentSlot and loc:IsEquipmentSlot() then
+							eqLoc = eqLoc or loc
+						else
+							local itemID = C_Item.GetItemID and C_Item.GetItemID(loc)
+							if itemID == ENCHANT_VELLUM_ID then
+								vellumLoc = vellumLoc or loc
+							else
+								bagLoc = bagLoc or loc
+							end
+						end
+					end
+				end
+			end
+			local chosen = eqLoc or bagLoc or vellumLoc
+			if chosen then
+				return chosen, BuildTargetMeta(chosen, false)
+			end
+		end
+	end
+
+	-- 2. Резерв по названию рецепта -> подходящий надетый слот экипировки
+	if ItemLocation and ItemLocation.CreateFromEquipmentSlot then
+		local name = self.GetRecipeDisplay and self:GetRecipeDisplay(recipeID) or ""
+		local lower = tostring(name or ""):lower()
+		for _, rule in ipairs(ENCHANT_SLOT_PATTERNS) do
+			if lower:find(rule.pattern, 1, true) then
+				for _, slotID in ipairs(rule.slots) do
+					local loc = ItemLocation:CreateFromEquipmentSlot(slotID)
+					if loc and loc.IsValid and loc:IsValid() and (not C_Item or not C_Item.DoesItemExist or C_Item.DoesItemExist(loc)) then
+						return loc, BuildTargetMeta(loc, false)
+					end
+				end
+			end
+		end
+	end
+
+	return nil, nil
+end
+
+local popupBindOwner = CreateFrame("Frame", "TradeFlowPopupBindOwner", UIParent)
+local popupConfirmProxy = CreateFrame("Button", "TradeFlowPopupConfirmBtn", UIParent, "SecureActionButtonTemplate")
+popupConfirmProxy:SetAttribute("type", "click")
+popupConfirmProxy:RegisterForClicks("AnyDown", "AnyUp")
+local hookedPopups = {}
+
+local function ClearReplaceEnchantSpace()
+	if not (InCombatLockdown and InCombatLockdown()) and ClearOverrideBindings then
+		ClearOverrideBindings(popupBindOwner)
+	end
+end
+
+local function FindReplaceEnchantPopup()
+	local dlg = StaticPopup_FindVisible and StaticPopup_FindVisible("REPLACE_ENCHANT")
+	if not dlg then
+		local maxN = STATICPOPUP_NUMDIALOGS or 4
+		for i = 1, maxN do
+			local f = _G["StaticPopup" .. i]
+			if f and f:IsShown() and f.which == "REPLACE_ENCHANT" then
+				dlg = f
+				break
+			end
+		end
+	end
+	if not dlg then
+		return nil, nil
+	end
+	local btn = (dlg.GetButton and dlg:GetButton(1)) or dlg.button1
+	if not btn and dlg.GetName and dlg:GetName() then
+		btn = _G[dlg:GetName() .. "Button1"]
+	end
+	return dlg, btn
+end
+
+local function BindReplaceEnchantSpace()
+	if InCombatLockdown and InCombatLockdown() then
+		return
+	end
+	local dlg, btn = FindReplaceEnchantPopup()
+	if not (dlg and btn and btn.IsEnabled and btn:IsEnabled()) then
+		ClearReplaceEnchantSpace()
+		return
+	end
+	local focus = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+	if focus then
+		if ns.mainFrame and focus.IsDescendantOf and focus:IsDescendantOf(ns.mainFrame) then
+			focus:ClearFocus()
+		else
+			return
+		end
+	end
+	if not hookedPopups[dlg] then
+		hookedPopups[dlg] = true
+		dlg:HookScript("OnHide", ClearReplaceEnchantSpace)
+	end
+	if ClearOverrideBindings then
+		ClearOverrideBindings(popupBindOwner)
+	end
+	if SetOverrideBindingClick then
+		local btnName = btn.GetName and btn:GetName()
+		if btnName and btnName ~= "" then
+			SetOverrideBindingClick(popupBindOwner, true, "SPACE", btnName)
+		else
+			popupConfirmProxy:SetAttribute("clickbutton", btn)
+			SetOverrideBindingClick(popupBindOwner, true, "SPACE", "TradeFlowPopupConfirmBtn")
+		end
+	end
+end
+
+if hooksecurefunc and StaticPopup_Show then
+	hooksecurefunc("StaticPopup_Show", function(which)
+		if which == "REPLACE_ENCHANT" then
+			BindReplaceEnchantSpace()
+		end
+	end)
+end
+
 function ns:ExecuteCraftRecipe(recipeID, count)
 	if not recipeID or (InCombatLockdown and InCombatLockdown()) then
 		return false
+	end
+	local focus = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+	if focus and self.mainFrame and focus.IsDescendantOf and focus:IsDescendantOf(self.mainFrame) then
+		focus:ClearFocus()
 	end
 	if self.LogTrace then
 		self:LogTrace("CraftRecipe", tostring(recipeID) .. "x" .. tostring(count or 1))
@@ -935,6 +1210,21 @@ function ns:ExecuteCraftRecipe(recipeID, count)
 		return false
 	end
 	self:SuppressBlizzardFrame()
+
+	if C_TradeSkillUI and C_TradeSkillUI.CraftEnchant and self:IsEnchantRecipe(recipeID) then
+		local targetLoc = self:ResolveEnchantTarget(recipeID)
+		if targetLoc then
+			local ok
+			if ns.SafeCall then
+				ok = ns:SafeCall("CraftEnchant", C_TradeSkillUI.CraftEnchant, recipeID, count, {}, targetLoc)
+			else
+				ok = pcall(C_TradeSkillUI.CraftEnchant, recipeID, count, {}, targetLoc)
+			end
+			if ok then
+				return true
+			end
+		end
+	end
 
 	if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
 		local ok
@@ -1044,6 +1334,9 @@ for _, ev in ipairs({
 	"NEW_RECIPE_LEARNED",
 	"GET_ITEM_INFO_RECEIVED",
 	"ITEM_DATA_LOAD_RESULT",
+	"REPLACE_ENCHANT",
+	"PLAYER_REGEN_DISABLED",
+	"PLAYER_EQUIPMENT_CHANGED",
 }) do
 	pcall(eventFrame.RegisterEvent, eventFrame, ev)
 end
@@ -1182,6 +1475,17 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			return
 		end
 		ScheduleItemDataRefresh()
+	elseif event == "REPLACE_ENCHANT" then
+		BindReplaceEnchantSpace()
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0, BindReplaceEnchantSpace)
+		end
+	elseif event == "PLAYER_REGEN_DISABLED" then
+		ClearReplaceEnchantSpace()
+	elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+		if ns.mainFrame and ns.mainFrame:IsShown() and ns.RefreshVisibleUI then
+			ns:RefreshVisibleUI()
+		end
 	end
 end)
 

@@ -1015,6 +1015,75 @@ function ns:CreateDetailsView(parent)
 	deBlock:Hide()
 	d.deBlock = deBlock
 
+	-- Цель для наложения чар (CraftEnchant): автоподбор экипировки или перетаскивание предмета
+	local etBar = CreateFrame("Frame", nil, d)
+	etBar:SetHeight(32)
+	local etSlot = CreateFrame("Button", nil, etBar, "BackdropTemplate")
+	etSlot:SetSize(26, 26)
+	etSlot:SetPoint("LEFT", 2, 0)
+	etSlot:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 8, edgeSize = 8,
+		insets = { left = 2, right = 2, top = 2, bottom = 2 },
+	})
+	etSlot:SetBackdropColor(0.08, 0.08, 0.08, 0.9)
+	etSlot:SetBackdropBorderColor(0.55, 0.45, 0.20, 0.9)
+	etSlot.icon = etSlot:CreateTexture(nil, "ARTWORK")
+	etSlot.icon:SetPoint("TOPLEFT", 2, -2)
+	etSlot.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+	etSlot.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+	etSlot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	etSlot:RegisterForDrag("LeftButton")
+	local function HandleTargetDrop(_, btn)
+		local rID = d.currentRecipeID
+		if not rID then
+			return
+		end
+		if btn == "RightButton" then
+			if ns.ClearEnchantTarget then
+				ns:ClearEnchantTarget(rID)
+				ns:RefreshDetailsView()
+			end
+			return
+		end
+		if CursorHasItem and CursorHasItem() and ns.SetEnchantTargetFromCursor and ns:SetEnchantTargetFromCursor(rID) then
+			ns:RefreshDetailsView()
+		end
+	end
+	etSlot:SetScript("OnReceiveDrag", HandleTargetDrop)
+	etSlot:SetScript("OnClick", HandleTargetDrop)
+	etSlot:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+		if self.itemLink and GameTooltip.SetHyperlink then
+			pcall(GameTooltip.SetHyperlink, GameTooltip, self.itemLink)
+			GameTooltip:AddLine(" ")
+		elseif self.itemID then
+			GameTooltip:SetItemByID(self.itemID)
+			GameTooltip:AddLine(" ")
+		end
+		GameTooltip:AddLine(L["ENCHANT_TARGET_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:Show()
+	end)
+	etSlot:SetScript("OnLeave", GameTooltip_Hide)
+
+	etBar.titleText = etBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	etBar.titleText:SetPoint("TOPLEFT", etSlot, "TOPRIGHT", 6, -1)
+	etBar.titleText:SetPoint("RIGHT", -4, 0)
+	etBar.titleText:SetJustifyH("LEFT")
+	etBar.titleText:SetWordWrap(false)
+
+	etBar.hintText = etBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	etBar.hintText:SetPoint("BOTTOMLEFT", etSlot, "BOTTOMRIGHT", 6, 1)
+	etBar.hintText:SetPoint("RIGHT", -4, 0)
+	etBar.hintText:SetJustifyH("LEFT")
+	etBar.hintText:SetWordWrap(false)
+	etBar.hintText:SetText("|cff888888" .. L["ENCHANT_TARGET_HINT"] .. "|r")
+
+	etBar.slotBtn = etSlot
+	etBar:Hide()
+	d.enchantTargetBar = etBar
+
 	-- Ввод количества и кнопки «В очередь», «В очередь все», «Создать»
 	local minusBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
 	minusBtn:SetSize(24, 24)
@@ -1119,6 +1188,9 @@ function ns:RefreshDetailsView()
 		end
 		if d.deBlock then
 			d.deBlock:Hide()
+		end
+		if d.enchantTargetBar then
+			d.enchantTargetBar:Hide()
 		end
 		for i = 1, 6 do d.reagentRows[i]:Hide() end
 		self:UpdateEconBox(d, nil)
@@ -1280,6 +1352,33 @@ function ns:RefreshDetailsView()
 	end
 	-- Только для изученных: у неизученных на этом месте строка источника и кнопка TomTom (y = -203)
 	self:UpdateDisenchantBlock(d, metrics.learned and outItemID or nil, math.min(#breakdown, 6))
+	if d.enchantTargetBar then
+		if metrics.learned and self.IsEnchantRecipe and self:IsEnchantRecipe(recipeID) then
+			local nReag = math.min(#breakdown, 6)
+			local topY = math.max(-222, -64 - nReag * 18 - 6)
+			d.enchantTargetBar:ClearAllPoints()
+			d.enchantTargetBar:SetPoint("TOPLEFT", d, "TOPLEFT", 8, topY)
+			d.enchantTargetBar:SetPoint("TOPRIGHT", d, "TOPRIGHT", -244, topY)
+			local _, meta = self:ResolveEnchantTarget(recipeID)
+			if meta then
+				d.enchantTargetBar.slotBtn.itemID = meta.itemID
+				d.enchantTargetBar.slotBtn.itemLink = meta.itemLink
+				d.enchantTargetBar.slotBtn.icon:SetTexture(meta.icon)
+				d.enchantTargetBar.slotBtn:SetBackdropBorderColor(meta.isManual and 0.25 or 0.55, meta.isManual and 0.90 or 0.45, meta.isManual and 0.35 or 0.20, 0.95)
+				local fmtKey = meta.isManual and "ENCHANT_TARGET_MANUAL" or "ENCHANT_TARGET_AUTO"
+				d.enchantTargetBar.titleText:SetText(string.format(L[fmtKey], meta.itemLink or meta.name))
+			else
+				d.enchantTargetBar.slotBtn.itemID = nil
+				d.enchantTargetBar.slotBtn.itemLink = nil
+				d.enchantTargetBar.slotBtn.icon:SetTexture("Interface\\PaperDoll\\UI-Backpack-EmptySlot")
+				d.enchantTargetBar.slotBtn:SetBackdropBorderColor(0.65, 0.30, 0.25, 0.9)
+				d.enchantTargetBar.titleText:SetText("|cffff8866" .. L["ENCHANT_TARGET_NONE"] .. "|r")
+			end
+			d.enchantTargetBar:Show()
+		else
+			d.enchantTargetBar:Hide()
+		end
+	end
 
 	self:UpdateEconBox(d, {
 		craftCost = craftCost,

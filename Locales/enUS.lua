@@ -233,5 +233,10 @@ ns.Locales.en = {
 	["DEBUG_LOG_REFRESH"] = "Refresh",
 	["DEBUG_BLOCKED_CHAT"] = "Recorded [%s] (%s: %s) - type /tf log",
 	["CRAFT_OPEN_PROF_MSG"] = "Open %s in-game (or click the Switch button in Queue) before crafting.",
+	["ENCHANT_TARGET_AUTO"] = "Target (auto): %s",
+	["ENCHANT_TARGET_MANUAL"] = "Target: %s",
+	["ENCHANT_TARGET_NONE"] = "Target: none found (drag item here)",
+	["ENCHANT_TARGET_HINT"] = "Space - confirm enchant replace",
+	["ENCHANT_TARGET_TIP"] = "Drag an item from bags or gear here to target it.\nRight-click: reset to auto-detect.\nPress Space when the Replace Enchant prompt appears.",
 }
 
