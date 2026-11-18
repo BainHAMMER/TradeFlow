@@ -6,6 +6,7 @@ ns.Locales.en = {
 	["ADDON_SUBTITLE"] = "Crafting Queue & Leveling Calculator",
 	["BLIZZARD_UI"] = "Blizzard UI",
 	["BLIZZARD_UI_DESC"] = "Open the default Blizzard Professions window",
+	["BLIZZARD_UI_NEED_PROF"] = "Open a profession first (K or its action bar icon): the game does not let addons open it.",
 	["LANG_TOOLTIP"] = "Switch UI language instantly (no /reload).\nItems and recipes are always resolved directly from the game client by ID.",
 	["CLOSE"] = "Close",
 	["SEARCH_PLACEHOLDER"] = "Search recipe or reagent...",
