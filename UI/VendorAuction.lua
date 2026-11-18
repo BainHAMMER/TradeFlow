@@ -398,6 +398,7 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 			ns:RefreshQueueAndShoppingView()
 		end
 	elseif event == "BANKFRAME_CLOSED" then
+		ns.bankWithdrawJob = nil
 		if bankBar then
 			bankBar:Hide()
 		end
@@ -457,6 +458,20 @@ end)
 -------------------------------------------------------------------------------
 -- Панель и кнопка «Забрать материалы» в окне банка (BANKFRAME_OPENED)
 -------------------------------------------------------------------------------
+local function ReadBankSlot(bag, slot, GetInfo)
+	local count, locked = 1, false
+	if C_Container and C_Container.GetContainerItemInfo then
+		local info = C_Container.GetContainerItemInfo(bag, slot)
+		count = (info and info.stackCount) or 1
+		locked = (info and info.isLocked) == true
+	elseif GetInfo then
+		local _, c, l = GetInfo(bag, slot)
+		count = c or 1
+		locked = l == true
+	end
+	return count, locked
+end
+
 local function CollectBankMatches()
 	if not (BankFrame and BankFrame:IsShown()) then
 		return {}
@@ -485,7 +500,7 @@ local function CollectBankMatches()
 		bankContainers[#bankContainers + 1] = b
 	end
 
-	local matchesByItem = {}
+	local rawByItem = {}
 	local order = {}
 	for _, bag in ipairs(bankContainers) do
 		local slots = GetNumSlots(bag) or 0
@@ -493,27 +508,41 @@ local function CollectBankMatches()
 			local itemID = GetID and GetID(bag, slot)
 			local need = itemID and needByItem[itemID]
 			if need and need > 0 then
-				local count = 1
-				if C_Container and C_Container.GetContainerItemInfo then
-					local info = C_Container.GetContainerItemInfo(bag, slot)
-					count = (info and info.stackCount) or 1
-				elseif GetInfo then
-					local _, c = GetInfo(bag, slot)
-					count = c or 1
+				local count, locked = ReadBankSlot(bag, slot, GetInfo)
+				if not rawByItem[itemID] then
+					rawByItem[itemID] = { itemID = itemID, need = need, totalTake = 0, slots = {} }
+					order[#order + 1] = rawByItem[itemID]
 				end
-				if not matchesByItem[itemID] then
-					matchesByItem[itemID] = { itemID = itemID, need = need, totalTake = 0, slots = {} }
-					order[#order + 1] = matchesByItem[itemID]
-				end
-				local entry = matchesByItem[itemID]
-				local rem = entry.need - entry.totalTake
-				if rem > 0 then
-					local take = math.min(rem, count)
-					entry.slots[#entry.slots + 1] = { bag = bag, slot = slot, count = count, take = take }
-					entry.totalTake = entry.totalTake + take
-				end
+				local slotsList = rawByItem[itemID].slots
+				slotsList[#slotsList + 1] = { bag = bag, slot = slot, count = count, locked = locked }
 			end
 		end
+	end
+
+	-- Берём сначала меньшие/неполные стаки целиком через UseContainerItem, дробя лишь последний остаток
+	for _, entry in ipairs(order) do
+		table.sort(entry.slots, function(a, b)
+			if a.count ~= b.count then
+				return a.count < b.count
+			end
+			if a.bag ~= b.bag then
+				return a.bag < b.bag
+			end
+			return a.slot < b.slot
+		end)
+		local picked = {}
+		local rem = entry.need
+		for _, s in ipairs(entry.slots) do
+			if rem <= 0 then
+				break
+			end
+			local take = math.min(rem, s.count)
+			s.take = take
+			picked[#picked + 1] = s
+			entry.totalTake = entry.totalTake + take
+			rem = rem - take
+		end
+		entry.slots = picked
 	end
 	return order
 end
@@ -525,15 +554,23 @@ end
 local function FindFreePlayerBagSlot()
 	local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
 	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
 	local GetFree = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
 	local maxBag = NUM_BAG_SLOTS or 4
 	for bag = 0, maxBag do
-		local free = GetFree and GetFree(bag)
-		if not free or free > 0 then
+		local free, family
+		if GetFree then
+			free, family = GetFree(bag)
+		end
+		-- Только обычные сумки (family == 0), чтобы Split+Pickup не упирался в спец-сумки
+		if (not free or free > 0) and (not family or family == 0) then
 			local slots = GetNumSlots and GetNumSlots(bag) or 0
 			for slot = 1, slots do
 				if not (GetID and GetID(bag, slot)) then
-					return bag, slot
+					local _, locked = ReadBankSlot(bag, slot, GetInfo)
+					if not locked then
+						return bag, slot
+					end
 				end
 			end
 		end
@@ -541,7 +578,39 @@ local function FindFreePlayerBagSlot()
 	return nil, nil
 end
 
+local function FinishBankWithdraw(job)
+	if ns.bankWithdrawJob ~= job then
+		return
+	end
+	ns.bankWithdrawJob = nil
+	if bankBar and bankBar.btn then
+		bankBar.btn:SetEnabled(true)
+	end
+	local function ReportActual()
+		ns:ScanBagsNow()
+		for _, itemID in ipairs(job.order) do
+			local gained = ns:GetBagCount(itemID) - (job.beforeBags[itemID] or 0)
+			if gained > 0 then
+				local name = ns:GetItemDisplay(itemID)
+				ns:Print(string.format(L["BANK_WITHDRAWN_MSG"], name, gained))
+			end
+		end
+		ns:RefreshBankBar()
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
+		end
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.25, ReportActual)
+	else
+		ReportActual()
+	end
+end
+
 function ns:WithdrawBankShoppingList()
+	if self.bankWithdrawJob then
+		return
+	end
 	local matches = CollectBankMatches()
 	if #matches == 0 then
 		return
@@ -556,42 +625,126 @@ function ns:WithdrawBankShoppingList()
 		ClearCursor()
 	end
 
+	local job = {
+		order = {},
+		beforeBags = {},
+		steps = 0,
+		stalls = 0,
+		lastTotal = nil,
+	}
 	for _, m in ipairs(matches) do
-		local moved = 0
-		for _, s in ipairs(m.slots) do
-			if s.take >= s.count then
-				pcall(UseItem, s.bag, s.slot)
-				moved = moved + s.count
-			elseif SplitItem and PickupItem then
-				local dstBag, dstSlot = FindFreePlayerBagSlot()
-				if dstBag and dstSlot then
-					pcall(SplitItem, s.bag, s.slot, s.take)
-					pcall(PickupItem, dstBag, dstSlot)
-					moved = moved + s.take
-				else
-					pcall(UseItem, s.bag, s.slot)
-					moved = moved + s.count
-				end
-			else
-				pcall(UseItem, s.bag, s.slot)
-				moved = moved + s.count
+		job.order[#job.order + 1] = m.itemID
+		job.beforeBags[m.itemID] = self:GetBagCount(m.itemID)
+	end
+	self.bankWithdrawJob = job
+	if bankBar and bankBar.btn then
+		bankBar.btn:SetEnabled(false)
+	end
+
+	local function StepNext()
+		if ns.bankWithdrawJob ~= job then
+			return
+		end
+		if not (BankFrame and BankFrame:IsShown()) or job.steps >= 45 then
+			FinishBankWithdraw(job)
+			return
+		end
+		if CursorHasItem and CursorHasItem() then
+			if ClearCursor then
+				ClearCursor()
+			end
+			if CursorHasItem() then
+				FinishBankWithdraw(job)
+				return
 			end
 		end
-		if moved > 0 then
-			local name = self:GetItemDisplay(m.itemID)
-			self:Print(string.format(L["BANK_WITHDRAWN_MSG"], name, moved))
+
+		ns:ScanBagsNow()
+		local cur = CollectBankMatches()
+		if #cur == 0 then
+			FinishBankWithdraw(job)
+			return
+		end
+
+		local totalNeed = 0
+		for _, entry in ipairs(cur) do
+			totalNeed = totalNeed + (entry.totalTake or 0)
+		end
+		if job.lastTotal and totalNeed >= job.lastTotal then
+			job.stalls = job.stalls + 1
+			if job.stalls >= 4 then
+				FinishBankWithdraw(job)
+				return
+			end
+		else
+			job.stalls = 0
+		end
+		job.lastTotal = totalNeed
+
+		local s = nil
+		for _, entry in ipairs(cur) do
+			for _, cand in ipairs(entry.slots or {}) do
+				if not cand.locked then
+					s = cand
+					break
+				end
+			end
+			if s then
+				break
+			end
+		end
+		if not s then
+			-- Все подходящие слоты сейчас залочены сервером — ждём следующий тик
+			job.stalls = job.stalls + 1
+			if job.stalls >= 4 then
+				FinishBankWithdraw(job)
+				return
+			end
+			if C_Timer and C_Timer.After then
+				C_Timer.After(0.14, StepNext)
+			else
+				FinishBankWithdraw(job)
+			end
+			return
+		end
+
+		job.steps = job.steps + 1
+		local movedAny = false
+		if s.take >= s.count then
+			local ok = pcall(UseItem, s.bag, s.slot)
+			movedAny = ok
+		elseif SplitItem and PickupItem then
+			local dstBag, dstSlot = FindFreePlayerBagSlot()
+			if dstBag and dstSlot then
+				local okSplit = pcall(SplitItem, s.bag, s.slot, s.take)
+				if okSplit and (not CursorHasItem or CursorHasItem()) then
+					local okPick = pcall(PickupItem, dstBag, dstSlot)
+					movedAny = okPick
+				end
+				if CursorHasItem and CursorHasItem() and ClearCursor then
+					ClearCursor()
+				end
+			else
+				FinishBankWithdraw(job)
+				return
+			end
+		else
+			local ok = pcall(UseItem, s.bag, s.slot)
+			movedAny = ok
+		end
+
+		if not movedAny then
+			FinishBankWithdraw(job)
+			return
+		end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.14, StepNext)
+		else
+			FinishBankWithdraw(job)
 		end
 	end
 
-	if C_Timer and C_Timer.After then
-		C_Timer.After(0.25, function()
-			ns:ScanBagsNow()
-			ns:RefreshBankBar()
-			if ns.RefreshQueueAndShoppingView then
-				ns:RefreshQueueAndShoppingView()
-			end
-		end)
-	end
+	StepNext()
 end
 
 function ns:RefreshBankBar()
