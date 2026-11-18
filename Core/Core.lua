@@ -214,6 +214,8 @@ function ns:WithLoadedItems(items, callback)
 		callback()
 	elseif C_Timer and C_Timer.After then
 		C_Timer.After(0.25, callback)
+	else
+		callback()
 	end
 end
 

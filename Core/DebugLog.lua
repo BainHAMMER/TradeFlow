@@ -160,7 +160,7 @@ function ns:ShowDebugLogWindow()
 
 		local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 		title:SetPoint("TOPLEFT", 14, -12)
-		title:SetText("|cffffd100" .. L["DEBUG_LOG_TITLE"] .. "|r")
+		f.titleText = title
 
 		local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 		close:SetPoint("TOPRIGHT", -4, -4)
@@ -181,23 +181,23 @@ function ns:ShowDebugLogWindow()
 		local refreshBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 		refreshBtn:SetSize(100, 22)
 		refreshBtn:SetPoint("BOTTOMLEFT", 14, 10)
-		refreshBtn:SetText(L["DEBUG_LOG_REFRESH"])
 		refreshBtn:SetScript("OnClick", function()
 			box:SetText(FormatDebugLogText())
 			box:HighlightText()
 			box:SetFocus()
 		end)
+		f.refreshBtn = refreshBtn
 
 		local clearBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 		clearBtn:SetSize(100, 22)
 		clearBtn:SetPoint("LEFT", refreshBtn, "RIGHT", 8, 0)
-		clearBtn:SetText(L["QUEUE_CLEAR"])
 		clearBtn:SetScript("OnClick", function()
 			if ns.db then
 				ns.db.debugLog = {}
 			end
 			box:SetText(FormatDebugLogText())
 		end)
+		f.clearBtn = clearBtn
 
 		if UISpecialFrames then
 			tinsert(UISpecialFrames, "TradeFlowDebugLogFrame")
@@ -205,6 +205,9 @@ function ns:ShowDebugLogWindow()
 		logFrame = f
 	end
 
+	logFrame.titleText:SetText("|cffffd100" .. L["DEBUG_LOG_TITLE"] .. "|r")
+	logFrame.refreshBtn:SetText(L["DEBUG_LOG_REFRESH"])
+	logFrame.clearBtn:SetText(L["QUEUE_CLEAR"])
 	logFrame.box:SetText(FormatDebugLogText())
 	logFrame.box:HighlightText()
 	logFrame:Show()
@@ -212,8 +215,12 @@ end
 
 function ns:ResetDebugLogWindow()
 	if logFrame then
-		logFrame:Hide()
-		logFrame = nil
+		logFrame.titleText:SetText("|cffffd100" .. L["DEBUG_LOG_TITLE"] .. "|r")
+		logFrame.refreshBtn:SetText(L["DEBUG_LOG_REFRESH"])
+		logFrame.clearBtn:SetText(L["QUEUE_CLEAR"])
+		if logFrame:IsShown() then
+			logFrame.box:SetText(FormatDebugLogText())
+		end
 	end
 end
 
