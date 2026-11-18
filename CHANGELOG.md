@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.7
+- **Profit Scanner & AH Reagent Sniper (`Core\Modules.lua`, `Modules\Profit\*`):**
+  - Added modular **Profit** tab (with enable/disable toggle in Settings) scanning profitable recipes across current character and alts by channel (`All`, `Safe: Vendor+DE`, `Auction`), margin, freshness, and craftability, with batch `+Queue` shortcuts (`+1 / +5 / +10 / all`).
+  - Added **Sniper** subtab and floating AH alert bar: track target buy thresholds (`-20%` from AH or shopping import), sync `"TradeFlow: Sniper"` list in **Auctionator**, auto-scan on AH open (30s cooldown), bulk reprice `-20%`, play audio/chat alerts on new deals (preserving detailed 1-tier commodity counts vs aggregate scans), and open spotted deals directly.
+  - Added **Craft Profit Log** subtab tracking actual craft cost/revenue/profit with coalescing, Today / All-time totals, exclusion of queue intermediate subcrafts, and deduction of consumed home-crafted intermediates on final crafts.
+- **Queue Crafting Time & Safe Profession Switching (`UI\QueueView.lua`, `Core\Core.lua`, `Core\Queue.lua`):**
+  - Displayed estimated crafting duration (`C_Spell.GetSpellInfo`) per queue step and total remaining queue time in the footer.
+  - Made sidebar/tab profession switching UI-only and converted the queue action button to `SecureActionButtonTemplate` to prevent `ADDON_ACTION_BLOCKED` taint when switching professions.
+- **Bank Withdraw & Container Indexing Fixes (`Core\Inventory.lua`, `UI\VendorAuction.lua`):**
+  - Added bank stock deduction in shopping list buy counts, Auctionator sync, and DAG subcraft expansion.
+  - Serialized bank withdrawal steps (`0.14s`), fixed `Enum.BagIndex` handling (`ReagentBag = 5` vs `BankBag_1..7 = 6..12`) so full banks no longer throw `"Bank is full"`, and ensured bank withdraw button re-enables cleanly on early bank close.
+- **Leveling Planner, Recipe Data & Diagnostics (`Core\Planner.lua`, `Data\Recipes.lua`, `Data\Trainer.lua`, `Core\DebugLog.lua`):**
+  - Upgraded the leveling route planner to beam search with exact trainer/book milestone fees, unified return calculation, and category collapse fix (`pinnedRecipeBySkill`).
+  - Cleaned specialization-gated recipes from `TrainerFees` and non-Apprentice recipes from `BasicRecipes`.
+  - Added persistent `/tf log` diagnostic window (`DebugLog`) capturing `ADDON_ACTION_BLOCKED`, `LUA_WARNING`, bank `UI_ERROR_MESSAGE`, and recent call traces.
+
 ## v1.0.6
 - **Leveling Calculator Priority Toggle (`UI\RouteView.lua`, `Core\Planner.lua`):**
   - Added a `Priority: Speed` / `Priority: Profit` toggle button in the leveling route calculator.
