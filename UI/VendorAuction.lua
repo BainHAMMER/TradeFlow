@@ -494,11 +494,7 @@ local function CollectBankMatches()
 		return {}
 	end
 
-	local maxBag = NUM_BAG_SLOTS or 4
-	local bankContainers = { -1 }
-	for b = maxBag + 1, maxBag + (NUM_BANKBAGSLOTS or 7) do
-		bankContainers[#bankContainers + 1] = b
-	end
+	local bankContainers = ns:GetBankContainerIDs()
 
 	local rawByItem = {}
 	local order = {}
@@ -556,14 +552,14 @@ local function FindFreePlayerBagSlot()
 	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
 	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
 	local GetFree = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
-	local maxBag = NUM_BAG_SLOTS or 4
-	for bag = 0, maxBag do
+	local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
+	for _, bag in ipairs(ns:GetPlayerContainerIDs()) do
 		local free, family
 		if GetFree then
 			free, family = GetFree(bag)
 		end
-		-- Только обычные сумки (family == 0), чтобы Split+Pickup не упирался в спец-сумки
-		if (not free or free > 0) and (not family or family == 0) then
+		-- Только обычные сумки (family == 0, без ReagentBag), чтобы Split+Pickup не упирался в спец-сумки
+		if bag ~= reagentBag and (not free or free > 0) and (not family or family == 0) then
 			local slots = GetNumSlots and GetNumSlots(bag) or 0
 			for slot = 1, slots do
 				if not (GetID and GetID(bag, slot)) then
@@ -709,6 +705,15 @@ function ns:WithdrawBankShoppingList()
 				FinishBankWithdraw(job)
 			end
 			return
+		end
+
+		local _, bankSet = ns:GetBankContainerIDs()
+		if bankSet and not bankSet[s.bag] then
+			FinishBankWithdraw(job)
+			return
+		end
+		if ns.LogTrace then
+			ns:LogTrace("BankStep", "bag=" .. tostring(s.bag) .. " slot=" .. tostring(s.slot) .. " " .. tostring(s.take) .. "/" .. tostring(s.count))
 		end
 
 		job.steps = job.steps + 1

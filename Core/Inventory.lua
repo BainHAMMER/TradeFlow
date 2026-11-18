@@ -81,7 +81,62 @@ function ns:GetRecipeRecord(recipeID)
 	}
 end
 
--- Сканирование сумок (0..4) и, если открыт банк, банковских сумок
+-- Единые списки контейнеров игрока и банка (с учётом Enum.BagIndex в клиентах 1.60+/Retail, где ReagentBag = 5, а BankBag_1 = 6)
+function ns:GetPlayerContainerIDs()
+	local ids, seen = {}, {}
+	local function add(bag)
+		if type(bag) == "number" and not seen[bag] then
+			seen[bag] = true
+			ids[#ids + 1] = bag
+		end
+	end
+	local bagIndex = Enum and Enum.BagIndex
+	if bagIndex and bagIndex.Backpack ~= nil then
+		add(bagIndex.Backpack)
+		for i = 1, (NUM_BAG_SLOTS or 4) do
+			add(bagIndex["Bag_" .. i] or i)
+		end
+		if bagIndex.ReagentBag and bagIndex.ReagentBag ~= bagIndex.BankBag_1 then
+			add(bagIndex.ReagentBag)
+		end
+	else
+		for bag = 0, (NUM_BAG_SLOTS or 4) do
+			add(bag)
+		end
+	end
+	return ids, seen
+end
+
+function ns:GetBankContainerIDs()
+	local _, playerSet = self:GetPlayerContainerIDs()
+	local ids, seen = {}, {}
+	local function add(bag)
+		if type(bag) == "number" and not seen[bag] and not playerSet[bag] then
+			seen[bag] = true
+			ids[#ids + 1] = bag
+		end
+	end
+	local bagIndex = Enum and Enum.BagIndex
+	local numBank = NUM_BANKBAGSLOTS or 7
+	add((bagIndex and bagIndex.Bank) or (BANK_CONTAINER or -1))
+	if bagIndex and bagIndex.BankBag_1 then
+		for i = 1, numBank do
+			add(bagIndex["BankBag_" .. i])
+		end
+	elseif bagIndex and bagIndex.CharacterBankTab_1 then
+		for i = 1, 6 do
+			add(bagIndex["CharacterBankTab_" .. i])
+		end
+	else
+		local firstBank = (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4) + 1
+		for b = firstBank, firstBank + numBank - 1 do
+			add(b)
+		end
+	end
+	return ids, seen
+end
+
+-- Сканирование сумок игрока и, если открыт банк, банковских сумок
 function ns:ScanBagsNow()
 	if not self.charDB then
 		return
@@ -90,10 +145,9 @@ function ns:ScanBagsNow()
 	local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
 	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
 	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
-	local maxBag = NUM_BAG_SLOTS or 4
 
 	if GetNumSlots then
-		for bag = 0, maxBag do
+		for _, bag in ipairs(self:GetPlayerContainerIDs()) do
 			local slots = GetNumSlots(bag) or 0
 			for slot = 1, slots do
 				local itemID = GetID and GetID(bag, slot)
@@ -115,10 +169,7 @@ function ns:ScanBagsNow()
 
 	if bankOpen and GetNumSlots then
 		local bank = {}
-		local bankContainers = { -1 }
-		for b = maxBag + 1, maxBag + (NUM_BANKBAGSLOTS or 7) do
-			bankContainers[#bankContainers + 1] = b
-		end
+		local bankContainers = self:GetBankContainerIDs()
 		for _, bag in ipairs(bankContainers) do
 			local slots = GetNumSlots(bag) or 0
 			for slot = 1, slots do
