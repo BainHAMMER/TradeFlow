@@ -88,7 +88,7 @@ ns.Locales.en = {
 	["SNIPE_ROW_SUB"] = "Target: <= %s | Current AH: %s",
 	["SNIPE_ADDED_MSG"] = "Added to Sniper: %d reagent(s) (-20%% AH threshold)",
 	["SNIPE_ALREADY_MSG"] = "All AH reagents for this recipe are already in Sniper.",
-	["SNIPE_NO_AH_MSG"] = "Recipe has no direct AH reagents (vendor/subcraft only).",
+	["SNIPE_NO_AH_MSG"] = "Recipe has no AH reagents to buy (vendor only).",
 	["SNIPE_BTN_TITLE"] = "Snipe Reagents (-20% AH)",
 	["SNIPE_BTN_DESC"] = "Adds the recipe's AH reagents to Sniper so cheap auction lots trigger an alert bar at the AH.",
 	["SNIPE_WATCHED_TAG"] = " |cff40ff40[watching]|r",

@@ -388,7 +388,7 @@ function ProfitMod:CreateView(parent)
 		row.snipeBtn:SetScript("OnClick", function()
 			local e = row.entryData
 			if e and e.recipeID and ns.AddRecipeReagentsToSnipe then
-				local added, total = ns:AddRecipeReagentsToSnipe(e.recipeID, 0.80)
+				local added, total = ns:AddRecipeReagentsToSnipe(e.recipeID, 0.80, e.gphCraftPlan)
 				if added > 0 then
 					ns:Print(string.format(L["SNIPE_ADDED_MSG"], added))
 				elseif total > 0 then
@@ -407,7 +407,7 @@ function ProfitMod:CreateView(parent)
 			GameTooltip:AddLine(L["SNIPE_BTN_TITLE"], 1, 0.82, 0)
 			GameTooltip:AddLine(L["SNIPE_BTN_DESC"], 0.85, 0.85, 0.85, true)
 			if ns.GetRecipeSnipePreview then
-				local items = ns:GetRecipeSnipePreview(e.recipeID, 0.80)
+				local items = ns:GetRecipeSnipePreview(e.recipeID, 0.80, e.gphCraftPlan)
 				if #items == 0 then
 					GameTooltip:AddLine(L["SNIPE_NO_AH_MSG"], 1, 0.5, 0.3, true)
 				else

@@ -72,38 +72,72 @@ function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync)
 	return true
 end
 
-function ns:GetRecipeSnipePreview(recipeID, discountRatio)
+function ns:GetRecipeSnipePreview(recipeID, discountRatio, craftPlan)
 	local items = {}
 	local newCount = 0
 	if not recipeID then
 		return items, 0, 0
 	end
 	local ratio = discountRatio or 0.80
-	local _, _, _, breakdown = self:GetRecipeEconomy(recipeID)
-	if not breakdown then
-		return items, 0, 0
-	end
 	local targets = EnsureSnipeDB()
-	for _, b in ipairs(breakdown) do
-		if b.itemID and b.source == "ah" and b.unitPrice and b.unitPrice > 0 then
-			local maxP = math.max(1, math.floor(b.unitPrice * ratio + 0.5))
-			local watched = targets[b.itemID] ~= nil
-			if not watched then
-				newCount = newCount + 1
-			end
-			items[#items + 1] = {
-				itemID = b.itemID,
-				curPrice = b.unitPrice,
-				maxPrice = targets[b.itemID] and targets[b.itemID].maxPrice or maxP,
-				watched = watched,
-			}
+	local seenItems = {}
+	local visitedRecipes = {}
+
+	local function AddAhReagent(itemID, curPrice)
+		if not (itemID and curPrice and curPrice > 0) or seenItems[itemID] then
+			return
 		end
+		seenItems[itemID] = true
+		local maxP = math.max(1, math.floor(curPrice * ratio + 0.5))
+		local watched = targets[itemID] ~= nil
+		if not watched then
+			newCount = newCount + 1
+		end
+		items[#items + 1] = {
+			itemID = itemID,
+			curPrice = curPrice,
+			maxPrice = targets[itemID] and targets[itemID].maxPrice or maxP,
+			watched = watched,
+		}
 	end
+
+	local function Collect(rID)
+		if not rID or visitedRecipes[rID] then
+			return
+		end
+		visitedRecipes[rID] = true
+		local _, _, _, breakdown = self:GetRecipeEconomy(rID)
+		if not breakdown then
+			visitedRecipes[rID] = nil
+			return
+		end
+		for _, b in ipairs(breakdown) do
+			if b.itemID then
+				if b.source == "ah" and b.unitPrice and b.unitPrice > 0 then
+					AddAhReagent(b.itemID, b.unitPrice)
+				elseif b.source == "craft" and b.subRecipeID then
+					if craftPlan and craftPlan[b.itemID] == false then
+						local ahP = self.GetAuctionPrice and self:GetAuctionPrice(b.itemID)
+						if ahP and ahP > 0 then
+							AddAhReagent(b.itemID, ahP)
+						else
+							Collect(b.subRecipeID)
+						end
+					else
+						Collect(b.subRecipeID)
+					end
+				end
+			end
+		end
+		visitedRecipes[rID] = nil
+	end
+
+	Collect(recipeID)
 	return items, newCount, #items
 end
 
-function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio)
-	local items = self:GetRecipeSnipePreview(recipeID, discountRatio)
+function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio, craftPlan)
+	local items = self:GetRecipeSnipePreview(recipeID, discountRatio, craftPlan)
 	local added = 0
 	for _, entry in ipairs(items) do
 		if not entry.watched then
