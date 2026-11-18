@@ -604,6 +604,9 @@ local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 	return 0, "gone", nil
 end
 
+local buyApiDepth = 0
+local buyApiBlocked = false
+
 function ns:BuyFirstSnipeHit()
 	if not IsAuctionHouseOpen() then
 		return
@@ -619,11 +622,19 @@ function ns:BuyFirstSnipeHit()
 			return
 		end
 		if C_AuctionHouse and C_AuctionHouse.ConfirmCommoditiesPurchase then
+			if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+				self:Print(L["SNIPE_BUY_WAIT"])
+				return
+			end
+			local confirmTok = pendingBuy.token
 			pendingBuy.state = "buying"
-			local ok = pcall(C_AuctionHouse.ConfirmCommoditiesPurchase, pendingBuy.itemID, pendingBuy.qty)
-			if not ok then
+			buyApiBlocked = false
+			buyApiDepth = buyApiDepth + 1
+			C_AuctionHouse.ConfirmCommoditiesPurchase(pendingBuy.itemID, pendingBuy.qty)
+			buyApiDepth = buyApiDepth - 1
+			if buyApiBlocked then
 				CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], pendingBuy.label), pendingBuy.itemID, nil)
-			else
+			elseif pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "buying" then
 				self:RefreshSnipeBar()
 			end
 		end
@@ -647,6 +658,10 @@ function ns:BuyFirstSnipeHit()
 	local label = link or ((hex or "|cffffffff") .. (name or ("#" .. itemID)) .. "|r")
 
 	if IsCommodityItem(itemID) and C_AuctionHouse and C_AuctionHouse.StartCommoditiesPurchase then
+		if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+			self:Print(L["SNIPE_BUY_WAIT"])
+			return
+		end
 		local qty, errKind, liveMin = ComputeCommodityBuyQty(itemID, maxPrice, first)
 		if qty <= 0 then
 			if errKind == "nomoney" then
@@ -666,11 +681,18 @@ function ns:BuyFirstSnipeHit()
 			token = tok,
 			label = label,
 		}
-		self:RefreshSnipeBar()
-		local ok = pcall(C_AuctionHouse.StartCommoditiesPurchase, itemID, qty)
-		if not ok then
+		-- Важно: вызываем StartCommoditiesPurchase напрямую (без pcall) ДО Disable/RefreshSnipeBar,
+		-- чтобы не сбивать активный hardware event клика в WoW 1.60.1 / 12.0.
+		buyApiBlocked = false
+		buyApiDepth = buyApiDepth + 1
+		C_AuctionHouse.StartCommoditiesPurchase(itemID, qty)
+		buyApiDepth = buyApiDepth - 1
+		if buyApiBlocked then
 			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), nil)
 			return
+		end
+		if pendingBuy and pendingBuy.token == tok and pendingBuy.state == "awaiting" then
+			self:RefreshSnipeBar()
 		end
 		if C_Timer and C_Timer.After then
 			C_Timer.After(4.0, function()
@@ -705,8 +727,11 @@ function ns:BuyFirstSnipeHit()
 			self:Print(L["SNIPE_BUY_NOMONEY"])
 			return
 		end
-		local ok = pcall(C_AuctionHouse.PlaceBid, bestAuction.auctionID, bestAuction.buyoutAmount)
-		if ok then
+		buyApiBlocked = false
+		buyApiDepth = buyApiDepth + 1
+		C_AuctionHouse.PlaceBid(bestAuction.auctionID, bestAuction.buyoutAmount)
+		buyApiDepth = buyApiDepth - 1
+		if not buyApiBlocked then
 			self:Print(string.format(L["SNIPE_BUY_DONE"], label, 1, ns.FormatMoney(bestAuction.buyoutAmount), ns.FormatMoney(maxPrice)))
 			ClearStaleSnipeHit(itemID, nil)
 			self:RefreshSnipeUI()
@@ -842,7 +867,9 @@ function ns:RefreshSnipeBar()
 		snipeBar.buyBtn:SetScript("OnLeave", GameTooltip_Hide)
 	end
 
-	snipeBar:SetParent(ah)
+	if snipeBar:GetParent() ~= ah then
+		snipeBar:SetParent(ah)
+	end
 	snipeBar:ClearAllPoints()
 	local ahScale = (ah.GetEffectiveScale and ah:GetEffectiveScale()) or 1
 	local uiScale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
@@ -946,10 +973,17 @@ for _, ev in ipairs({
 	"COMMODITY_PRICE_UNAVAILABLE",
 	"COMMODITY_PURCHASE_SUCCEEDED",
 	"COMMODITY_PURCHASE_FAILED",
+	"ADDON_ACTION_BLOCKED",
 }) do
 	pcall(snipeEventFrame.RegisterEvent, snipeEventFrame, ev)
 end
 snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
+	if event == "ADDON_ACTION_BLOCKED" then
+		if buyApiDepth > 0 and arg1 == "TradeFlow" then
+			buyApiBlocked = true
+		end
+		return
+	end
 	if not (ns.IsModuleEnabled and ns:IsModuleEnabled("profit")) then
 		if snipeBar then
 			snipeBar:Hide()
