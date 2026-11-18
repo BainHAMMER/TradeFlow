@@ -4,6 +4,7 @@ local _, ns = ...
 -- Движок сканера профита по всем изученным профессиям персонажа (и альтов)
 -------------------------------------------------------------------------------
 local AUCTION_CUT = ns.AUCTION_CUT or 0.05
+local MIN_CRAFT_TIME = 1.0 -- минимальное время каста для защиты от деления на 0 при мгновенных крафтах
 local profitCache = nil
 local profitCacheKey = nil
 local profitCachePriceRev = -1
@@ -100,6 +101,205 @@ local function GetMaxAuctionAgeDays(outItemID, outSource, breakdown)
 		end
 	end
 	return CollectBreakdownMaxAge(maxAge, breakdown, {})
+end
+
+-- Оценивает минимальный score = cost + lambda * time для 1 ед. предмета itemID
+-- при заданной ставке lambda (меди/сек). Возвращает: score, cost, time, subRecipeID (nil = покупка)
+local function EvalItemForRate(itemID, lambda, visiting, memo)
+	local canMemo = (next(visiting) == nil)
+	if canMemo and memo[itemID] then
+		local m = memo[itemID]
+		return m[1], m[2], m[3], m[4]
+	end
+
+	local vendorPrice = ns:GetVendorPrice(itemID)
+	if vendorPrice then
+		if canMemo then
+			memo[itemID] = { vendorPrice, vendorPrice, 0, nil }
+		end
+		return vendorPrice, vendorPrice, 0, nil
+	end
+
+	local buyPrice = ns:GetAuctionPrice(itemID)
+	local bestScore = buyPrice
+	local bestCost = buyPrice
+	local bestTime = 0
+	local bestRecipeID = nil
+
+	if not visiting[itemID] then
+		local producers = ns.ItemProducedBy and ns.ItemProducedBy[itemID]
+		if producers and #producers > 0 then
+			visiting[itemID] = true
+			for _, childRecipeID in ipairs(producers) do
+				if ns:IsRecipeLearned(childRecipeID) then
+					local rec = ns:GetRecipeRecord(childRecipeID)
+					if rec and #rec.reagents > 0 and (rec.numMade or 1) > 0 then
+						local childCast = ns.GetRecipeCastTime and ns:GetRecipeCastTime(childRecipeID)
+						if childCast ~= nil then
+							local sumCost, sumTime, okAll = 0, childCast, true
+							for _, r in ipairs(rec.reagents) do
+								if visiting[r.itemID] then
+									okAll = false
+									break
+								end
+								local _, rCost, rTime = EvalItemForRate(r.itemID, lambda, visiting, memo)
+								if not rCost then
+									okAll = false
+									break
+								end
+								sumCost = sumCost + rCost * r.quantity
+								sumTime = sumTime + rTime * r.quantity
+							end
+							if okAll then
+								local unitCost = sumCost / rec.numMade
+								local unitTime = sumTime / rec.numMade
+								local score = unitCost + lambda * unitTime
+								if not bestScore or score < bestScore then
+									bestScore = score
+									bestCost = unitCost
+									bestTime = unitTime
+									bestRecipeID = childRecipeID
+								end
+							end
+						end
+					end
+				end
+			end
+			visiting[itemID] = nil
+		end
+	end
+
+	if canMemo then
+		memo[itemID] = { bestScore, bestCost, bestTime, bestRecipeID }
+	end
+	return bestScore, bestCost, bestTime, bestRecipeID
+end
+
+-- Находит точный план «купить vs крафтить» для максимизации прибыли в час (алгоритм Динкельбаха).
+-- Учитывает суммарное время крафта самого рецепта и всех выбранных промежуточных этапов.
+local function EvaluateGoldPerHour(recipeID, evalOut, outItemID, outSource)
+	local rec = ns:GetRecipeRecord(recipeID)
+	local rootCast = ns.GetRecipeCastTime and ns:GetRecipeCastTime(recipeID)
+	if not rec or not rec.reagents or #rec.reagents == 0 or rootCast == nil then
+		return nil
+	end
+
+	local lambda = 0
+	local bestLambda = 0
+	local bestCost, bestTime, bestChoices
+
+	for _ = 1, 6 do
+		local memo = {}
+		local choices = {}
+		local sumCost, sumTime, okAll = 0, rootCast, true
+		for _, r in ipairs(rec.reagents) do
+			local _, rCost, rTime, rSub = EvalItemForRate(r.itemID, lambda, {}, memo)
+			if not rCost then
+				okAll = false
+				break
+			end
+			sumCost = sumCost + rCost * r.quantity
+			sumTime = sumTime + rTime * r.quantity
+			choices[r.itemID] = rSub
+		end
+		if not okAll then
+			return nil
+		end
+
+		local effTime = math.max(MIN_CRAFT_TIME, sumTime)
+		local profit = evalOut - sumCost
+		bestCost = sumCost
+		bestTime = effTime
+		bestChoices = choices
+		bestLambda = lambda
+
+		if profit <= 0 then
+			break
+		end
+		local newLambda = profit / effTime
+		if math.abs(newLambda - lambda) <= 0.01 then
+			break
+		end
+		lambda = newLambda
+	end
+
+	local gphCost = math.floor(bestCost + 0.5)
+	local gphProfit = evalOut - gphCost
+	if gphProfit <= 0 then
+		return nil
+	end
+
+	-- Собираем полный план решений для QueueAddRecipe и список реагентов, которые выгоднее купить вместо крафта
+	local craftPlan = {}
+	local buyInstead = {}
+	local maxAge = nil
+	if outSource == "ah" and outItemID then
+		maxAge = MergeAge(maxAge, outItemID)
+	elseif outSource == "disenchant" and outItemID and ns.GetItemDisenchantInfo then
+		local _, yields = ns:GetItemDisenchantInfo(outItemID)
+		if yields then
+			for _, y in ipairs(yields) do
+				maxAge = MergeAge(maxAge, y.itemID)
+			end
+		end
+	end
+
+	local seenPlan = {}
+	local function CollectPlan(rList, visiting)
+		for _, r in ipairs(rList) do
+			local itemID = r.itemID
+			if not seenPlan[itemID] then
+				seenPlan[itemID] = true
+				local chosenSub = bestChoices[itemID]
+				if chosenSub == nil then
+					local memoTmp = {}
+					local _, _, _, sub = EvalItemForRate(itemID, bestLambda, {}, memoTmp)
+					chosenSub = sub
+				end
+				local producers = ns.ItemProducedBy and ns.ItemProducedBy[itemID]
+				local hasLearnedProducer = false
+				if producers then
+					for _, pID in ipairs(producers) do
+						if ns:IsRecipeLearned(pID) then
+							hasLearnedProducer = true
+							break
+						end
+					end
+				end
+				if chosenSub then
+					craftPlan[itemID] = chosenSub
+					local subRec = ns:GetRecipeRecord(chosenSub)
+					if subRec and subRec.reagents and not visiting[chosenSub] then
+						visiting[chosenSub] = true
+						CollectPlan(subRec.reagents, visiting)
+						visiting[chosenSub] = nil
+					end
+				else
+					if hasLearnedProducer and not ns:IsVendorItem(itemID) then
+						craftPlan[itemID] = false
+						buyInstead[#buyInstead + 1] = itemID
+					end
+					if not ns:IsVendorItem(itemID) then
+						maxAge = MergeAge(maxAge, itemID)
+					end
+				end
+			end
+		end
+	end
+	CollectPlan(rec.reagents, { [recipeID] = true })
+
+	local gph = math.floor((gphProfit / bestTime) * 3600 + 0.5)
+	local gphMargin = (gphCost > 0) and math.floor((gphProfit / gphCost) * 100 + 0.5) or 999
+	return {
+		gph = gph,
+		gphCost = gphCost,
+		gphProfit = gphProfit,
+		gphTime = bestTime,
+		gphMargin = gphMargin,
+		craftPlan = craftPlan,
+		buyInstead = buyInstead,
+		ageDays = maxAge,
+	}
 end
 
 function ns.InvalidateProfitCache()
@@ -204,7 +404,8 @@ function ns:BuildProfitList(opts)
 		local evalOut, evalProfit, evalSource = EvalRecipeForChannel(rec, craftCost, alts, channel)
 		if evalProfit and evalProfit > 0 then
 			local name, icon, outItemID, _, _, hex = self:GetRecipeDisplay(recipeID)
-			local ageDays = GetMaxAuctionAgeDays(outItemID, evalSource, breakdown)
+			local gphInfo = (sortBy == "gph") and EvaluateGoldPerHour(recipeID, evalOut, outItemID, evalSource) or nil
+			local ageDays = gphInfo and gphInfo.ageDays or GetMaxAuctionAgeDays(outItemID, evalSource, breakdown)
 			local passFresh = (not freshOnly) or (not ageDays or ageDays <= 3)
 			if passFresh then
 				local craftNow = 0
@@ -230,6 +431,13 @@ function ns:BuildProfitList(opts)
 						source = evalSource,
 						ageDays = ageDays,
 						craftNow = craftNow,
+						gph = gphInfo and gphInfo.gph or nil,
+						gphCost = gphInfo and gphInfo.gphCost or nil,
+						gphProfit = gphInfo and gphInfo.gphProfit or nil,
+						gphTime = gphInfo and gphInfo.gphTime or nil,
+						gphMargin = gphInfo and gphInfo.gphMargin or nil,
+						gphCraftPlan = gphInfo and gphInfo.craftPlan or nil,
+						gphBuyInstead = gphInfo and gphInfo.buyInstead or nil,
 					}
 				end
 			end
@@ -237,7 +445,12 @@ function ns:BuildProfitList(opts)
 	end
 
 	table.sort(entries, function(a, b)
-		if sortBy == "margin" then
+		if sortBy == "gph" then
+			local ga, gb = a.gph or -1, b.gph or -1
+			if ga ~= gb then
+				return ga > gb
+			end
+		elseif sortBy == "margin" then
 			if a.margin ~= b.margin then
 				return a.margin > b.margin
 			end

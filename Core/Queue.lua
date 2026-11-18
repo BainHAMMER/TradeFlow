@@ -118,7 +118,8 @@ local function InsertOrMergeStep(queue, step)
 end
 
 -- Главная функция добавления рецепта в очередь с DAG-разворачиванием промежуточных реагентов
-function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent)
+-- craftPlan (опционально): { [itemID] = false (купить вместо крафта) | subRecipeID }
+function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent, craftPlan)
 	count = math.max(1, math.floor(tonumber(count) or 1))
 	local rec = self:GetRecipeRecord(recipeID)
 	if not rec then
@@ -150,8 +151,11 @@ function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent)
 			simHave[reagent.itemID] = avail - useFromAvail
 			local deficit = totalNeed - useFromAvail
 
-			if autoSubcrafts and deficit > 0 and not self:IsVendorItem(reagent.itemID) then
-				local prodRecipeID = self:FindBestProducerRecipe(reagent.itemID, visiting)
+			local planChoice = craftPlan and craftPlan[reagent.itemID]
+			if autoSubcrafts and planChoice ~= false and deficit > 0 and not self:IsVendorItem(reagent.itemID) then
+				local prodRecipeID = (type(planChoice) == "number" and self:IsRecipeLearned(planChoice))
+					and planChoice
+					or self:FindBestProducerRecipe(reagent.itemID, visiting)
 				if prodRecipeID then
 					local prodRec = self:GetRecipeRecord(prodRecipeID)
 					if prodRec and (prodRec.numMade or 1) > 0 then

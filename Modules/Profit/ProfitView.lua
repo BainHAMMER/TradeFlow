@@ -7,7 +7,7 @@ local L = ns.L
 local ROW_H = 27
 local VISIBLE_ROWS = 8
 local CHANNELS = { "all", "safe", "ah" }
-local SORTS = { "profit", "margin", "craftable" }
+local SORTS = { "profit", "gph", "margin", "craftable" }
 
 local ProfitMod = {
 	id = "profit",
@@ -441,7 +441,9 @@ function ProfitMod:CreateView(parent)
 				elseif IsShiftKeyDown and IsShiftKeyDown() then
 					qty = math.max(1, e.craftNow or 1)
 				end
-				ns:QueueAddRecipe(e.recipeID, qty)
+				local filters = ProfitMod:GetFilters()
+				local craftPlan = (filters.sortBy == "gph") and e.gphCraftPlan or nil
+				ns:QueueAddRecipe(e.recipeID, qty, nil, nil, craftPlan)
 			end
 		end)
 		row.queueBtn:SetScript("OnEnter", function(self)
@@ -567,9 +569,32 @@ function ProfitMod:CreateView(parent)
 			end
 			if e.recipeID and ns.ShowRecipeTooltip then
 				ns:ShowRecipeTooltip(self, e.recipeID)
-				if e.isAlt and e.ownerName and GameTooltip and GameTooltip.IsShown and GameTooltip:IsShown() then
-					GameTooltip:AddLine(" ")
-					GameTooltip:AddLine(string.format(L["PROFIT_ALT_TOOLTIP"], e.ownerName), 0.4, 0.8, 1)
+				if GameTooltip and GameTooltip.IsShown and GameTooltip:IsShown() then
+					local addedGap = false
+					if e.gph and e.gph > 0 then
+						GameTooltip:AddLine(" ")
+						addedGap = true
+						GameTooltip:AddLine(string.format(
+							L["PROFIT_GPH_TOOLTIP"],
+							ns.FormatMoney(e.gph),
+							ns.FormatDuration(e.gphTime),
+							ns.FormatMoney(e.gphProfit or e.profit)
+						), 0.4, 1, 0.4, true)
+						if e.gphBuyInstead and #e.gphBuyInstead > 0 then
+							local names = {}
+							for _, itemID in ipairs(e.gphBuyInstead) do
+								local n, _, _, _, _, hex = ns:GetItemDisplay(itemID)
+								names[#names + 1] = (hex or "|cffffffff") .. (n or ("#" .. itemID)) .. "|r"
+							end
+							GameTooltip:AddLine(string.format(L["PROFIT_GPH_BUY_SUB"], table.concat(names, ", ")), 1, 0.85, 0.4, true)
+						end
+					end
+					if e.isAlt and e.ownerName then
+						if not addedGap then
+							GameTooltip:AddLine(" ")
+						end
+						GameTooltip:AddLine(string.format(L["PROFIT_ALT_TOOLTIP"], e.ownerName), 0.4, 0.8, 1)
+					end
 					GameTooltip:Show()
 				end
 			end
@@ -672,15 +697,25 @@ function ProfitMod:RenderRows()
 				local cntTag = (e.craftNow and e.craftNow > 0) and string.format(" |cff40ff40[%d]|r", e.craftNow) or ""
 				row.title:SetText(string.format("%s%s|r %s%s%s", e.qualityHex or "|cffffffff", e.name, profTag, cntTag, altTag))
 
+				local filters = self:GetFilters()
+				local useGph = (filters.sortBy == "gph") and e.gph and e.gph > 0
+				local dispCost = useGph and (e.gphCost or e.craftCost) or e.craftCost
+				local dispProfit = useGph and (e.gphProfit or e.profit) or e.profit
+
 				local srcText = FormatChannelTag(e.source, e.ageDays)
-				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], srcText, ns.FormatMoney(e.craftCost), ns.FormatMoney(e.outputValue)))
+				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], srcText, ns.FormatMoney(dispCost), ns.FormatMoney(e.outputValue)))
 				local anchorRight = (not e.isAlt) and row.queueBtn or row.snipeBtn
 				row.profitText:ClearAllPoints()
 				row.profitText:SetPoint("RIGHT", anchorRight, "LEFT", -8, 6)
 				row.marginText:ClearAllPoints()
 				row.marginText:SetPoint("RIGHT", anchorRight, "LEFT", -8, -6)
-				row.profitText:SetText("|cff40ff40+" .. ns.FormatMoney(e.profit) .. "|r")
-				row.marginText:SetText(string.format("|cffaaaaaa+%d%%|r", e.margin or 0))
+				if useGph then
+					row.profitText:SetText("|cff40ff40+" .. ns.FormatMoney(e.gph) .. L["PROFIT_GPH_SUFFIX"] .. "|r")
+					row.marginText:SetText(string.format("|cff88ccff%s|r |cffaaaaaa(+%s)|r", ns.FormatDuration(e.gphTime), ns.FormatMoney(dispProfit)))
+				else
+					row.profitText:SetText("|cff40ff40+" .. ns.FormatMoney(e.profit) .. "|r")
+					row.marginText:SetText(string.format("|cffaaaaaa+%d%%|r", e.margin or 0))
+				end
 				row.snipeBtn:Show()
 				row.queueBtn:SetShown(not e.isAlt)
 				row.minusBtn:Hide()
@@ -783,7 +818,8 @@ function ProfitMod:OnRefresh()
 		or "PROFIT_CH_ALL"
 	f.channelBtn:SetText(L[chKey])
 
-	local sortKey = (filters.sortBy == "margin" and "PROFIT_SORT_MARGIN")
+	local sortKey = (filters.sortBy == "gph" and "PROFIT_SORT_GPH")
+		or (filters.sortBy == "margin" and "PROFIT_SORT_MARGIN")
 		or (filters.sortBy == "craftable" and "PROFIT_SORT_CRAFTABLE")
 		or "PROFIT_SORT_PROFIT"
 	f.sortBtn:SetText(L[sortKey])
