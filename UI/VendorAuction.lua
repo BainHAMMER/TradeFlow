@@ -14,32 +14,11 @@ function ns:GetAuctionatorListName()
 	return "TradeFlow: " .. self:CharKey()
 end
 
--- Гарантирует загрузку реальных названий предметов по itemID перед вызовом Auctionator API
-local function WithLoadedItemNames(items, callback)
-	if #items == 0 then
-		callback()
-		return
+local function RunSafe(tag, fn, ...)
+	if ns.SafeCall then
+		return ns:SafeCall(tag, fn, ...)
 	end
-	if ContinuableContainer and Item and Item.CreateFromItemID then
-		local container = ContinuableContainer:Create()
-		for _, entry in ipairs(items) do
-			container:AddContinuable(Item:CreateFromItemID(entry.itemID))
-		end
-		container:ContinueOnLoad(callback)
-		return
-	end
-	local allLoaded = true
-	for _, entry in ipairs(items) do
-		local _, _, _, _, loaded = ns:GetItemDisplay(entry.itemID)
-		if not loaded then
-			allLoaded = false
-		end
-	end
-	if allLoaded then
-		callback()
-	elseif C_Timer and C_Timer.After then
-		C_Timer.After(0.25, callback)
-	end
+	return pcall(fn, ...)
 end
 
 -- Автоматическое создание / обновление / удаление Shopping List в Auctionator
@@ -80,7 +59,7 @@ function ns:SyncAuctionatorShoppingList(silent)
 		return
 	end
 
-	WithLoadedItemNames(ahItems, function()
+	self:WithLoadedItems(ahItems, function()
 		local searches = {}
 		for _, item in ipairs(ahItems) do
 			local name, _, _, _, loaded = self:GetItemDisplay(item.itemID)
@@ -130,7 +109,7 @@ function ns:SearchShoppingListOnAH()
 		return
 	end
 
-	WithLoadedItemNames(ahItems, function()
+	self:WithLoadedItems(ahItems, function()
 		local advanced, names = {}, {}
 		for _, item in ipairs(ahItems) do
 			local name, _, _, _, loaded = self:GetItemDisplay(item.itemID)
@@ -400,6 +379,9 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 	elseif event == "BANKFRAME_CLOSED" then
 		ns.bankWithdrawJob = nil
 		if bankBar then
+			if bankBar.btn then
+				bankBar.btn:SetEnabled(true)
+			end
 			bankBar:Hide()
 		end
 		if ns.RefreshQueueAndShoppingView then
@@ -458,7 +440,7 @@ end)
 -------------------------------------------------------------------------------
 -- Панель и кнопка «Забрать материалы» в окне банка (BANKFRAME_OPENED)
 -------------------------------------------------------------------------------
-local function ReadBankSlot(bag, slot, GetInfo)
+local function ReadContainerSlot(bag, slot, GetInfo)
 	local count, locked = 1, false
 	if C_Container and C_Container.GetContainerItemInfo then
 		local info = C_Container.GetContainerItemInfo(bag, slot)
@@ -504,7 +486,7 @@ local function CollectBankMatches()
 			local itemID = GetID and GetID(bag, slot)
 			local need = itemID and needByItem[itemID]
 			if need and need > 0 then
-				local count, locked = ReadBankSlot(bag, slot, GetInfo)
+				local count, locked = ReadContainerSlot(bag, slot, GetInfo)
 				if not rawByItem[itemID] then
 					rawByItem[itemID] = { itemID = itemID, need = need, totalTake = 0, slots = {} }
 					order[#order + 1] = rawByItem[itemID]
@@ -563,7 +545,7 @@ local function FindFreePlayerBagSlot()
 			local slots = GetNumSlots and GetNumSlots(bag) or 0
 			for slot = 1, slots do
 				if not (GetID and GetID(bag, slot)) then
-					local _, locked = ReadBankSlot(bag, slot, GetInfo)
+					local _, locked = ReadContainerSlot(bag, slot, GetInfo)
 					if not locked then
 						return bag, slot
 					end
@@ -658,7 +640,7 @@ function ns:WithdrawBankShoppingList()
 			end
 		end
 
-		ns:ScanBagsNow()
+		ns:ScanBagsNow(true)
 		local cur = CollectBankMatches()
 		if #cur == 0 then
 			FinishBankWithdraw(job)
@@ -669,16 +651,6 @@ function ns:WithdrawBankShoppingList()
 		for _, entry in ipairs(cur) do
 			totalNeed = totalNeed + (entry.totalTake or 0)
 		end
-		if job.lastTotal and totalNeed >= job.lastTotal then
-			job.stalls = job.stalls + 1
-			if job.stalls >= 4 then
-				FinishBankWithdraw(job)
-				return
-			end
-		else
-			job.stalls = 0
-		end
-		job.lastTotal = totalNeed
 
 		local s = nil
 		for _, entry in ipairs(cur) do
@@ -692,13 +664,21 @@ function ns:WithdrawBankShoppingList()
 				break
 			end
 		end
-		if not s then
-			-- Все подходящие слоты сейчас залочены сервером — ждём следующий тик
+
+		local stalled = (job.lastTotal ~= nil and totalNeed >= job.lastTotal)
+		job.lastTotal = totalNeed
+		if stalled or not s then
 			job.stalls = job.stalls + 1
 			if job.stalls >= 4 then
 				FinishBankWithdraw(job)
 				return
 			end
+		else
+			job.stalls = 0
+		end
+
+		if not s then
+			-- Все подходящие слоты сейчас залочены сервером — ждём следующий тик
 			if C_Timer and C_Timer.After then
 				C_Timer.After(0.14, StepNext)
 			else
@@ -719,15 +699,13 @@ function ns:WithdrawBankShoppingList()
 		job.steps = job.steps + 1
 		local movedAny = false
 		if s.take >= s.count then
-			local ok = ns.SafeCall and ns:SafeCall("BankUseItem", UseItem, s.bag, s.slot) or pcall(UseItem, s.bag, s.slot)
-			movedAny = ok
+			movedAny = RunSafe("BankUseItem", UseItem, s.bag, s.slot)
 		elseif SplitItem and PickupItem then
 			local dstBag, dstSlot = FindFreePlayerBagSlot()
 			if dstBag and dstSlot then
-				local okSplit = ns.SafeCall and ns:SafeCall("BankSplitItem", SplitItem, s.bag, s.slot, s.take) or pcall(SplitItem, s.bag, s.slot, s.take)
+				local okSplit = RunSafe("BankSplitItem", SplitItem, s.bag, s.slot, s.take)
 				if okSplit and (not CursorHasItem or CursorHasItem()) then
-					local okPick = ns.SafeCall and ns:SafeCall("BankPickupItem", PickupItem, dstBag, dstSlot) or pcall(PickupItem, dstBag, dstSlot)
-					movedAny = okPick
+					movedAny = RunSafe("BankPickupItem", PickupItem, dstBag, dstSlot)
 				end
 				if CursorHasItem and CursorHasItem() and ClearCursor then
 					ClearCursor()
@@ -737,8 +715,7 @@ function ns:WithdrawBankShoppingList()
 				return
 			end
 		else
-			local ok = pcall(UseItem, s.bag, s.slot)
-			movedAny = ok
+			movedAny = RunSafe("BankUseItem", UseItem, s.bag, s.slot)
 		end
 
 		if not movedAny then
@@ -821,6 +798,7 @@ function ns:RefreshBankBar()
 
 	bankBar.label:SetText(string.format(L["BANK_BAR_TITLE"], #matches))
 	bankBar.btn:SetText(L["BANK_WITHDRAW_BTN"])
+	bankBar.btn:SetEnabled(not ns.bankWithdrawJob)
 	bankBar:Show()
 end
 

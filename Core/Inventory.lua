@@ -137,7 +137,7 @@ function ns:GetBankContainerIDs()
 end
 
 -- Сканирование сумок игрока и, если открыт банк, банковских сумок
-function ns:ScanBagsNow()
+function ns:ScanBagsNow(quiet)
 	if not self.charDB then
 		return
 	end
@@ -191,7 +191,7 @@ function ns:ScanBagsNow()
 	end
 
 	self:InvalidateCraftCounts()
-	if self.OnInventoryUpdated then
+	if not quiet and self.OnInventoryUpdated then
 		self:OnInventoryUpdated()
 	end
 end

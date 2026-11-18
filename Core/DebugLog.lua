@@ -99,6 +99,9 @@ local function IsLikelyOurs(source, msg, stack)
 	if type(stack) == "string" and stack:find(ADDON_NAME, 1, true) then
 		return true
 	end
+	if type(source) == "string" and source ~= "" then
+		return false
+	end
 	local last = breadcrumbs[#breadcrumbs]
 	local nowT = GetTime and GetTime() or 0
 	if last and nowT > 0 and (nowT - last.t) <= 3.0 then
@@ -207,9 +210,15 @@ function ns:ShowDebugLogWindow()
 	logFrame:Show()
 end
 
+function ns:ResetDebugLogWindow()
+	if logFrame then
+		logFrame:Hide()
+		logFrame = nil
+	end
+end
+
 local debugFrame = CreateFrame("Frame")
 for _, ev in ipairs({
-	"PLAYER_LOGIN",
 	"ADDON_ACTION_BLOCKED",
 	"ADDON_ACTION_FORBIDDEN",
 	"MACRO_ACTION_BLOCKED",
@@ -221,28 +230,11 @@ for _, ev in ipairs({
 end
 
 debugFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
-	if event == "PLAYER_LOGIN" then
-		if geterrorhandler and seterrorhandler and not ns._errHooked then
-			ns._errHooked = true
-			local prev = geterrorhandler()
-			seterrorhandler(function(msg)
-				local stack = ShortStack(3)
-				if IsLikelyOurs(nil, msg, stack) then
-					AppendEntry("LUA_ERR", ADDON_NAME, msg, stack)
-				end
-				if prev then
-					return prev(msg)
-				end
-			end)
-		end
-		return
-	end
-
 	local stack = ShortStack(3)
 	if event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
 		local kind = (event == "ADDON_ACTION_BLOCKED") and "BLOCKED" or "FORBIDDEN"
-		AppendEntry(kind, arg1, arg2, stack)
 		if IsLikelyOurs(arg1, arg2, stack) then
+			AppendEntry(kind, arg1, arg2, stack)
 			local tNow = GetTime and GetTime() or 0
 			if (tNow - lastChatAlertAt) > 10 then
 				lastChatAlertAt = tNow

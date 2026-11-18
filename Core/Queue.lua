@@ -350,10 +350,14 @@ function ns:ProcessQueue()
 	for idx, step in ipairs(queue) do
 		local readyCrafts, state = self:GetQueueStepStatus(step)
 		if readyCrafts > 0 then
-			if state == "other_prof" then
+			local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
+			if state == "other_prof" and step.skillLine and activeClientSL ~= step.skillLine then
 				self:SwitchToProfession(step.skillLine, step.recipeID)
 				return
-			elseif state == "ready" or state == "partial" then
+			elseif state == "ready" or state == "partial" or (state == "other_prof" and step.skillLine and activeClientSL == step.skillLine) then
+				if state == "other_prof" and step.skillLine then
+					self.currentSkillLine = step.skillLine
+				end
 				local toCraft = math.min(step.count, readyCrafts)
 				self.activeCastRecipeID = step.recipeID
 				self.activeCastQueueIndex = idx

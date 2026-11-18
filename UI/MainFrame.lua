@@ -632,6 +632,9 @@ function ns:CreateMainFrame()
 			if e.isHeader then
 				ns.collapsedCategories = ns.collapsedCategories or {}
 				ns.collapsedCategories[e.categoryName] = not (ns.collapsedCategories[e.categoryName] == true)
+				if ns.collapsedCategories[e.categoryName] and ns.pinnedRecipeBySkill and ns.currentSkillLine then
+					ns.pinnedRecipeBySkill[ns.currentSkillLine] = nil
+				end
 				ns:RefreshRecipeList()
 				return
 			end
@@ -1670,6 +1673,9 @@ function ns:RebuildMainFrame()
 	if self.settingsFrame then
 		self.settingsFrame:Hide()
 		self.settingsFrame = nil
+	end
+	if self.ResetDebugLogWindow then
+		self:ResetDebugLogWindow()
 	end
 	if self.mainFrame then
 		self.isRebuildingFrame = true
