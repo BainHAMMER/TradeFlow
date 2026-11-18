@@ -397,6 +397,9 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 		self:Print(L["ATR_NOT_FOUND"])
 		return
 	end
+	if self.LogTrace then
+		self:LogTrace("SnipeSearchAH", tostring(targetOrFilter or "all"))
+	end
 
 	self:SyncSnipeShoppingList(true)
 	local targets = EnsureSnipeDB()

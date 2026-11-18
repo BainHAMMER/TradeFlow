@@ -780,6 +780,9 @@ function ns:OpenClientTradeSkill(skillLine, recipeID)
 	if not skillLine or (InCombatLockdown and InCombatLockdown()) then
 		return false
 	end
+	if self.LogTrace then
+		self:LogTrace("OpenClientTradeSkill", tostring(skillLine) .. (recipeID and (":" .. recipeID) or ""))
+	end
 	self.isSwitchingProfession = true
 	self:SuppressBlizzardFrame()
 	local profInfo = self.playerProfessions[skillLine]
@@ -832,6 +835,9 @@ end
 function ns:ExecuteCraftRecipe(recipeID, count)
 	if not recipeID or (InCombatLockdown and InCombatLockdown()) then
 		return false
+	end
+	if self.LogTrace then
+		self:LogTrace("CraftRecipe", tostring(recipeID) .. "x" .. tostring(count or 1))
 	end
 	count = math.max(1, count or 1)
 	local rec = self:GetRecipeRecord(recipeID)
@@ -1056,6 +1062,10 @@ SlashCmdList.TRADEFLOW = function(msg)
 		ns:ToggleLanguage()
 	elseif msg == "blizz" or msg == "blizzard" then
 		ns:OpenBlizzardProfessions()
+	elseif msg == "log" or msg == "errors" or msg == "debug" then
+		if ns.ShowDebugLogWindow then
+			ns:ShowDebugLogWindow()
+		end
 	else
 		if ns.ToggleMainWindow then
 			ns:ToggleMainWindow()

@@ -615,6 +615,9 @@ function ns:WithdrawBankShoppingList()
 	if #matches == 0 then
 		return
 	end
+	if self.LogTrace then
+		self:LogTrace("WithdrawBank", #matches .. " items")
+	end
 	local UseItem = (C_Container and C_Container.UseContainerItem) or UseContainerItem
 	local SplitItem = (C_Container and C_Container.SplitContainerItem) or SplitContainerItem
 	local PickupItem = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
@@ -711,14 +714,14 @@ function ns:WithdrawBankShoppingList()
 		job.steps = job.steps + 1
 		local movedAny = false
 		if s.take >= s.count then
-			local ok = pcall(UseItem, s.bag, s.slot)
+			local ok = ns.SafeCall and ns:SafeCall("BankUseItem", UseItem, s.bag, s.slot) or pcall(UseItem, s.bag, s.slot)
 			movedAny = ok
 		elseif SplitItem and PickupItem then
 			local dstBag, dstSlot = FindFreePlayerBagSlot()
 			if dstBag and dstSlot then
-				local okSplit = pcall(SplitItem, s.bag, s.slot, s.take)
+				local okSplit = ns.SafeCall and ns:SafeCall("BankSplitItem", SplitItem, s.bag, s.slot, s.take) or pcall(SplitItem, s.bag, s.slot, s.take)
 				if okSplit and (not CursorHasItem or CursorHasItem()) then
-					local okPick = pcall(PickupItem, dstBag, dstSlot)
+					local okPick = ns.SafeCall and ns:SafeCall("BankPickupItem", PickupItem, dstBag, dstSlot) or pcall(PickupItem, dstBag, dstSlot)
 					movedAny = okPick
 				end
 				if CursorHasItem and CursorHasItem() and ClearCursor then

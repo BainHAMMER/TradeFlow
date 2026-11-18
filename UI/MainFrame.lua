@@ -1625,7 +1625,7 @@ function ns:ToggleSettingsFrame()
 		end
 
 		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(310, 50 + #opts * 28)
+		sf:SetSize(310, 80 + #opts * 28)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1669,6 +1669,17 @@ function ns:ToggleSettingsFrame()
 			end)
 			sf.checks[i] = { cb = cb, opt = o }
 		end
+
+		local logBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+		logBtn:SetSize(286, 22)
+		logBtn:SetPoint("BOTTOMLEFT", 12, 10)
+		logBtn:SetText(L["OPT_DEBUG_LOG_BTN"])
+		logBtn:SetScript("OnClick", function()
+			sf:Hide()
+			if ns.ShowDebugLogWindow then
+				ns:ShowDebugLogWindow()
+			end
+		end)
 
 		if not self.settingsSpecialRegistered then
 			self.settingsSpecialRegistered = true
