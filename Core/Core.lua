@@ -103,6 +103,62 @@ function ns.FormatSkillUpCost(copper)
 	return ns.FormatMoney(copper)
 end
 
+-- Компактное форматирование длительности в ч/м/с
+function ns.FormatDuration(seconds)
+	if type(seconds) ~= "number" or seconds < 0 then
+		return "-"
+	end
+	if seconds < 10 then
+		local rounded = math.floor(seconds + 0.5)
+		if math.abs(seconds - rounded) >= 0.05 then
+			return string.format("%.1f%s", seconds, L["TIME_SEC"])
+		end
+		return string.format("%d%s", rounded, L["TIME_SEC"])
+	end
+	local total = math.floor(seconds + 0.5)
+	local h = math.floor(total / 3600)
+	local m = math.floor((total % 3600) / 60)
+	local s = total % 60
+	if h > 0 then
+		if m > 0 then
+			return string.format("%d%s %d%s", h, L["TIME_HOUR"], m, L["TIME_MIN"])
+		end
+		return string.format("%d%s", h, L["TIME_HOUR"])
+	end
+	if m > 0 then
+		if s > 0 then
+			return string.format("%d%s %d%s", m, L["TIME_MIN"], s, L["TIME_SEC"])
+		end
+		return string.format("%d%s", m, L["TIME_MIN"])
+	end
+	return string.format("%d%s", s, L["TIME_SEC"])
+end
+
+-- Время изготовления одной единицы рецепта в секундах (по данным клиента)
+function ns:GetRecipeCastTime(recipeID)
+	if not recipeID or recipeID <= 0 then
+		return nil
+	end
+	local castMs
+	if C_Spell and C_Spell.GetSpellInfo then
+		local info = C_Spell.GetSpellInfo(recipeID)
+		if info then
+			castMs = info.castTime
+		end
+	end
+	if castMs == nil and GetSpellInfo then
+		local _, _, _, ct = GetSpellInfo(recipeID)
+		castMs = ct
+	end
+	if type(castMs) ~= "number" or castMs < 0 then
+		if C_Spell and C_Spell.RequestLoadSpellData then
+			pcall(C_Spell.RequestLoadSpellData, recipeID)
+		end
+		return nil
+	end
+	return castMs / 1000
+end
+
 function ns:RealmKey()
 	local realm = GetRealmName and GetRealmName() or "Realm"
 	local faction = UnitFactionGroup and UnitFactionGroup("player") or "Neutral"

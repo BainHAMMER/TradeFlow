@@ -163,6 +163,10 @@ ns.Locales.en = {
 	["QUEUE_STATUS_UNLEARNED"] = "|cffff5555Unlearned|r",
 	["QUEUE_STATUS_OTHER_PROF"] = "|cff66ccffProf: %s|r",
 	["QUEUE_SUBCRAFT_BADGE"] = "|cffaaaaaa[sub]|r ",
+	["TIME_HOUR"] = "h",
+	["TIME_MIN"] = "m",
+	["TIME_SEC"] = "s",
+	["QUEUE_TOTAL_TIME"] = "Time: |cffffd100%s|r",
 
 	-- Shopping List & Integrations
 	["SHOPPING_EMPTY"] = "Your bags already hold all reagents needed for the queue!",
