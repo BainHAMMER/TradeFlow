@@ -529,9 +529,9 @@ function ns:RefreshQueueAndShoppingView()
 			local ready, state = self:GetQueueStepStatus(step)
 			if ready > 0 then
 				local stepSL = step.skillLine or (self:GetRecipeRecord(step.recipeID) or {}).skillLine
-				if state == "other_prof" or (stepSL and activeClientSL ~= stepSL) then
+				if stepSL and activeClientSL ~= stepSL then
 					switchProf = stepSL
-				elseif state == "ready" or state == "partial" then
+				elseif state == "ready" or state == "partial" or state == "other_prof" then
 					canCraftAny = true
 				end
 				break
@@ -545,7 +545,7 @@ function ns:RefreshQueueAndShoppingView()
 			if not inCombat then
 				local profInfo = self.playerProfessions and self.playerProfessions[switchProf]
 				local spellID = (switchProf == 186 and 2656) or (profInfo and profInfo.spellID) or (self.PROF_SPELLS and self.PROF_SPELLS[switchProf])
-				local spellName = spellID and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
+				local spellName = spellID and ((C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or (GetSpellInfo and GetSpellInfo(spellID)))
 				if spellName or spellID then
 					f.processBtn:SetAttribute("type", "spell")
 					f.processBtn:SetAttribute("spell", spellName or spellID)

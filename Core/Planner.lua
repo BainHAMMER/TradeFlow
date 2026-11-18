@@ -189,7 +189,6 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						th = th,
 						craftCost = craftCost,
 						unitReturn = unitReturn,
-						vendorDeduct = effectiveDeduct,
 						reagents = breakdown or {},
 						netCost = math.max(0, craftCost - effectiveDeduct),
 					}
@@ -508,7 +507,6 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					unitNetCost = c.netCost,
 					unitCraftCost = c.craftCost,
 					unitReturn = c.unitReturn or 0,
-					vendorDeduct = c.vendorDeduct or 0,
 					reagents = c.reagents,
 					learnFee = p.learnFee,
 					reqSkill = c.reqSkill,

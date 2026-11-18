@@ -187,6 +187,36 @@ function ns:RequestItemData(itemID)
 	end
 end
 
+-- Гарантирует загрузку данных предметов по itemID перед вызовом Auctionator API
+function ns:WithLoadedItems(items, callback)
+	if not items or #items == 0 then
+		callback()
+		return
+	end
+	if ContinuableContainer and Item and Item.CreateFromItemID then
+		local container = ContinuableContainer:Create()
+		for _, entry in ipairs(items) do
+			if entry.itemID and entry.itemID > 0 then
+				container:AddContinuable(Item:CreateFromItemID(entry.itemID))
+			end
+		end
+		container:ContinueOnLoad(callback)
+		return
+	end
+	local allLoaded = true
+	for _, entry in ipairs(items) do
+		local _, _, _, _, loaded = self:GetItemDisplay(entry.itemID)
+		if not loaded then
+			allLoaded = false
+		end
+	end
+	if allLoaded then
+		callback()
+	elseif C_Timer and C_Timer.After then
+		C_Timer.After(0.25, callback)
+	end
+end
+
 local function ScheduleItemDataRefresh()
 	if pendingItemRefresh or not (ns.mainFrame and ns.mainFrame:IsShown()) then
 		return
@@ -861,8 +891,12 @@ function ns:ExecuteCraftRecipe(recipeID, count)
 	self:SuppressBlizzardFrame()
 
 	if C_TradeSkillUI and C_TradeSkillUI.CraftRecipe then
-		local ok = ns.SafeCall and ns:SafeCall("CraftRecipe", C_TradeSkillUI.CraftRecipe, recipeID, count)
-			or pcall(C_TradeSkillUI.CraftRecipe, recipeID, count)
+		local ok
+		if ns.SafeCall then
+			ok = ns:SafeCall("CraftRecipe", C_TradeSkillUI.CraftRecipe, recipeID, count)
+		else
+			ok = pcall(C_TradeSkillUI.CraftRecipe, recipeID, count)
+		end
 		return ok and true or false
 	end
 	return false
