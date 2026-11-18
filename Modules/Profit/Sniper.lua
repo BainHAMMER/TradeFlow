@@ -12,6 +12,8 @@ local lastChatHitAt = {}
 local lastSnipeListSig = nil
 local pendingUiRefresh = false
 local hookedAuctionFrames = {}
+local pendingBuy = nil
+local buyTokenCounter = 0
 
 local function EnsureSnipeDB()
 	if not ns.realmDB then
@@ -468,11 +470,258 @@ local function HookAuctionFrameShow(ah)
 	end
 end
 
+local function ClearStaleSnipeHit(itemID, newMinPrice)
+	if itemID and ns.snipeHits then
+		ns.snipeHits[itemID] = nil
+	end
+	if itemID and ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID] then
+		if newMinPrice and newMinPrice > 0 then
+			local s = ns.realmDB.ahStock[itemID]
+			s.minPrice = newMinPrice
+			s.tiers = { { price = newMinPrice, qty = s.total or 1 } }
+			s.isAggregate = true
+			s.ts = (time and time()) or s.ts
+		else
+			ns.realmDB.ahStock[itemID] = nil
+		end
+	end
+end
+
+local function CancelPendingCommodity(reasonText, dropItemID, newMinPrice)
+	if C_AuctionHouse and C_AuctionHouse.CancelCommoditiesPurchase then
+		pcall(C_AuctionHouse.CancelCommoditiesPurchase)
+	end
+	pendingBuy = nil
+	if dropItemID then
+		ClearStaleSnipeHit(dropItemID, newMinPrice)
+	end
+	if reasonText and ns.Print then
+		ns:Print(reasonText)
+	end
+	ns:RefreshSnipeUI()
+end
+
+local function IsCommodityItem(itemID)
+	if C_AuctionHouse and C_AuctionHouse.GetNumCommoditySearchResults then
+		local ok, n = pcall(C_AuctionHouse.GetNumCommoditySearchResults, itemID)
+		if ok and type(n) == "number" and n > 0 then
+			return true
+		end
+	end
+	if C_AuctionHouse and C_AuctionHouse.GetItemCommodityStatus and Enum and Enum.ItemCommodityStatus then
+		local ok, st = pcall(C_AuctionHouse.GetItemCommodityStatus, itemID)
+		if ok and st ~= nil then
+			if st == Enum.ItemCommodityStatus.Commodity then
+				return true
+			elseif st == Enum.ItemCommodityStatus.NonCommodity then
+				return false
+			end
+		end
+	end
+	if C_Item and C_Item.GetItemInfoInstant then
+		local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemID)
+		if classID == 0 or classID == 3 or classID == 7 then
+			return true
+		elseif classID == 2 or classID == 4 or classID == 9 then
+			return false
+		end
+	end
+	return true
+end
+
+local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
+	local money = (GetMoney and GetMoney()) or 0
+	if C_AuctionHouse and C_AuctionHouse.GetNumCommoditySearchResults and C_AuctionHouse.GetCommoditySearchResultInfo then
+		local ok, n = pcall(C_AuctionHouse.GetNumCommoditySearchResults, itemID)
+		if ok and type(n) == "number" and n > 0 then
+			local buyQty, spent, liveMin = 0, 0, nil
+			local sawAffordableCheap = false
+			for i = 1, math.min(n, 200) do
+				local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+				local p = info and info.unitPrice
+				local q = info and info.quantity
+				if p and p > 0 and q and q > 0 then
+					if not liveMin or p < liveMin then
+						liveMin = p
+					end
+					if p <= maxPrice then
+						local canAfford = math.floor((money - spent) / p)
+						if canAfford > 0 then
+							sawAffordableCheap = true
+							local take = math.min(q, canAfford)
+							buyQty = buyQty + take
+							spent = spent + take * p
+							if take < q then
+								break
+							end
+						elseif buyQty == 0 then
+							return 0, "nomoney", liveMin
+						end
+					end
+				end
+			end
+			if buyQty > 0 then
+				return buyQty, nil, liveMin
+			end
+			return 0, sawAffordableCheap and "nomoney" or "gone", liveMin
+		end
+	end
+
+	local stock = ns.GetAuctionTiers and ns:GetAuctionTiers(itemID)
+	if stock and not stock.isAggregate and stock.tiers and #stock.tiers > 0 then
+		local buyQty, spent = 0, 0
+		for _, t in ipairs(stock.tiers) do
+			if t.price <= maxPrice and (t.qty or 0) > 0 then
+				local canAfford = math.floor((money - spent) / t.price)
+				if canAfford > 0 then
+					local take = math.min(t.qty, canAfford)
+					buyQty = buyQty + take
+					spent = spent + take * t.price
+					if take < t.qty then
+						break
+					end
+				elseif buyQty == 0 then
+					return 0, "nomoney", t.price
+				end
+			end
+		end
+		if buyQty > 0 then
+			return buyQty, nil, stock.tiers[1] and stock.tiers[1].price
+		end
+		return 0, "gone", stock.tiers[1] and stock.tiers[1].price
+	end
+
+	if hit and hit.bestPrice and hit.bestPrice <= maxPrice then
+		if money < hit.bestPrice then
+			return 0, "nomoney", hit.bestPrice
+		end
+		local desired = (hit.totalCheapQty and hit.totalCheapQty > 0) and hit.totalCheapQty or (hit.qty or 1)
+		local qty = math.min(desired, math.floor(money / math.max(1, hit.bestPrice)))
+		if qty > 0 then
+			return qty, nil, hit.bestPrice
+		end
+	end
+	return 0, "gone", nil
+end
+
+function ns:BuyFirstSnipeHit()
+	if not IsAuctionHouseOpen() then
+		return
+	end
+	if pendingBuy and pendingBuy.state == "confirm" then
+		local money = (GetMoney and GetMoney()) or 0
+		if (pendingBuy.totalPrice or 0) > money then
+			CancelPendingCommodity(L["SNIPE_BUY_NOMONEY"], nil)
+			return
+		end
+		if (pendingBuy.unitPrice or 0) > pendingBuy.maxPrice then
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_GONE_PRICE"], pendingBuy.label, ns.FormatMoney(pendingBuy.unitPrice), ns.FormatMoney(pendingBuy.maxPrice)), pendingBuy.itemID, pendingBuy.unitPrice)
+			return
+		end
+		if C_AuctionHouse and C_AuctionHouse.ConfirmCommoditiesPurchase then
+			pendingBuy.state = "buying"
+			local ok = pcall(C_AuctionHouse.ConfirmCommoditiesPurchase, pendingBuy.itemID, pendingBuy.qty)
+			if not ok then
+				CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], pendingBuy.label), pendingBuy.itemID, nil)
+			else
+				self:RefreshSnipeBar()
+			end
+		end
+		return
+	end
+	if pendingBuy and pendingBuy.state == "awaiting" then
+		return
+	end
+
+	local hits = self:GetSnipeHitList()
+	local first = hits[1]
+	if not first then
+		return
+	end
+	local itemID = first.itemID
+	local maxPrice = first.maxPrice or 0
+	if maxPrice <= 0 then
+		return
+	end
+	local name, _, _, link, _, hex = self:GetItemDisplay(itemID)
+	local label = link or ((hex or "|cffffffff") .. (name or ("#" .. itemID)) .. "|r")
+
+	if IsCommodityItem(itemID) and C_AuctionHouse and C_AuctionHouse.StartCommoditiesPurchase then
+		local qty, errKind, liveMin = ComputeCommodityBuyQty(itemID, maxPrice, first)
+		if qty <= 0 then
+			if errKind == "nomoney" then
+				self:Print(L["SNIPE_BUY_NOMONEY"])
+			else
+				CancelPendingCommodity(string.format(L["SNIPE_BUY_GONE"], label), itemID, liveMin)
+			end
+			return
+		end
+		buyTokenCounter = buyTokenCounter + 1
+		local tok = buyTokenCounter
+		pendingBuy = {
+			itemID = itemID,
+			qty = qty,
+			maxPrice = maxPrice,
+			state = "awaiting",
+			token = tok,
+			label = label,
+		}
+		self:RefreshSnipeBar()
+		local ok = pcall(C_AuctionHouse.StartCommoditiesPurchase, itemID, qty)
+		if not ok then
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), nil)
+			return
+		end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(4.0, function()
+				if pendingBuy and pendingBuy.token == tok and (pendingBuy.state == "awaiting" or pendingBuy.state == "buying") then
+					CancelPendingCommodity(string.format(L["SNIPE_BUY_TIMEOUT"], label), nil)
+				end
+			end)
+		end
+	elseif C_AuctionHouse and C_AuctionHouse.MakeItemKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo and C_AuctionHouse.PlaceBid then
+		local key = C_AuctionHouse.MakeItemKey(itemID)
+		local n = C_AuctionHouse.GetNumItemSearchResults(key) or 0
+		if n == 0 then
+			self:SearchSnipeTargetsOnAH(itemID, true)
+			self:Print(string.format(L["SNIPE_BUY_LOADING"], label))
+			return
+		end
+		local bestAuction = nil
+		for i = 1, n do
+			local info = C_AuctionHouse.GetItemSearchResultInfo(key, i)
+			if info and info.auctionID and info.buyoutAmount and info.buyoutAmount > 0 then
+				if not bestAuction or info.buyoutAmount < bestAuction.buyoutAmount then
+					bestAuction = info
+				end
+			end
+		end
+		if not bestAuction or bestAuction.buyoutAmount > maxPrice then
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_GONE"], label), itemID, bestAuction and bestAuction.buyoutAmount)
+			return
+		end
+		local money = (GetMoney and GetMoney()) or 0
+		if bestAuction.buyoutAmount > money then
+			self:Print(L["SNIPE_BUY_NOMONEY"])
+			return
+		end
+		local ok = pcall(C_AuctionHouse.PlaceBid, bestAuction.auctionID, bestAuction.buyoutAmount)
+		if ok then
+			self:Print(string.format(L["SNIPE_BUY_DONE"], label, 1, ns.FormatMoney(bestAuction.buyoutAmount), ns.FormatMoney(maxPrice)))
+			ClearStaleSnipeHit(itemID, nil)
+			self:RefreshSnipeUI()
+		else
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), itemID, nil)
+		end
+	end
+end
+
 function ns:RefreshSnipeBar()
 	local ah = GetActiveAuctionFrame()
 	local enabled = self.IsModuleEnabled and self:IsModuleEnabled("profit")
 	local targets = self:GetSnipeTargetList()
-	if not (ah and enabled and #targets > 0) then
+	local hits = self:GetSnipeHitList()
+	if not (ah and enabled and (#targets > 0 or pendingBuy)) then
 		if snipeBar then
 			snipeBar:Hide()
 		end
@@ -544,6 +793,53 @@ function ns:RefreshSnipeBar()
 			GameTooltip:Show()
 		end)
 		snipeBar.openBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+		snipeBar.buyBtn = CreateFrame("Button", "TradeFlowSnipeBuyBtn", snipeBar, "UIPanelButtonTemplate")
+		snipeBar.buyBtn:SetSize(142, 24)
+		snipeBar.buyBtn:SetPoint("RIGHT", snipeBar.openBtn, "LEFT", -6, 0)
+		snipeBar.buyBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		snipeBar.buyBtn:SetScript("OnClick", function(_, button)
+			if button == "RightButton" then
+				if pendingBuy then
+					CancelPendingCommodity(nil, nil)
+				end
+				return
+			end
+			ns:BuyFirstSnipeHit()
+		end)
+		if AuctionHouseFrame and AuctionHouseFrame.BuyDialog and not hookedAuctionFrames[AuctionHouseFrame.BuyDialog] then
+			hookedAuctionFrames[AuctionHouseFrame.BuyDialog] = true
+			pcall(AuctionHouseFrame.BuyDialog.HookScript, AuctionHouseFrame.BuyDialog, "OnHide", function()
+				if pendingBuy and pendingBuy.state == "confirm" then
+					if C_Timer and C_Timer.After then
+						C_Timer.After(0.05, function()
+							if pendingBuy and pendingBuy.state == "confirm" then
+								CancelPendingCommodity(nil, nil)
+							end
+						end)
+					else
+						CancelPendingCommodity(nil, nil)
+					end
+				end
+			end)
+		end
+		snipeBar.buyBtn:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			if pendingBuy and pendingBuy.state == "confirm" then
+				GameTooltip:SetText(string.format(L["SNIPE_BUY_CONFIRM"], pendingBuy.qty), 0.25, 1, 0.25)
+				GameTooltip:AddLine(string.format(
+					L["SNIPE_BUY_CONFIRM_TIP"],
+					pendingBuy.qty,
+					ns.FormatMoney(pendingBuy.unitPrice or 0),
+					ns.FormatMoney(pendingBuy.totalPrice or 0)
+				), 0.9, 0.9, 0.9, true)
+			else
+				GameTooltip:SetText(string.format(L["SNIPE_BUY_BTN"], 1):gsub("%s*x%d+", ""), 1, 0.82, 0)
+				GameTooltip:AddLine(L["SNIPE_BUY_TIP"], 0.85, 0.85, 0.85, true)
+			end
+			GameTooltip:Show()
+		end)
+		snipeBar.buyBtn:SetScript("OnLeave", GameTooltip_Hide)
 	end
 
 	snipeBar:SetParent(ah)
@@ -564,6 +860,35 @@ function ns:RefreshSnipeBar()
 
 	local hits = self:GetSnipeHitList()
 	snipeBar.openBtn:SetText(string.format(L["SNIPE_FIND_HIT_BTN"], #hits))
+	if #hits > 0 or pendingBuy then
+		local first = hits[1]
+		if pendingBuy and pendingBuy.state == "awaiting" then
+			snipeBar.buyBtn:SetText(L["SNIPE_BUY_WAIT"])
+			snipeBar.buyBtn:SetEnabled(false)
+		elseif pendingBuy and pendingBuy.state == "confirm" then
+			snipeBar.buyBtn:SetText(string.format(L["SNIPE_BUY_CONFIRM"], pendingBuy.qty or 1))
+			snipeBar.buyBtn:SetEnabled(true)
+		elseif pendingBuy and pendingBuy.state == "buying" then
+			snipeBar.buyBtn:SetText(L["SNIPE_BUY_WAIT"])
+			snipeBar.buyBtn:SetEnabled(false)
+		elseif first then
+			local qty = ComputeCommodityBuyQty(first.itemID, first.maxPrice or 0, first)
+			if qty <= 0 then
+				qty = (first.totalCheapQty and first.totalCheapQty > 0) and first.totalCheapQty or (first.qty or 1)
+			end
+			snipeBar.buyBtn:SetText(string.format(L["SNIPE_BUY_BTN"], qty))
+			snipeBar.buyBtn:SetEnabled(true)
+		end
+		snipeBar.buyBtn:Show()
+		snipeBar.label:ClearAllPoints()
+		snipeBar.label:SetPoint("LEFT", 10, 0)
+		snipeBar.label:SetPoint("RIGHT", snipeBar.buyBtn, "LEFT", -8, 0)
+	else
+		snipeBar.buyBtn:Hide()
+		snipeBar.label:ClearAllPoints()
+		snipeBar.label:SetPoint("LEFT", 10, 0)
+		snipeBar.label:SetPoint("RIGHT", snipeBar.scanBtn, "LEFT", -8, 0)
+	end
 	if #hits > 0 then
 		local first = hits[1]
 		local name = self:GetItemDisplay(first.itemID)
@@ -617,10 +942,14 @@ for _, ev in ipairs({
 	"AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
 	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"AUCTION_ITEM_LIST_UPDATE",
+	"COMMODITY_PRICE_UPDATED",
+	"COMMODITY_PRICE_UNAVAILABLE",
+	"COMMODITY_PURCHASE_SUCCEEDED",
+	"COMMODITY_PURCHASE_FAILED",
 }) do
 	pcall(snipeEventFrame.RegisterEvent, snipeEventFrame, ev)
 end
-snipeEventFrame:SetScript("OnEvent", function(_, event)
+snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if not (ns.IsModuleEnabled and ns:IsModuleEnabled("profit")) then
 		if snipeBar then
 			snipeBar:Hide()
@@ -652,7 +981,47 @@ snipeEventFrame:SetScript("OnEvent", function(_, event)
 				end
 			end
 		end
+	elseif event == "COMMODITY_PRICE_UPDATED" then
+		if pendingBuy and pendingBuy.state == "awaiting" then
+			local unitP = tonumber(arg1)
+			local totalP = tonumber(arg2)
+			local effUnit = (unitP and pendingBuy.qty > 0 and totalP) and math.ceil(totalP / pendingBuy.qty) or unitP
+			if not unitP or unitP <= 0 or unitP > pendingBuy.maxPrice or (effUnit and effUnit > pendingBuy.maxPrice) then
+				CancelPendingCommodity(
+					string.format(L["SNIPE_BUY_GONE_PRICE"], pendingBuy.label, ns.FormatMoney(unitP or effUnit or 0), ns.FormatMoney(pendingBuy.maxPrice)),
+					pendingBuy.itemID,
+					unitP or effUnit
+				)
+			elseif totalP and GetMoney and totalP > GetMoney() then
+				CancelPendingCommodity(L["SNIPE_BUY_NOMONEY"], nil)
+			else
+				pendingBuy.state = "confirm"
+				pendingBuy.unitPrice = unitP
+				pendingBuy.totalPrice = totalP or (unitP * pendingBuy.qty)
+				ns:RefreshSnipeBar()
+			end
+		end
+	elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
+		if pendingBuy then
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_GONE"], pendingBuy.label), pendingBuy.itemID, nil)
+		end
+	elseif event == "COMMODITY_PURCHASE_FAILED" then
+		if pendingBuy then
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], pendingBuy.label), pendingBuy.itemID, nil)
+		end
+	elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
+		if pendingBuy then
+			local bought = pendingBuy
+			pendingBuy = nil
+			local totalSpent = bought.totalPrice or ((bought.unitPrice or 0) * bought.qty)
+			ns:Print(string.format(L["SNIPE_BUY_DONE"], bought.label, bought.qty, ns.FormatMoney(totalSpent), ns.FormatMoney(bought.maxPrice)))
+			ClearStaleSnipeHit(bought.itemID, nil)
+			ns:RefreshSnipeUI()
+		end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
+		if pendingBuy then
+			CancelPendingCommodity(nil, nil)
+		end
 		if snipeBar then
 			snipeBar:Hide()
 		end
