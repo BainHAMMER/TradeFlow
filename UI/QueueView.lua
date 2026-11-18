@@ -181,6 +181,12 @@ function ns:CreateQueueAndShoppingView(parent)
 		row.rightText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		row.rightText:SetPoint("RIGHT", row.upBtn, "LEFT", -6, 0)
 		row.rightText:SetJustifyH("RIGHT")
+		row.rightText:SetWordWrap(false)
+
+		row.timeText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		row.timeText:SetPoint("BOTTOMRIGHT", row.upBtn, "BOTTOMLEFT", -6, -1)
+		row.timeText:SetJustifyH("RIGHT")
+		row.timeText:SetWordWrap(false)
 
 		row:SetScript("OnClick", function(self)
 			if IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("DRESSUP") or IsShiftKeyDown() or IsControlKeyDown()) then
@@ -211,7 +217,7 @@ function ns:CreateQueueAndShoppingView(parent)
 
 	-- Нижняя панель кнопок режима «Очередь» (SecureActionButton для легального переключения профессии без taint)
 	local processBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
-	processBtn:SetSize(180, 24)
+	processBtn:SetSize(168, 24)
 	processBtn:SetPoint("BOTTOMLEFT", 8, 5)
 	processBtn:RegisterForClicks("AnyUp")
 	if not (InCombatLockdown and InCombatLockdown()) then
@@ -232,13 +238,20 @@ function ns:CreateQueueAndShoppingView(parent)
 	f.processBtn = processBtn
 
 	local clearBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	clearBtn:SetSize(110, 24)
+	clearBtn:SetSize(80, 24)
 	clearBtn:SetPoint("LEFT", processBtn, "RIGHT", 6, 0)
 	clearBtn:SetText(L["QUEUE_CLEAR"])
 	clearBtn:SetScript("OnClick", function()
 		ns:QueueClear()
 	end)
 	f.clearBtn = clearBtn
+
+	local queueTotal = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	queueTotal:SetPoint("LEFT", clearBtn, "RIGHT", 8, 0)
+	queueTotal:SetPoint("RIGHT", f, "BOTTOMRIGHT", -10, 17)
+	queueTotal:SetJustifyH("RIGHT")
+	queueTotal:SetWordWrap(false)
+	f.queueTotal = queueTotal
 
 	-- Нижняя панель кнопок режима «Список покупок»
 	local shopTotal = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -329,7 +342,16 @@ function ns:RenderQueueOrShoppingRows()
 				row.downBtn:Show()
 				row.delBtn:Show()
 				row.rightText:ClearAllPoints()
-				row.rightText:SetPoint("RIGHT", row.upBtn, "LEFT", -6, 0)
+				row.rightText:SetPoint("TOPRIGHT", row.upBtn, "TOPLEFT", -6, 1)
+				row.timeText:ClearAllPoints()
+				row.timeText:SetPoint("BOTTOMRIGHT", row.upBtn, "BOTTOMLEFT", -6, -1)
+				row.timeText:Show()
+				row.title:ClearAllPoints()
+				row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
+				row.title:SetPoint("RIGHT", row.rightText, "LEFT", -6, 0)
+				row.sub:ClearAllPoints()
+				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
+				row.sub:SetPoint("RIGHT", row.timeText, "LEFT", -6, 0)
 
 				local name, icon, outItemID, _, _, hex = self:GetRecipeDisplay(step.recipeID)
 				row.itemID = outItemID
@@ -358,6 +380,12 @@ function ns:RenderQueueOrShoppingRows()
 				end
 				row.sub:SetText(statusStr)
 				row.rightText:SetText(self:GetProfessionName(stepSL))
+				local castSec = self.GetRecipeCastTime and self:GetRecipeCastTime(step.recipeID)
+				if castSec then
+					row.timeText:SetText("|cff88ccff" .. ns.FormatDuration(castSec * (step.count or 1)) .. "|r")
+				else
+					row.timeText:SetText("")
+				end
 			else
 				row:Hide()
 			end
@@ -379,8 +407,16 @@ function ns:RenderQueueOrShoppingRows()
 				row.upBtn:Hide()
 				row.downBtn:Hide()
 				row.delBtn:Hide()
+				row.timeText:SetText("")
+				row.timeText:Hide()
 				row.rightText:ClearAllPoints()
 				row.rightText:SetPoint("RIGHT", -8, 0)
+				row.title:ClearAllPoints()
+				row.title:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 6, -1)
+				row.title:SetPoint("RIGHT", row.rightText, "LEFT", -6, 0)
+				row.sub:ClearAllPoints()
+				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
+				row.sub:SetPoint("RIGHT", row.rightText, "LEFT", -6, 0)
 
 				-- Отображение реального предмета из клиента по его itemID
 				local name, icon, _, _, _, hex = self:GetItemDisplay(item.itemID)
@@ -528,7 +564,44 @@ function ns:RefreshQueueAndShoppingView()
 			end
 		end
 		f.clearBtn:SetEnabled(#queue > 0)
+		if f.queueTotal then
+			if #queue > 0 then
+				local totalSec, hasKnown = 0, false
+				for _, step in ipairs(queue) do
+					local castSec = self.GetRecipeCastTime and self:GetRecipeCastTime(step.recipeID)
+					if castSec then
+						hasKnown = true
+						totalSec = totalSec + castSec * (step.count or 1)
+					end
+				end
+				if hasKnown then
+					local rightBtn = (hasVendorMatches and f.buyVendorBtn)
+						or (hasBankMatches and not hasVendorMatches and f.withdrawBankBtn)
+						or (hasTrainerMatches and not hasVendorMatches and not hasBankMatches and f.learnTrainerBtn)
+						or nil
+					f.queueTotal:ClearAllPoints()
+					f.queueTotal:SetPoint("LEFT", f.clearBtn, "RIGHT", 8, 0)
+					if rightBtn then
+						f.queueTotal:SetPoint("RIGHT", rightBtn, "LEFT", -6, 0)
+						f.queueTotal:SetJustifyH("CENTER")
+						f.queueTotal:SetText("|cffffd100" .. ns.FormatDuration(totalSec) .. "|r")
+					else
+						f.queueTotal:SetPoint("RIGHT", f, "BOTTOMRIGHT", -10, 17)
+						f.queueTotal:SetJustifyH("RIGHT")
+						f.queueTotal:SetText(string.format(L["QUEUE_TOTAL_TIME"], ns.FormatDuration(totalSec)))
+					end
+					f.queueTotal:Show()
+				else
+					f.queueTotal:Hide()
+				end
+			else
+				f.queueTotal:Hide()
+			end
+		end
 	else
+		if f.queueTotal then
+			f.queueTotal:Hide()
+		end
 		f.shopTotal:SetText(string.format(L["SHOPPING_TOTAL"], ns.FormatMoney(totalShopCost)))
 	end
 

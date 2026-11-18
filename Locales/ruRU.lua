@@ -107,6 +107,10 @@ ns.Locales.ru = {
 	["QUEUE_STATUS_UNLEARNED"] = "|cffff5555Не изучено|r",
 	["QUEUE_STATUS_OTHER_PROF"] = "|cff66ccffПрофессия: %s|r",
 	["QUEUE_SUBCRAFT_BADGE"] = "|cffaaaaaa[этап]|r ",
+	["TIME_HOUR"] = "ч",
+	["TIME_MIN"] = "м",
+	["TIME_SEC"] = "с",
+	["QUEUE_TOTAL_TIME"] = "Время: |cffffd100%s|r",
 
 	-- Список покупок и интеграции
 	["SHOPPING_EMPTY"] = "Все реагенты для очереди уже есть в ваших сумках!",
