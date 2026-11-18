@@ -824,9 +824,9 @@ function ProfitMod:OnAuctionStockUpdated(itemID)
 	end
 end
 
-function ProfitMod:OnCraftSucceeded(spellID)
+function ProfitMod:OnCraftSucceeded(spellID, isSubcraft)
 	if ns.RecordCraftProfit then
-		ns:RecordCraftProfit(spellID)
+		ns:RecordCraftProfit(spellID, isSubcraft)
 	end
 end
 

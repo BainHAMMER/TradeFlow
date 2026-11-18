@@ -31,8 +31,48 @@ local function GetTodayStartTimestamp()
 	return (time and time() or 0) - 86400
 end
 
-function ns:RecordCraftProfit(spellID)
-	if not spellID or spellID <= 0 then
+-- Списывает из сегодняшнего лога того же персонажа скрафченные ранее полуфабрикаты,
+-- когда они фактически уходят в крафт финального предмета (без двойного учёта).
+local function ConsumeIntermediateFromLog(log, rec, charKey, dayKey)
+	if not (rec and rec.reagents) then
+		return
+	end
+	for _, rg in ipairs(rec.reagents) do
+		local need = rg.quantity or 0
+		if need > 0 and rg.itemID and rg.itemID > 0 then
+			local idx = 1
+			while idx <= #log and need > 0 do
+				local e = log[idx]
+				if e.outItemID == rg.itemID and e.recipeID ~= rec.recipeID
+					and e.charKey == charKey and e.dayKey == dayKey
+				then
+					local eRec = ns.GetRecipeRecord and ns:GetRecipeRecord(e.recipeID)
+					local perCraft = (eRec and eRec.numMade and eRec.numMade > 0) and eRec.numMade or 1
+					local avail = e.itemQty or ((e.count or 1) * perCraft)
+					if avail <= need then
+						need = need - avail
+						table.remove(log, idx)
+					else
+						local rem = avail - need
+						local ratio = rem / avail
+						e.itemQty = rem
+						e.count = math.max(1, math.ceil(rem / perCraft))
+						e.cost = math.floor((e.cost or 0) * ratio + 0.5)
+						e.revenue = math.floor((e.revenue or 0) * ratio + 0.5)
+						e.profit = e.revenue - e.cost
+						need = 0
+						idx = idx + 1
+					end
+				else
+					idx = idx + 1
+				end
+			end
+		end
+	end
+end
+
+function ns:RecordCraftProfit(spellID, isSubcraft)
+	if isSubcraft or not spellID or spellID <= 0 then
 		return
 	end
 	local rec = self.GetRecipeRecord and self:GetRecipeRecord(spellID)
@@ -60,12 +100,16 @@ function ns:RecordCraftProfit(spellID)
 	local charKey = self.CharKey and self:CharKey() or ""
 
 	local log = EnsureLogDB()
+	ConsumeIntermediateFromLog(log, rec, charKey, dayKey)
 	local top = log[1]
 	if top and top.recipeID == spellID and top.charKey == charKey and top.source == src
 		and top.dayKey == dayKey
 		and now >= (top.ts or 0) and (now - (top.ts or 0)) <= COALESCE_SECONDS
 	then
 		top.count = (top.count or 1) + 1
+		if top.itemQty ~= nil then
+			top.itemQty = top.itemQty + ((rec.numMade and rec.numMade > 0) and rec.numMade or 1)
+		end
 		top.cost = (top.cost or 0) + unitCost
 		top.revenue = (top.revenue or 0) + unitRev
 		top.profit = (top.profit or 0) + unitProfit

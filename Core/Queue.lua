@@ -406,19 +406,47 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 		return
 	end
 	if event == "UNIT_SPELLCAST_SUCCEEDED" and spellID then
-		if ns.NotifyModules then
-			ns:NotifyModules("OnCraftSucceeded", spellID)
-		end
 		local queue = ns:GetQueue()
+		local isSubcraft = false
+		local matchedIndex = nil
 		for i, step in ipairs(queue) do
 			if step.recipeID == spellID then
-				step.count = (step.count or 1) - 1
-				if step.count <= 0 then
-					table.remove(queue, i)
+				matchedIndex = i
+				if step.isSubcraft == true then
+					isSubcraft = true
+				else
+					local rec = ns:GetRecipeRecord(spellID)
+					local outID = rec and rec.outputItemID
+					if outID and outID > 0 then
+						for j = i + 1, #queue do
+							local nextRec = ns:GetRecipeRecord(queue[j].recipeID)
+							if nextRec and nextRec.reagents then
+								for _, rg in ipairs(nextRec.reagents) do
+									if rg.itemID == outID then
+										isSubcraft = true
+										break
+									end
+								end
+							end
+							if isSubcraft then
+								break
+							end
+						end
+					end
 				end
-				ns:OnQueueUpdated()
 				break
 			end
+		end
+		if ns.NotifyModules then
+			ns:NotifyModules("OnCraftSucceeded", spellID, isSubcraft)
+		end
+		if matchedIndex then
+			local step = queue[matchedIndex]
+			step.count = (step.count or 1) - 1
+			if step.count <= 0 then
+				table.remove(queue, matchedIndex)
+			end
+			ns:OnQueueUpdated()
 		end
 	elseif event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" then
 		if spellID == ns.activeCastRecipeID then
