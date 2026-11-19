@@ -38,26 +38,58 @@ local function BuildSimulatedInventory(queue)
 	return sim
 end
 
--- Выбирает лучший изученный персонажем рецепт для крафта промежуточного реагента
-function ns:FindBestProducerRecipe(itemID, visiting)
+-- Выбирает лучший изученный (или разрешённый по очереди/тренеру) рецепт для крафта промежуточного реагента
+function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, parentSkillLine, maxReqSkill)
 	local producers = self.ItemProducedBy and self.ItemProducedBy[itemID]
 	if not producers or #producers == 0 then
 		return nil
 	end
 	local bestID = nil
 	local bestCost = math.huge
+	local ahPrice = nil
+	local ahChecked = false
 	for _, recipeID in ipairs(producers) do
-		if not visiting[recipeID] and self:IsRecipeLearned(recipeID) then
+		if not visiting[recipeID] then
 			local rec = self:GetRecipeRecord(recipeID)
 			-- Предпочитаем рецепт текущей профессии, затем второй профессии персонажа
 			if rec and (rec.skillLine == self.currentSkillLine or self.playerProfessions[rec.skillLine]) then
-				local cost = self:GetRecipeEconomy(recipeID) or 999999
-				if rec.skillLine == self.currentSkillLine then
-					cost = cost * 0.95
+				local learned = self:IsRecipeLearned(recipeID)
+				local eligible = learned
+				if not eligible and queueSet and queueSet[recipeID] then
+					eligible = true
 				end
-				if cost < bestCost then
-					bestCost = cost
-					bestID = recipeID
+				if not eligible and allowUnlearned and parentSkillLine and rec.skillLine == parentSkillLine then
+					local reqSkill, _, isTrainer = self:GetRecipeRequiredSkill(recipeID)
+					local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
+					if (isBasic or isTrainer) and (reqSkill or 1) <= (maxReqSkill or 300) then
+						eligible = true
+					end
+				end
+				if eligible then
+					local rawCost = self:GetRecipeEconomy(recipeID)
+					local numMade = (rec.numMade and rec.numMade > 0) and rec.numMade or 1
+					local unitCraft = rawCost and (rawCost / numMade) or nil
+					local accept = true
+					if not learned then
+						if not ahChecked then
+							ahPrice = self:GetAuctionPrice(itemID)
+							ahChecked = true
+						end
+						-- Неизученный промежуточный рецепт разворачиваем только при известной и не более дорогой цене, чем на АХ
+						if not unitCraft or (ahPrice and unitCraft > ahPrice) then
+							accept = false
+						end
+					end
+					if accept then
+						local cost = unitCraft or 999999
+						if rec.skillLine == self.currentSkillLine then
+							cost = cost * 0.95
+						end
+						if cost < bestCost then
+							bestCost = cost
+							bestID = recipeID
+						end
+					end
 				end
 			end
 		end
@@ -104,9 +136,9 @@ local function InsertOrMergeStep(queue, step)
 		end
 	end
 
-	-- 3. Если в допустимом диапазоне [minIndex .. maxIndex] уже есть такой же рецепт — сливаем с ним (не смешивая этапы с целевыми)
+	-- 3. Если в допустимом диапазоне [minIndex .. maxIndex] уже есть такой же рецепт — сливаем с ним (этап можно влить в основной шаг)
 	for i = maxIndex, minIndex, -1 do
-		if queue[i] and queue[i].recipeID == step.recipeID and (queue[i].isSubcraft == true) == (step.isSubcraft == true) then
+		if queue[i] and queue[i].recipeID == step.recipeID and ((queue[i].isSubcraft == true) == (step.isSubcraft == true) or step.isSubcraft) then
 			queue[i].count = queue[i].count + step.count
 			return
 		end
@@ -130,6 +162,12 @@ function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent, craftPlan)
 	end
 
 	local queue = self:GetQueue()
+	local queueSet = {}
+	for _, cmd in ipairs(queue) do
+		if cmd.recipeID then
+			queueSet[cmd.recipeID] = true
+		end
+	end
 	local simHave = BuildSimulatedInventory(queue)
 	local staged = {}
 	local visiting = {}
@@ -143,6 +181,9 @@ function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent, craftPlan)
 			return
 		end
 		visiting[rID] = true
+		local allowUnlearned = not self:IsRecipeLearned(rID)
+		local rReqSkill = allowUnlearned and (select(1, self:GetRecipeRequiredSkill(rID)) or 300) or nil
+		local rSkillLine = rRecord.skillLine or self.currentSkillLine
 
 		for _, reagent in ipairs(rRecord.reagents) do
 			local totalNeed = reagent.quantity * craftsNeeded
@@ -155,7 +196,7 @@ function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent, craftPlan)
 			if autoSubcrafts and planChoice ~= false and deficit > 0 and not self:IsVendorItem(reagent.itemID) then
 				local prodRecipeID = (type(planChoice) == "number" and self:IsRecipeLearned(planChoice))
 					and planChoice
-					or self:FindBestProducerRecipe(reagent.itemID, visiting)
+					or self:FindBestProducerRecipe(reagent.itemID, visiting, allowUnlearned, queueSet, rSkillLine, rReqSkill)
 				if prodRecipeID then
 					local prodRec = self:GetRecipeRecord(prodRecipeID)
 					if prodRec and (prodRec.numMade or 1) > 0 then
@@ -172,6 +213,7 @@ function ns:QueueAddRecipe(recipeID, count, autoSubcrafts, silent, craftPlan)
 			simHave[rRecord.outputItemID] = simHave[rRecord.outputItemID] + (craftsNeeded * (rRecord.numMade or 1))
 		end
 
+		queueSet[rID] = true
 		staged[#staged + 1] = {
 			recipeID = rID,
 			skillLine = rRecord.skillLine or self.currentSkillLine,

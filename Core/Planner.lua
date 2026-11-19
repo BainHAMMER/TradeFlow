@@ -220,6 +220,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					candidates[#candidates + 1] = {
 						recipeID = recipeID,
 						learned = learned or isBasic,
+						isTrainer = isTrainer,
 						reqSkill = learned and 1 or (reqSkill or 1),
 						trainerFee = acquireFee,
 						scrollItemID = (not learned and not isBasic and not isTrainer) and scrollItemID or nil,
@@ -227,6 +228,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						isFallback = isFallbackScroll,
 						th = th,
 						craftCost = craftCost,
+						effectiveDeduct = effectiveDeduct,
 						unitReturn = unitReturn,
 						outputItemID = rec and rec.outputItemID or nil,
 						numMade = (rec and rec.numMade and rec.numMade > 0) and rec.numMade or 1,
@@ -235,6 +237,73 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					}
 				end
 			end
+		end
+	end
+
+	-- В калькуляторе учитываем себестоимость полуфабрикатов (напр. рулона шёлка) по доступным рецептам маршрута,
+	-- если их крафт дешевле покупки готового полуфабриката на аукционе (не мутируя кэш GetRecipeEconomy)
+	local routeCraftUnit = {}
+	local function ConsiderRouteProducer(c)
+		if c.isFallback or not c.outputItemID or c.outputItemID <= 0 or not c.craftCost or c.craftCost <= 0 then
+			return
+		end
+		if not (c.learned or c.isTrainer or c.isVendorScroll) then
+			return
+		end
+		local unitPrice = math.floor(c.craftCost / (c.numMade or 1) + 0.5)
+		local req = c.reqSkill or 1
+		local prev = routeCraftUnit[c.outputItemID]
+		if not prev or unitPrice < prev.unitPrice or (unitPrice == prev.unitPrice and req < prev.reqSkill) then
+			routeCraftUnit[c.outputItemID] = {
+				unitPrice = unitPrice,
+				reqSkill = req,
+				recipeID = c.recipeID,
+			}
+		end
+	end
+	for _, c in ipairs(candidates) do
+		ConsiderRouteProducer(c)
+	end
+	for _ = 1, 2 do
+		local updatedAny = false
+		for _, c in ipairs(candidates) do
+			if c.reagents and #c.reagents > 0 then
+				local improved = false
+				for _, b in ipairs(c.reagents) do
+					local prod = b.itemID and routeCraftUnit[b.itemID]
+					if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= (c.reqSkill or 1) and prod.unitPrice < (b.unitPrice or math.huge) then
+						improved = true
+						break
+					end
+				end
+				if improved then
+					local newReagents = {}
+					local newCost = 0
+					for idx, b in ipairs(c.reagents) do
+						local prod = b.itemID and routeCraftUnit[b.itemID]
+						if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= (c.reqSkill or 1) and prod.unitPrice < (b.unitPrice or math.huge) then
+							newReagents[idx] = {
+								itemID = b.itemID,
+								quantity = b.quantity,
+								unitPrice = prod.unitPrice,
+								source = "craft",
+							}
+							newCost = newCost + prod.unitPrice * b.quantity
+						else
+							newReagents[idx] = b
+							newCost = newCost + (b.unitPrice or 0) * b.quantity
+						end
+					end
+					c.reagents = newReagents
+					c.craftCost = newCost
+					c.netCost = math.max(0, newCost - (c.effectiveDeduct or 0))
+					ConsiderRouteProducer(c)
+					updatedAny = true
+				end
+			end
+		end
+		if not updatedAny then
+			break
 		end
 	end
 
