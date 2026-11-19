@@ -38,14 +38,54 @@ local function BuildSimulatedInventory(queue)
 	return sim
 end
 
+local function EstimateProducerUnitCost(recipeID, visiting, allowUnlearned, queueSet, parentSkillLine, maxReqSkill)
+	local rec = ns:GetRecipeRecord(recipeID)
+	if not rec or not rec.reagents or #rec.reagents == 0 then
+		return nil
+	end
+	local numMade = (rec.numMade and rec.numMade > 0) and rec.numMade or 1
+	if ns:IsRecipeLearned(recipeID) then
+		local rawCost = ns:GetRecipeEconomy(recipeID)
+		return rawCost and (rawCost / numMade) or nil
+	end
+	if visiting[recipeID] then
+		return nil
+	end
+	visiting[recipeID] = true
+	local total = 0
+	local ok = true
+	local rSkillLine = rec.skillLine or parentSkillLine
+	for _, r in ipairs(rec.reagents) do
+		local unitP = ns.GetReagentBestPrice and ns:GetReagentBestPrice(r.itemID)
+		if allowUnlearned or (queueSet and next(queueSet) ~= nil) then
+			local _, subUnit = ns:FindBestProducerRecipe(r.itemID, visiting, allowUnlearned, queueSet, rSkillLine, maxReqSkill)
+			if subUnit and (not unitP or subUnit < unitP) then
+				unitP = subUnit
+			end
+		end
+		if not unitP then
+			ok = false
+			break
+		end
+		total = total + unitP * r.quantity
+	end
+	visiting[recipeID] = nil
+	if not ok then
+		return nil
+	end
+	return total / numMade
+end
+
 -- Выбирает лучший изученный (или разрешённый по очереди/тренеру) рецепт для крафта промежуточного реагента
 function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, parentSkillLine, maxReqSkill)
 	local producers = self.ItemProducedBy and self.ItemProducedBy[itemID]
 	if not producers or #producers == 0 then
-		return nil
+		return nil, nil
 	end
 	local bestID = nil
+	local bestLearned = false
 	local bestCost = math.huge
+	local bestUnitCraft = nil
 	local ahPrice = nil
 	local ahChecked = false
 	for _, recipeID in ipairs(producers) do
@@ -54,10 +94,8 @@ function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, p
 			-- Предпочитаем рецепт текущей профессии, затем второй профессии персонажа
 			if rec and (rec.skillLine == self.currentSkillLine or self.playerProfessions[rec.skillLine]) then
 				local learned = self:IsRecipeLearned(recipeID)
-				local eligible = learned
-				if not eligible and queueSet and queueSet[recipeID] then
-					eligible = true
-				end
+				local inQueue = (queueSet and queueSet[recipeID]) and true or false
+				local eligible = learned or inQueue
 				if not eligible and allowUnlearned and parentSkillLine and rec.skillLine == parentSkillLine then
 					local reqSkill, _, isTrainer = self:GetRecipeRequiredSkill(recipeID)
 					local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
@@ -66,18 +104,16 @@ function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, p
 					end
 				end
 				if eligible then
-					local rawCost = self:GetRecipeEconomy(recipeID)
-					local numMade = (rec.numMade and rec.numMade > 0) and rec.numMade or 1
-					local unitCraft = rawCost and (rawCost / numMade) or nil
+					local unitCraft = EstimateProducerUnitCost(recipeID, visiting, allowUnlearned, queueSet, parentSkillLine, maxReqSkill)
 					local accept = true
-					if not learned then
+					if not learned and not inQueue then
 						if not ahChecked then
 							ahPrice = self:GetAuctionPrice(itemID)
 							ahChecked = true
 						end
-						-- Неизученный промежуточный рецепт разворачиваем только при известной и не более дорогой цене, чем на АХ
-						if not unitCraft or (ahPrice and unitCraft > ahPrice) then
-							accept = false
+						-- Если предмет продаётся на АХ, неизученный рецепт берём только при известной и не более дорогой себестоимости
+						if ahPrice and ahPrice > 0 then
+							accept = (unitCraft ~= nil and unitCraft <= ahPrice)
 						end
 					end
 					if accept then
@@ -85,16 +121,21 @@ function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, p
 						if rec.skillLine == self.currentSkillLine then
 							cost = cost * 0.95
 						end
-						if cost < bestCost then
+						local isBetter = (not bestID)
+							or (learned and not bestLearned)
+							or ((learned == bestLearned) and cost < bestCost)
+						if isBetter then
+							bestLearned = learned
 							bestCost = cost
 							bestID = recipeID
+							bestUnitCraft = unitCraft
 						end
 					end
 				end
 			end
 		end
 	end
-	return bestID
+	return bestID, bestUnitCraft
 end
 
 -- Добавление или слияние команды в очередь со строгим сохранением топологического порядка (DAG)
@@ -136,10 +177,13 @@ local function InsertOrMergeStep(queue, step)
 		end
 	end
 
-	-- 3. Если в допустимом диапазоне [minIndex .. maxIndex] уже есть такой же рецепт — сливаем с ним (этап можно влить в основной шаг)
+	-- 3. Если в допустимом диапазоне [minIndex .. maxIndex] уже есть такой же рецепт — сливаем с ним
 	for i = maxIndex, minIndex, -1 do
-		if queue[i] and queue[i].recipeID == step.recipeID and ((queue[i].isSubcraft == true) == (step.isSubcraft == true) or step.isSubcraft) then
+		if queue[i] and queue[i].recipeID == step.recipeID then
 			queue[i].count = queue[i].count + step.count
+			if not step.isSubcraft then
+				queue[i].isSubcraft = false
+			end
 			return
 		end
 	end

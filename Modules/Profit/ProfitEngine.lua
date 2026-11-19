@@ -405,7 +405,7 @@ function ns:BuildProfitList(opts)
 			local cData = self.realmDB.chars[charName]
 			if cData and cData.learned then
 				for recipeID, isLearned in pairs(cData.learned) do
-					if isLearned and not collected[recipeID] then
+					if isLearned and (not collected[recipeID] or collected[recipeID].unlearnedSource) then
 						local rec = self:GetRecipeRecord(recipeID)
 						local sl = rec and rec.skillLine
 						local hasProf = not cData.professions or (sl and cData.professions[sl] ~= nil)

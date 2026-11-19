@@ -139,12 +139,22 @@ function ns:CreateRouteView(parent)
 
 	-- Отдельные поля справа под приоритетом: 1) Затраты и 2) Расчётный возврат
 	f.summaryText = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	f.summaryText:SetPoint("TOPRIGHT", -6, -28)
+	f.summaryText:SetPoint("TOPLEFT", top, "TOPLEFT", 224, -28)
+	f.summaryText:SetPoint("TOPRIGHT", top, "TOPRIGHT", -6, -28)
 	f.summaryText:SetJustifyH("RIGHT")
+	f.summaryText:SetWordWrap(false)
+	if f.summaryText.SetMaxLines then
+		f.summaryText:SetMaxLines(1)
+	end
 
 	f.returnText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	f.returnText:SetPoint("TOPRIGHT", -6, -48)
+	f.returnText:SetPoint("TOPLEFT", top, "TOPLEFT", 224, -48)
+	f.returnText:SetPoint("TOPRIGHT", top, "TOPRIGHT", -6, -48)
 	f.returnText:SetJustifyH("RIGHT")
+	f.returnText:SetWordWrap(false)
+	if f.returnText.SetMaxLines then
+		f.returnText:SetMaxLines(1)
+	end
 
 	-- Список шагов маршрута
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
@@ -281,7 +291,7 @@ function ns:CreateRouteView(parent)
 	queueUntilBtn:SetText(L["PLANNER_QUEUE_UNTIL_TRAIN"])
 	queueUntilBtn:SetScript("OnClick", function()
 		for _, st in ipairs(f.steps) do
-			if st.kind ~= "craft" or (st.learnFee and st.learnFee > 0) or st.scrollItemID then
+			if st.kind ~= "craft" or st.needsLearn then
 				break
 			end
 			ns:QueueAddRecipe(st.recipeID, st.crafts or 1, nil, true)
@@ -326,16 +336,20 @@ function ns:RenderRouteRows()
 				row.icon:SetTexture(icon)
 				row.title:SetText(dc.hex .. name .. "|r")
 				local subText = string.format(L["PLANNER_STEP_CRAFT"], st.fromSkill, st.toSkill, st.crafts or 1, st.avgChance or 100)
-				if st.isVendorScroll and st.learnFee and st.learnFee > 0 then
-					subText = subText .. " | |cff66d9ff" .. string.format(L["PLANNER_STEP_VENDOR_SCROLL"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
-				elseif st.isVendorScroll then
-					subText = subText .. " | |cff66d9ff" .. string.format(L["PLANNER_STEP_VENDOR_SCROLL_FREE"], st.reqSkill or 1) .. "|r"
-				elseif st.scrollItemID and st.learnFee and st.learnFee > 0 then
-					subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_SCROLL_AH"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
-				elseif st.scrollItemID then
-					subText = subText .. " | |cff88ccff" .. string.format(L["PLANNER_STEP_SCROLL"], st.reqSkill or 1) .. "|r"
-				elseif st.learnFee and st.learnFee > 0 then
-					subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_LEARN"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
+				if st.needsLearn then
+					if st.isVendorScroll and st.learnFee and st.learnFee > 0 then
+						subText = subText .. " | |cff66d9ff" .. string.format(L["PLANNER_STEP_VENDOR_SCROLL"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
+					elseif st.isVendorScroll then
+						subText = subText .. " | |cff66d9ff" .. string.format(L["PLANNER_STEP_VENDOR_SCROLL_FREE"], st.reqSkill or 1) .. "|r"
+					elseif st.scrollItemID and st.learnFee and st.learnFee > 0 then
+						subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_SCROLL_AH"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
+					elseif st.scrollItemID then
+						subText = subText .. " | |cff88ccff" .. string.format(L["PLANNER_STEP_SCROLL"], st.reqSkill or 1) .. "|r"
+					elseif st.learnFee and st.learnFee > 0 then
+						subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_LEARN"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
+					else
+						subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_LEARN_FREE"], st.reqSkill or 1) .. "|r"
+					end
 				end
 				if st.lowStock then
 					subText = subText .. " | " .. L["PLANNER_LOW_STOCK"]

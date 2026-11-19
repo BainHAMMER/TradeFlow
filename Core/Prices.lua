@@ -308,14 +308,14 @@ function ns:GetPriceRevision()
 	return priceRev
 end
 
-function ns:InvalidatePrices()
+function ns:InvalidatePrices(noRefresh)
 	priceRev = priceRev + 1
 	wipe(reagentPriceCache)
 	wipe(recipeEconomyCache)
 	if self.NotifyModules then
-		self:NotifyModules("OnPricesInvalidated")
+		self:NotifyModules("OnPricesInvalidated", noRefresh)
 	end
-	if self.RefreshVisibleUI then
+	if not noRefresh and self.RefreshVisibleUI then
 		self:RefreshVisibleUI()
 	end
 end
@@ -593,16 +593,8 @@ local function EnsureTrackedAhItems()
 			trackedAhItems[sc[1]] = true
 		end
 	end
-	for _, byQual in pairs(DE_TABLE) do
-		for _, rows in pairs(byQual) do
-			for _, r in ipairs(rows) do
-				for x = 5, #r, 3 do
-					if r[x] then
-						trackedAhItems[r[x]] = true
-					end
-				end
-			end
-		end
+	for itemID in pairs(ns.DisenchantMatIDs or {}) do
+		trackedAhItems[itemID] = true
 	end
 	return trackedAhItems
 end
@@ -647,6 +639,10 @@ local function SchedulePriceInvalidation()
 	else
 		ns:InvalidatePrices()
 	end
+end
+
+function ns:SchedulePriceInvalidation()
+	SchedulePriceInvalidation()
 end
 
 local function BuildAuctionTiers(qtyByPrice)
@@ -830,11 +826,13 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 			if snipes and snipes[itemID] and ns.NotifyModules then
 				ns:NotifyModules("OnAuctionStockUpdated", itemID)
 			end
+			SchedulePriceInvalidation()
 		end
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" and C_AuctionHouse and C_AuctionHouse.GetBrowseResults then
 		local results = C_AuctionHouse.GetBrowseResults()
 		if type(results) == "table" then
 			local now = time and time() or 0
+			local updatedAny = false
 			for _, r in ipairs(results) do
 				local itemID = r and r.itemKey and r.itemKey.itemID
 				if itemID and IsTrackedAhItem(itemID) and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
@@ -842,11 +840,16 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 					local keepTiers = prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 60
 					if not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then
 						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity, nil, true)
+						updatedAny = true
 					end
 				end
 			end
+			if updatedAny then
+				SchedulePriceInvalidation()
+			end
 		end
 	elseif event == "MERCHANT_SHOW" then
+		local changed = false
 		if GetMerchantNumItems and GetMerchantItemInfo and GetMerchantItemLink then
 			local n = GetMerchantNumItems() or 0
 			for i = 1, n do
@@ -855,17 +858,21 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				local _, _, price, quantity, numAvailable = GetMerchantItemInfo(i)
 				if itemID and price and price > 0 and (quantity or 1) > 0 and (numAvailable == -1 or (numAvailable or 0) > 0) then
 					local unit = math.floor(price / quantity + 0.5)
-					if ns.VendorPrices and ns.VendorPrices[itemID] then
+					if ns.VendorPrices and ns.VendorPrices[itemID] and ns.db and ns.db.vendorPrices and ns.db.vendorPrices[itemID] ~= unit then
 						ns.db.vendorPrices[itemID] = unit
-						wipe(reagentPriceCache)
+						changed = true
 					end
 				end
 			end
+		end
+		if changed then
+			SchedulePriceInvalidation()
 		end
 		if ns.OnMerchantShow then
 			ns:OnMerchantShow()
 		end
 	elseif event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then
+		local changed = false
 		if GetNumTrainerServices and GetTrainerServiceCost and GetTrainerServiceItemLink then
 			local n = GetNumTrainerServices() or 0
 			for i = 1, n do
@@ -873,10 +880,18 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				local spellID = link and tonumber(link:match("spell:(%d+)") or link:match("enchant:(%d+)"))
 				local moneyCost = GetTrainerServiceCost(i)
 				local _, reqSkill = GetTrainerServiceSkillReq and GetTrainerServiceSkillReq(i)
-				if spellID and moneyCost and moneyCost > 0 then
-					ns.db.trainerFees[spellID] = { moneyCost, reqSkill or 1 }
+				if spellID and moneyCost and moneyCost > 0 and ns.db and ns.db.trainerFees then
+					local r = reqSkill or 1
+					local prev = ns.db.trainerFees[spellID]
+					if not prev or prev[1] ~= moneyCost or prev[2] ~= r then
+						ns.db.trainerFees[spellID] = { moneyCost, r }
+						changed = true
+					end
 				end
 			end
+		end
+		if changed then
+			SchedulePriceInvalidation()
 		end
 	end
 end)

@@ -39,9 +39,6 @@ function ns:SyncAuctionatorShoppingList(silent)
 		if item.source ~= "vendor" and buyQty > 0 then
 			ahItems[#ahItems + 1] = item
 			sigParts[#sigParts + 1] = item.itemID .. ":" .. buyQty
-			if self.TrackTradeFlowAhItem then
-				self:TrackTradeFlowAhItem(item.itemID)
-			end
 		end
 	end
 
@@ -178,12 +175,20 @@ local function CollectMerchantMatches()
 	end
 
 	-- Записываем живые цены вендора в базу при посещении торговца
+	local vendorChanged = false
 	for slot = 1, numMerchant do
 		local itemID = GetMerchantSlotItemID(slot)
 		local price, stackSize, numAvailable, canBuy = GetMerchantSlotInfo(slot)
 		if itemID and price and price > 0 and canBuy and numAvailable == -1 and ns.db and ns.db.vendorPrices then
-			ns.db.vendorPrices[itemID] = math.floor(price / math.max(1, stackSize) + 0.5)
+			local unit = math.floor(price / math.max(1, stackSize) + 0.5)
+			if ns.db.vendorPrices[itemID] ~= unit then
+				ns.db.vendorPrices[itemID] = unit
+				vendorChanged = true
+			end
 		end
+	end
+	if vendorChanged and ns.SchedulePriceInvalidation then
+		ns:SchedulePriceInvalidation()
 	end
 
 	local shopping = ns:GetShoppingList()
@@ -234,21 +239,49 @@ function ns:GetMerchantShoppingMatches()
 	return CollectMerchantMatches()
 end
 
+local vendorBuyInFlight = false
+
 function ns:BuyVendorShoppingList(onlyItemID)
+	if vendorBuyInFlight then
+		return
+	end
 	local matches = CollectMerchantMatches()
 	if #matches == 0 then
 		return
 	end
+	if self.ScanBagsNow then
+		self:ScanBagsNow()
+	end
 	local beforeMoney = (GetMoney and GetMoney()) or 0
 	local attempted = {}
+	local attemptedByItem = {}
 	local maxStackFn = GetMerchantItemMaxStack
 	for _, m in ipairs(matches) do
 		if not onlyItemID or m.itemID == onlyItemID then
-			attempted[#attempted + 1] = {
-				itemID = m.itemID,
-				units = m.batches * m.stackSize,
-				cost = m.cost or 0,
-			}
+			local entry = attemptedByItem[m.itemID]
+			if not entry then
+				entry = {
+					itemID = m.itemID,
+					units = 0,
+					cost = 0,
+					beforeBag = self:GetBagCount(m.itemID),
+				}
+				attemptedByItem[m.itemID] = entry
+				attempted[#attempted + 1] = entry
+			end
+			entry.units = entry.units + m.batches * m.stackSize
+			entry.cost = entry.cost + (m.cost or 0)
+		end
+	end
+	if #attempted == 0 then
+		return
+	end
+	vendorBuyInFlight = true
+	if vendorBar and vendorBar.btn then
+		vendorBar.btn:SetEnabled(false)
+	end
+	for _, m in ipairs(matches) do
+		if not onlyItemID or m.itemID == onlyItemID then
 			if m.stackSize > 1 then
 				-- Для предметов, продающихся пачками (напр. по 5 шт), BuyMerchantItem(slot) без аргумента покупает 1 пачку
 				for _ = 1, m.batches do
@@ -264,32 +297,57 @@ function ns:BuyVendorShoppingList(onlyItemID)
 					remainingBatches = remainingBatches - buyNow
 				end
 			end
-			local name = self:GetItemDisplay(m.itemID)
-			self:Print(string.format(L["VENDOR_BOUGHT_MSG"], name, m.batches * m.stackSize))
+		end
+	end
+	local function Finish()
+		vendorBuyInFlight = false
+		if vendorBar and vendorBar.btn then
+			vendorBar.btn:SetEnabled(true)
+		end
+		if ns.ScanBagsNow then
+			ns:ScanBagsNow()
+		end
+		local gainedList = {}
+		local totalEst = 0
+		for _, a in ipairs(attempted) do
+			local gained = math.max(0, ns:GetBagCount(a.itemID) - a.beforeBag)
+			if gained > 0 then
+				local name = ns:GetItemDisplay(a.itemID)
+				ns:Print(string.format(L["VENDOR_BOUGHT_MSG"], name, gained))
+				local estCost = (a.units > 0) and math.floor((a.cost or 0) * gained / a.units + 0.5) or 0
+				if estCost > 0 then
+					gainedList[#gainedList + 1] = { itemID = a.itemID, gained = gained, estCost = estCost }
+					totalEst = totalEst + estCost
+				end
+			end
+		end
+		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
+		local totalSpent = math.max(0, beforeMoney - afterMoney)
+		if totalSpent > 0 and totalEst > 0 and #gainedList > 0 and ns.RecordTradeFlowPurchase then
+			local remSpent = math.min(totalSpent, math.ceil(totalEst * 1.05))
+			local remEst = totalEst
+			for _, g in ipairs(gainedList) do
+				if remSpent <= 0 then
+					break
+				end
+				local share = (remEst <= g.estCost) and remSpent or math.floor(remSpent * g.estCost / remEst + 0.5)
+				share = math.min(share, remSpent)
+				remSpent = remSpent - share
+				remEst = remEst - g.estCost
+				if share > 0 then
+					ns:RecordTradeFlowPurchase("vendor_buy", g.itemID, g.gained, share)
+				end
+			end
+		end
+		ns:RefreshVendorBar()
+		if ns.RefreshQueueAndShoppingView then
+			ns:RefreshQueueAndShoppingView()
 		end
 	end
 	if C_Timer and C_Timer.After then
-		C_Timer.After(0.3, function()
-			local afterMoney = (GetMoney and GetMoney()) or beforeMoney
-			local remSpent = math.max(0, beforeMoney - afterMoney)
-			if remSpent > 0 and ns.RecordTradeFlowPurchase then
-				for _, a in ipairs(attempted) do
-					if remSpent <= 0 then
-						break
-					end
-					if (a.cost or 0) > 0 and (a.units or 0) > 0 and (a.cost <= remSpent + 1) then
-						local amt = math.min(a.cost, remSpent)
-						remSpent = remSpent - amt
-						ns:RecordTradeFlowPurchase("vendor_buy", a.itemID, a.units, amt)
-					end
-				end
-			end
-			ns:ScanBagsNow()
-			ns:RefreshVendorBar()
-			if ns.RefreshQueueAndShoppingView then
-				ns:RefreshQueueAndShoppingView()
-			end
-		end)
+		C_Timer.After(0.3, Finish)
+	else
+		Finish()
 	end
 end
 
@@ -914,10 +972,19 @@ function ns:GetTrainerQueueMatches()
 	return CollectTrainerMatches()
 end
 
+local trainerLearnInFlight = false
+
 function ns:LearnQueuedTrainerRecipes()
+	if trainerLearnInFlight then
+		return
+	end
 	local matches = CollectTrainerMatches()
 	if #matches == 0 or not BuyTrainerService then
 		return
+	end
+	trainerLearnInFlight = true
+	if trainerBar and trainerBar.btn then
+		trainerBar.btn:SetEnabled(false)
 	end
 	local beforeMoney = (GetMoney and GetMoney()) or 0
 	local attempted = {}
@@ -926,32 +993,74 @@ function ns:LearnQueuedTrainerRecipes()
 		local m = matches[i]
 		attempted[#attempted + 1] = m
 		pcall(BuyTrainerService, m.index)
-		self:Print(string.format(L["TRAINER_LEARNED_MSG"], m.name or tostring(m.recipeID)))
 	end
-	if C_Timer and C_Timer.After then
-		C_Timer.After(0.25, function()
-			if ns.ScanPlayerProfessions then
-				ns:ScanPlayerProfessions()
+	local function Finish()
+		trainerLearnInFlight = false
+		if trainerBar and trainerBar.btn then
+			trainerBar.btn:SetEnabled(true)
+		end
+		if ns.ScanPlayerProfessions then
+			ns:ScanPlayerProfessions()
+		end
+		local trainerOpen = (GetActiveTrainerFrame() ~= nil)
+		local stillAvailable = {}
+		if trainerOpen then
+			for _, cm in ipairs(CollectTrainerMatches()) do
+				stillAvailable[cm.recipeID] = true
 			end
-			local afterMoney = (GetMoney and GetMoney()) or beforeMoney
-			local remSpent = math.max(0, beforeMoney - afterMoney)
-			if remSpent > 0 and ns.RecordTrainerExpense then
-				for _, m in ipairs(attempted) do
-					if remSpent <= 0 then
-						break
-					end
-					if (m.cost or 0) > 0 and (m.cost <= remSpent + 1) then
-						local amt = math.min(m.cost, remSpent)
-						remSpent = remSpent - amt
-						ns:RecordTrainerExpense(m.recipeID, m.name, amt)
-					end
+		end
+		local learnedAny = false
+		local learnedPriced = {}
+		local totalBaseCost = 0
+		for _, m in ipairs(attempted) do
+			local learned = (trainerOpen and not stillAvailable[m.recipeID]) or (ns.IsRecipeLearned and ns:IsRecipeLearned(m.recipeID))
+			if learned then
+				learnedAny = true
+				if ns.charDB and ns.charDB.learned then
+					ns.charDB.learned[m.recipeID] = true
+				end
+				ns:Print(string.format(L["TRAINER_LEARNED_MSG"], m.name or tostring(m.recipeID)))
+				if (m.cost or 0) > 0 then
+					learnedPriced[#learnedPriced + 1] = m
+					totalBaseCost = totalBaseCost + m.cost
 				end
 			end
-			ns:RefreshTrainerBar()
-			if ns.RefreshVisibleUI then
-				ns:RefreshVisibleUI()
+		end
+		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
+		local actualSpent = math.max(0, beforeMoney - afterMoney)
+		if actualSpent > 0 and totalBaseCost > 0 and #learnedPriced > 0 and ns.RecordTrainerExpense then
+			local remSpent = math.min(actualSpent, math.ceil(totalBaseCost * 1.05))
+			local remBase = totalBaseCost
+			for _, m in ipairs(learnedPriced) do
+				if remSpent <= 0 then
+					break
+				end
+				local amt = (remBase <= m.cost) and remSpent or math.floor(remSpent * m.cost / remBase + 0.5)
+				amt = math.min(amt, remSpent)
+				remSpent = remSpent - amt
+				remBase = remBase - m.cost
+				if amt > 0 then
+					ns:RecordTrainerExpense(m.recipeID, m.name, amt)
+				end
 			end
-		end)
+		end
+		if learnedAny then
+			if ns.InvalidateCraftCounts then
+				ns:InvalidateCraftCounts()
+			end
+			if ns.InvalidatePrices then
+				ns:InvalidatePrices(true)
+			end
+		end
+		ns:RefreshTrainerBar()
+		if ns.RefreshVisibleUI then
+			ns:RefreshVisibleUI()
+		end
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.25, Finish)
+	else
+		Finish()
 	end
 end
 

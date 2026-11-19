@@ -228,7 +228,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local isFallbackScroll = (not hasKnownAcquisition) and includeOther and isOtherScroll
 			if hasKnownAcquisition or isFallbackScroll then
 				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
-				if craftCost then
+				if breakdown and #breakdown > 0 then
 					local rec = self:GetRecipeRecord(recipeID)
 					local vendorSell = (alts and alts.vendor) or 0
 					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше
@@ -242,11 +242,13 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 							acquireFee = scrollPrice
 						end
 					end
+					local realReqSkill = select(1, self:GetRecipeRequiredSkill(recipeID)) or reqSkill or 1
 					candidates[#candidates + 1] = {
 						recipeID = recipeID,
 						learned = learned or isBasic,
 						isTrainer = isTrainer,
 						reqSkill = learned and 1 or (reqSkill or 1),
+						realReqSkill = realReqSkill,
 						trainerFee = acquireFee,
 						scrollItemID = (not learned and not isBasic and not isTrainer) and scrollItemID or nil,
 						isVendorScroll = isVendorScroll,
@@ -257,8 +259,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						unitReturn = unitReturn,
 						outputItemID = rec and rec.outputItemID or nil,
 						numMade = (rec and rec.numMade and rec.numMade > 0) and rec.numMade or 1,
-						reagents = breakdown or {},
-						netCost = math.max(0, craftCost - effectiveDeduct),
+						reagents = breakdown,
+						netCost = craftCost and math.max(0, craftCost - effectiveDeduct) or nil,
 					}
 				end
 			end
@@ -272,7 +274,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		if c.isFallback or not c.outputItemID or c.outputItemID <= 0 or not c.craftCost or c.craftCost <= 0 then
 			return
 		end
-		if not (c.learned or c.isTrainer or c.isVendorScroll) then
+		if not (c.learned or c.isTrainer) then
 			return
 		end
 		local unitPrice = math.floor(c.craftCost / (c.numMade or 1) + 0.5)
@@ -289,14 +291,15 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	for _, c in ipairs(candidates) do
 		ConsiderRouteProducer(c)
 	end
-	for _ = 1, 2 do
+	for _ = 1, 4 do
 		local updatedAny = false
 		for _, c in ipairs(candidates) do
 			if c.reagents and #c.reagents > 0 then
+				local effectiveReq = math.max(startSkill, c.reqSkill or 1, c.realReqSkill or 1)
 				local improved = false
 				for _, b in ipairs(c.reagents) do
 					local prod = b.itemID and routeCraftUnit[b.itemID]
-					if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= (c.reqSkill or 1) and prod.unitPrice < (b.unitPrice or math.huge) then
+					if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= effectiveReq and prod.unitPrice < (b.unitPrice or math.huge) then
 						improved = true
 						break
 					end
@@ -304,9 +307,10 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				if improved then
 					local newReagents = {}
 					local newCost = 0
+					local allPriced = true
 					for idx, b in ipairs(c.reagents) do
 						local prod = b.itemID and routeCraftUnit[b.itemID]
-						if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= (c.reqSkill or 1) and prod.unitPrice < (b.unitPrice or math.huge) then
+						if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= effectiveReq and prod.unitPrice < (b.unitPrice or math.huge) then
 							newReagents[idx] = {
 								itemID = b.itemID,
 								quantity = b.quantity,
@@ -316,13 +320,19 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 							newCost = newCost + prod.unitPrice * b.quantity
 						else
 							newReagents[idx] = b
-							newCost = newCost + (b.unitPrice or 0) * b.quantity
+							if b.unitPrice then
+								newCost = newCost + b.unitPrice * b.quantity
+							else
+								allPriced = false
+							end
 						end
 					end
 					c.reagents = newReagents
-					c.craftCost = newCost
-					c.netCost = math.max(0, newCost - (c.effectiveDeduct or 0))
-					ConsiderRouteProducer(c)
+					if allPriced then
+						c.craftCost = newCost
+						c.netCost = math.max(0, newCost - (c.effectiveDeduct or 0))
+						ConsiderRouteProducer(c)
+					end
 					updatedAny = true
 				end
 			end
@@ -331,6 +341,13 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			break
 		end
 	end
+	local pricedCandidates = {}
+	for _, c in ipairs(candidates) do
+		if c.craftCost ~= nil then
+			pricedCandidates[#pricedCandidates + 1] = c
+		end
+	end
+	candidates = pricedCandidates
 
 	local steps = {}
 	local totalCost = 0
@@ -491,7 +508,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				else
 					stepScore = netTotal + rngPenalty
 				end
-				local learnFee = (not c.learned and not state.learned[c.recipeID] and c.trainerFee > 0) and c.trainerFee or 0
+				local needsLearn = (not c.learned and not state.learned[c.recipeID])
+				local learnFee = (needsLearn and c.trainerFee > 0) and c.trainerFee or 0
 				stepScore = stepScore + (ahPenalty or 0) + learnFee
 				if c.recipeID == state.prevID then
 					stepScore = stepScore - math.max(20, math.abs(stepScore) * 0.01)
@@ -503,6 +521,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					cand = c,
 					chance = chance,
 					color = entry.color,
+					needsLearn = needsLearn,
 					learnFee = learnFee,
 					craftsPerPoint = craftsPerPoint,
 				}
@@ -622,7 +641,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				end
 			end
 			local newLearned = prevState.learned
-			if tr.learnFee > 0 then
+			if tr.needsLearn then
 				newLearned = CopyMap(prevState.learned)
 				newLearned[cand.recipeID] = true
 			end
@@ -640,6 +659,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					cand = cand,
 					chance = tr.chance,
 					color = tr.color,
+					needsLearn = tr.needsLearn,
 					learnFee = tr.learnFee,
 				},
 			}
@@ -672,12 +692,13 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			end
 			local c = p.cand
 			local lastStep = steps[#steps]
-			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID and not (p.learnFee and p.learnFee > 0) then
+			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID and not p.needsLearn then
 				lastStep.toSkill = p.s + 1
 				lastStep.expectedCrafts = lastStep.expectedCrafts + (1 / p.chance)
 				lastStep.chanceSum = lastStep.chanceSum + p.chance
 				lastStep.points = lastStep.points + 1
 			else
+				local stepNeedsLearn = p.needsLearn and true or false
 				steps[#steps + 1] = {
 					kind = "craft",
 					recipeID = c.recipeID,
@@ -694,9 +715,11 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					numMade = c.numMade or 1,
 					th = c.th,
 					reagents = c.reagents,
-					learnFee = p.learnFee,
-					scrollItemID = c.scrollItemID,
-					isVendorScroll = c.isVendorScroll,
+					needsLearn = stepNeedsLearn,
+					learnFee = stepNeedsLearn and (p.learnFee or 0) or 0,
+					scrollItemID = stepNeedsLearn and c.scrollItemID or nil,
+					isVendorScroll = stepNeedsLearn and c.isVendorScroll or false,
+					isTrainer = stepNeedsLearn and c.isTrainer or false,
 					reqSkill = c.reqSkill,
 				}
 			end
@@ -749,8 +772,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			if a.kind == "craft" and b.kind == "craft"
 				and b.outputItemID and StepConsumesItem(a, b.outputItemID)
 				and not StepConsumesItem(b, a.outputItemID)
-				and (not a.learnFee or a.learnFee == 0) and not a.scrollItemID
-				and (not b.learnFee or b.learnFee == 0) and not b.scrollItemID
+				and not a.needsLearn
+				and not b.needsLearn
 				and a.fromSkill >= (b.reqSkill or 1)
 			then
 				local evB = EvalStepRange(b, a.fromSkill, b.points)
@@ -776,7 +799,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local prev = merged[#merged]
 			if prev and prev.kind == "craft" and st.kind == "craft"
 				and prev.recipeID == st.recipeID and prev.toSkill == st.fromSkill
-				and (not st.learnFee or st.learnFee == 0)
+				and not st.needsLearn
 			then
 				prev.toSkill = st.toSkill
 				prev.points = prev.points + st.points

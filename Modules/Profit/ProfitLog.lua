@@ -8,24 +8,30 @@ local MAX_LOT_ENTRIES = 120
 local MAX_CRAFTED_TRACK = 200
 local LOT_MAX_AGE = 7 * 86400
 local COALESCE_SECONDS = 30
-
-ns._trackedAhBuyItems = ns._trackedAhBuyItems or {}
+local MAIL_PAIR_WINDOW = 5
+local MERCHANT_PAIR_WINDOW = 2.0
 
 local consumedReagentSet = nil
 local disenchantNameMap = nil
+local disenchantMapComplete = false
 local soldSubjectPattern = nil
 local ahHooksInstalled = false
-local lastSnipeRec = nil
 local lastDisenchantAt = 0
 local pendingAhComm = nil
 local pendingAhBid = nil
 local lastViewedAhItemID = nil
 local merchantMoney = 0
 local merchantBagSnap = nil
+local pendingMerchantMoney = { amount = 0, ts = 0 }
+local pendingMerchantDrops = {}
 local mailMoney = 0
 local mailSellerSnap = nil
 local pendingMailMoney = { amount = 0, ts = 0 }
 local pendingMailItems = {}
+
+local function IsProfitEnabled()
+	return not (ns.IsModuleEnabled and not ns:IsModuleEnabled("profit"))
+end
 
 local function HasAuctionator()
 	local api = _G.Auctionator and Auctionator.API and Auctionator.API.v1
@@ -121,10 +127,55 @@ local function PruneCraftedTrack(craftedItems, craftedNames)
 		end
 	end
 	for name, itemID in pairs(craftedNames) do
-		if not craftedItems[itemID] then
+		if not craftedItems[itemID] or (type(name) == "string" and name:find("#%d+")) then
 			craftedNames[name] = nil
 		end
 	end
+end
+
+local function DecrementCraftedItem(itemID, qty)
+	if not (itemID and qty and qty > 0) then
+		return
+	end
+	local craftedItems, craftedNames = EnsureCraftedItemsDB()
+	local cur = craftedItems[itemID]
+	if not cur or cur <= 0 then
+		craftedItems[itemID] = nil
+		return
+	end
+	local left = cur - qty
+	if left > 0 then
+		craftedItems[itemID] = left
+	else
+		craftedItems[itemID] = nil
+		for name, mappedID in pairs(craftedNames) do
+			if mappedID == itemID then
+				craftedNames[name] = nil
+			end
+		end
+	end
+end
+
+local function GetLoadedItemName(itemID)
+	if not itemID or itemID <= 0 then
+		return nil
+	end
+	if ns.GetItemDisplay then
+		local name, _, _, _, loaded = ns:GetItemDisplay(itemID)
+		if loaded and type(name) == "string" and name ~= "" then
+			return name
+		end
+	end
+	if C_Item and C_Item.GetItemNameByID then
+		local name = C_Item.GetItemNameByID(itemID)
+		if type(name) == "string" and name ~= "" then
+			return name
+		end
+	end
+	if ns.RequestItemData then
+		ns:RequestItemData(itemID)
+	end
+	return nil
 end
 
 local function GetConsumedReagentSet()
@@ -177,29 +228,18 @@ function ns:GetProfitLogMode()
 	return "craft"
 end
 
-function ns:TrackTradeFlowAhItem(itemID)
-	if type(itemID) == "number" and itemID > 0 then
-		ns._trackedAhBuyItems[itemID] = true
-	end
-end
-
 local function IsInTradeFlowAhScope(itemID)
 	if not itemID or itemID <= 0 then
 		return false
 	end
-	if ns._trackedAhBuyItems[itemID] then
-		return true
-	end
 	local targets = ns.GetSnipeTargets and ns:GetSnipeTargets()
 	if targets and targets[itemID] then
-		ns._trackedAhBuyItems[itemID] = true
 		return true
 	end
 	if ns.GetShoppingList then
 		local list = ns:GetShoppingList()
 		for _, item in ipairs(list or {}) do
 			if item.itemID == itemID then
-				ns._trackedAhBuyItems[itemID] = true
 				return true
 			end
 		end
@@ -223,9 +263,13 @@ local function AddPurchaseLot(itemID, qty, totalCost, now)
 	PrunePurchaseLots(lots, now)
 end
 
-local function PreviewPurchaseLot(lots, itemID, qty)
+local function PreviewPurchaseLot(lots, itemID, qty, now)
 	local lot = lots and lots[itemID]
 	if not lot or (lot.qty or 0) <= 0 or qty <= 0 then
+		return 0, 0
+	end
+	if now and now > 0 and (now - (lot.ts or 0)) > LOT_MAX_AGE then
+		lots[itemID] = nil
 		return 0, 0
 	end
 	local take = math.min(lot.qty, qty)
@@ -274,14 +318,13 @@ local function AppendCashflowEntry(kind, itemID, recipeID, name, qty, amount, ch
 end
 
 function ns:RecordTradeFlowPurchase(kind, itemID, qty, totalCost)
+	if not IsProfitEnabled() then
+		return
+	end
 	if not (itemID and itemID > 0 and qty and qty > 0 and totalCost and totalCost > 0) then
 		return
 	end
 	local now = time and time() or 0
-	local gNow = GetTime and GetTime() or 0
-	if kind == "snipe_buy" then
-		lastSnipeRec = { itemID = itemID, qty = qty, ts = gNow }
-	end
 	local dayKey = (date and now > 0) and date("%Y-%m-%d", now) or nil
 	local charKey = self.CharKey and self:CharKey() or ""
 
@@ -291,6 +334,9 @@ function ns:RecordTradeFlowPurchase(kind, itemID, qty, totalCost)
 end
 
 function ns:RecordTrainerExpense(recipeID, name, cost)
+	if not IsProfitEnabled() then
+		return
+	end
 	if not (cost and cost > 0) then
 		return
 	end
@@ -321,6 +367,9 @@ function ns:RecordTrainerExpense(recipeID, name, cost)
 end
 
 function ns:RecordCashflowIncome(kind, itemID, qty, totalEarned)
+	if not IsProfitEnabled() then
+		return
+	end
 	if not (qty and qty > 0 and totalEarned and totalEarned > 0) then
 		return
 	end
@@ -391,29 +440,31 @@ function ns:RecordCraftProfit(spellID, isSubcraft)
 	for _, rg in ipairs(rec.reagents) do
 		local qty = rg.quantity or 0
 		if qty > 0 and rg.itemID then
-			local took, spent = PreviewPurchaseLot(lots, rg.itemID, qty)
+			local took, spent = PreviewPurchaseLot(lots, rg.itemID, qty, now)
 			if took > 0 then
 				plannedTakes[#plannedTakes + 1] = { itemID = rg.itemID, take = took, spent = spent }
 				actualCost = actualCost + spent
 				usedRealCost = true
 			end
 			local rem = qty - took
-			if rem > 0 then
+			if rem > 0 and allPriced then
 				local unitP = self.GetReagentBestPrice and self:GetReagentBestPrice(rg.itemID)
 				if not unitP then
 					allPriced = false
-					break
+				else
+					actualCost = actualCost + unitP * rem
 				end
-				actualCost = actualCost + unitP * rem
 			end
 		end
 	end
 
 	local numMade = (rec.numMade and rec.numMade > 0) and rec.numMade or 1
-	if allPriced and usedRealCost then
+	if #plannedTakes > 0 then
 		for _, pt in ipairs(plannedTakes) do
 			CommitPurchaseLot(lots, pt.itemID, pt.take, pt.spent)
 		end
+	end
+	if allPriced and usedRealCost then
 		if isSubcraft or GetConsumedReagentSet()[rec.outputItemID] then
 			AddPurchaseLot(rec.outputItemID, numMade, actualCost, now)
 		end
@@ -428,11 +479,8 @@ function ns:RecordCraftProfit(spellID, isSubcraft)
 	-- Помечаем произведённый предмет для отслеживания его реальной продажи вендору или на АХ (Режим «Касса»)
 	local craftedItems, craftedNames = EnsureCraftedItemsDB()
 	craftedItems[rec.outputItemID] = (craftedItems[rec.outputItemID] or 0) + numMade
-	local outName = self.GetItemDisplay and select(1, self:GetItemDisplay(rec.outputItemID))
-	if (not outName or outName == "" or outName:find("^#")) and C_Item and C_Item.GetItemNameByID then
-		outName = C_Item.GetItemNameByID(rec.outputItemID)
-	end
-	if outName and outName ~= "" and not outName:find("^#") then
+	local outName = GetLoadedItemName(rec.outputItemID)
+	if outName then
 		craftedNames[outName] = rec.outputItemID
 	end
 	PruneCraftedTrack(craftedItems, craftedNames)
@@ -583,16 +631,20 @@ local function InstallAhHooks()
 	if ahHooksInstalled or not C_AuctionHouse then
 		return
 	end
-	if C_AuctionHouse.StartCommoditiesPurchase or C_AuctionHouse.PlaceBid then
+	if C_AuctionHouse.StartCommoditiesPurchase or C_AuctionHouse.CancelCommoditiesPurchase or C_AuctionHouse.PlaceBid then
 		ahHooksInstalled = true
 	end
 	if C_AuctionHouse.StartCommoditiesPurchase then
 		hooksecurefunc(C_AuctionHouse, "StartCommoditiesPurchase", function(itemID, qty)
-			if not HasAuctionator() then
+			pendingAhComm = nil
+			if not IsProfitEnabled() or not HasAuctionator() then
 				return
 			end
 			if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
 				return
+			end
+			if ns.OnExternalCommodityPurchase then
+				ns:OnExternalCommodityPurchase()
 			end
 			if type(itemID) ~= "number" or not qty or qty <= 0 or not IsInTradeFlowAhScope(itemID) then
 				return
@@ -604,9 +656,15 @@ local function InstallAhHooks()
 			}
 		end)
 	end
+	if C_AuctionHouse.CancelCommoditiesPurchase then
+		hooksecurefunc(C_AuctionHouse, "CancelCommoditiesPurchase", function()
+			pendingAhComm = nil
+		end)
+	end
 	if C_AuctionHouse.PlaceBid then
-		hooksecurefunc(C_AuctionHouse, "PlaceBid", function(_, bidAmount)
-			if not HasAuctionator() then
+		hooksecurefunc(C_AuctionHouse, "PlaceBid", function(auctionID, bidAmount)
+			pendingAhBid = nil
+			if not IsProfitEnabled() or not HasAuctionator() then
 				return
 			end
 			if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
@@ -616,6 +674,21 @@ local function InstallAhHooks()
 			local iid = lastViewedAhItemID
 			if not (iid and amt and amt > 0 and IsInTradeFlowAhScope(iid)) then
 				return
+			end
+			if auctionID and C_AuctionHouse.MakeItemKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
+				local okKey, itemKey = pcall(C_AuctionHouse.MakeItemKey, iid)
+				if okKey and itemKey then
+					local n = C_AuctionHouse.GetNumItemSearchResults(itemKey) or 0
+					for i = 1, n do
+						local info = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
+						if info and info.auctionID == auctionID then
+							if info.buyoutAmount ~= amt then
+								return
+							end
+							break
+						end
+					end
+				end
 			end
 			pendingAhBid = {
 				itemID = iid,
@@ -640,60 +713,121 @@ local function SnapshotMerchantBags()
 	end
 	merchantBagSnap = snap
 	merchantMoney = GetMoney and GetMoney() or 0
+	pendingMerchantMoney = { amount = 0, ts = 0 }
+	pendingMerchantDrops = {}
 end
 
-local function CheckMerchantSoldCrafted()
-	if not (merchantBagSnap and MerchantFrame and MerchantFrame:IsShown()) then
+local function ScanMerchantBagDelta(now, force)
+	if not merchantBagSnap then
 		return
 	end
-	local curMoney = GetMoney and GetMoney() or 0
-	if curMoney <= merchantMoney then
-		merchantMoney = curMoney
-		for itemID in pairs(merchantBagSnap) do
-			merchantBagSnap[itemID] = ns.GetBagCount and ns:GetBagCount(itemID) or 0
-		end
+	if not force and not (MerchantFrame and MerchantFrame:IsShown()) then
 		return
 	end
-	local gained = curMoney - merchantMoney
 	local craftedItems = EnsureCraftedItemsDB()
-	for itemID, prevCnt in pairs(merchantBagSnap) do
+	local watchIDs = {}
+	for itemID in pairs(merchantBagSnap) do
+		watchIDs[itemID] = true
+	end
+	for itemID, qty in pairs(craftedItems) do
+		if type(qty) == "number" and qty > 0 then
+			watchIDs[itemID] = true
+		end
+	end
+	for itemID in pairs(watchIDs) do
+		local prevCnt = merchantBagSnap[itemID] or 0
 		local curCnt = ns.GetBagCount and ns:GetBagCount(itemID) or 0
-		if curCnt < prevCnt then
+		if curCnt > prevCnt then
+			merchantBagSnap[itemID] = curCnt
+		elseif curCnt < prevCnt then
 			local dropped = prevCnt - curCnt
 			local capCrafted = craftedItems[itemID] or 0
-			local sold = math.min(dropped, capCrafted)
-			if sold > 0 and gained > 0 then
+			local sellQty = math.min(dropped, capCrafted)
+			if sellQty > 0 then
 				local unitSell = ns.GetItemSellPrice and ns:GetItemSellPrice(itemID) or 0
-				local earned = (unitSell > 0) and math.min(unitSell * sold, gained) or 0
-				if earned > 0 then
-					ns:RecordCashflowIncome("vendor_sell", itemID, sold, earned)
-					craftedItems[itemID] = math.max(0, capCrafted - sold)
-					gained = math.max(0, gained - earned)
+				if unitSell > 0 then
+					pendingMerchantDrops[#pendingMerchantDrops + 1] = {
+						itemID = itemID,
+						count = sellQty,
+						money = unitSell * sellQty,
+						ts = now,
+					}
 				end
 			end
-			merchantBagSnap[itemID] = curCnt
+			merchantBagSnap[itemID] = (curCnt > 0) and curCnt or nil
 		end
 	end
-	merchantMoney = curMoney
 end
 
-local MAIL_PAIR_WINDOW = 5
+local function FlushPendingMerchantSales(now)
+	if (now - (pendingMerchantMoney.ts or 0)) > MERCHANT_PAIR_WINDOW then
+		pendingMerchantMoney.amount = 0
+		pendingMerchantMoney.ts = 0
+	end
+	local kept = {}
+	for _, entry in ipairs(pendingMerchantDrops) do
+		if (now - (entry.ts or 0)) <= MERCHANT_PAIR_WINDOW then
+			kept[#kept + 1] = entry
+		end
+	end
+	pendingMerchantDrops = kept
+
+	if (pendingMerchantMoney.amount or 0) <= 0 or #pendingMerchantDrops == 0 then
+		return
+	end
+
+	local craftedItems = EnsureCraftedItemsDB()
+	while (pendingMerchantMoney.amount or 0) > 0 and #pendingMerchantDrops > 0 do
+		local matchIdx = nil
+		for idx, entry in ipairs(pendingMerchantDrops) do
+			if math.abs(entry.money - pendingMerchantMoney.amount) <= 2 then
+				matchIdx = idx
+				break
+			end
+		end
+		if not matchIdx then
+			for idx, entry in ipairs(pendingMerchantDrops) do
+				if entry.money <= (pendingMerchantMoney.amount + 2) then
+					matchIdx = idx
+					break
+				end
+			end
+		end
+		if not matchIdx then
+			break
+		end
+		local entry = table.remove(pendingMerchantDrops, matchIdx)
+		local availCrafted = craftedItems[entry.itemID] or 0
+		local qty = math.min(entry.count, availCrafted)
+		if qty > 0 then
+			local unitMoney = (entry.count > 0) and (entry.money / entry.count) or 0
+			local capMoney = math.floor(unitMoney * qty + 0.5)
+			local earned = math.min(capMoney, pendingMerchantMoney.amount)
+			if earned > 0 then
+				ns:RecordCashflowIncome("vendor_sell", entry.itemID, qty, earned)
+				DecrementCraftedItem(entry.itemID, qty)
+				pendingMerchantMoney.amount = math.max(0, pendingMerchantMoney.amount - earned)
+			end
+		end
+	end
+end
 
 local function GetDisenchantMatNameMap()
 	disenchantNameMap = disenchantNameMap or {}
-	if not ns.DisenchantMatIDs then
+	if disenchantMapComplete or not ns.DisenchantMatIDs then
 		return disenchantNameMap
 	end
+	local missing = false
 	for itemID in pairs(ns.DisenchantMatIDs) do
-		local name = ns.GetItemDisplay and select(1, ns:GetItemDisplay(itemID))
-		if (not name or name == "" or name:find("^#")) and C_Item and C_Item.GetItemNameByID then
-			name = C_Item.GetItemNameByID(itemID)
-		end
-		if name and name ~= "" and not name:find("^#") then
+		local name = GetLoadedItemName(itemID)
+		if name then
 			disenchantNameMap[name] = itemID
-		elseif ns.RequestItemData then
-			ns:RequestItemData(itemID)
+		else
+			missing = true
 		end
+	end
+	if not missing then
+		disenchantMapComplete = true
 	end
 	return disenchantNameMap
 end
@@ -702,9 +836,10 @@ local function ResolveTrackedSellItemID(cleanName)
 	if not cleanName or cleanName == "" then
 		return nil
 	end
-	local _, craftedNames = EnsureCraftedItemsDB()
-	if craftedNames[cleanName] then
-		return craftedNames[cleanName]
+	local craftedItems, craftedNames = EnsureCraftedItemsDB()
+	local craftedID = craftedNames[cleanName]
+	if craftedID and (craftedItems[craftedID] or 0) > 0 then
+		return craftedID
 	end
 	return GetDisenchantMatNameMap()[cleanName]
 end
@@ -761,7 +896,7 @@ local function BuildMailSellerSnap()
 	local subjPat = GetAuctionSoldSubjectPattern()
 	local n = GetInboxNumItems() or 0
 	for i = 1, n do
-		local _, _, sender, subject, money = GetInboxHeaderInfo(i)
+		local _, _, _, subject, money = GetInboxHeaderInfo(i)
 		if money and money > 0 then
 			local invoiceType, itemName, count
 			if GetInboxInvoiceInfo then
@@ -781,11 +916,15 @@ local function BuildMailSellerSnap()
 				local cleanName, suffixQty = ParseSoldItemName(itemName)
 				local itemID = ResolveTrackedSellItemID(cleanName)
 				if itemID then
-					local qty = math.max(1, tonumber(count) or suffixQty or 1)
-					local key = (sender or "") .. "|" .. (subject or "") .. "|" .. itemID .. "|" .. qty .. "|" .. money
+					local rawCount = tonumber(count)
+					local qty = math.max(1, (rawCount and rawCount > 0 and rawCount) or suffixQty or 1)
+					local key = (subject or "") .. "|" .. itemID .. "|" .. money
 					counts[key] = (counts[key] or 0) + 1
-					if not entries[key] then
+					local entry = entries[key]
+					if not entry then
 						entries[key] = { itemID = itemID, count = qty, money = money }
+					elseif qty > entry.count then
+						entry.count = qty
 					end
 				end
 			end
@@ -811,7 +950,6 @@ local function FlushPendingMailSales(now)
 		return
 	end
 
-	local craftedItems = EnsureCraftedItemsDB()
 	while (pendingMailMoney.amount or 0) > 0 and #pendingMailItems > 0 do
 		local matchIdx = nil
 		for idx, entry in ipairs(pendingMailItems) do
@@ -835,9 +973,7 @@ local function FlushPendingMailSales(now)
 		local earned = math.min(entry.money, pendingMailMoney.amount)
 		if earned > 0 then
 			ns:RecordCashflowIncome("ah_sell", entry.itemID, entry.count, earned)
-			if craftedItems[entry.itemID] then
-				craftedItems[entry.itemID] = math.max(0, craftedItems[entry.itemID] - entry.count)
-			end
+			DecrementCraftedItem(entry.itemID, entry.count)
 			pendingMailMoney.amount = math.max(0, pendingMailMoney.amount - earned)
 		end
 	end
@@ -894,12 +1030,26 @@ for _, ev in ipairs({
 	pcall(txFrame.RegisterEvent, txFrame, ev)
 end
 
-txFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
+txFrame:SetScript("OnEvent", function(_, event, ...)
+	local arg1, arg2, arg3 = ...
 	local now = GetTime and GetTime() or 0
-	if event == "PLAYER_LOGIN" then
+	if event == "PLAYER_LOGIN" or event == "AUCTION_HOUSE_SHOW" then
 		InstallAhHooks()
-	elseif event == "AUCTION_HOUSE_SHOW" then
-		InstallAhHooks()
+	end
+	if not IsProfitEnabled() then
+		pendingAhComm = nil
+		pendingAhBid = nil
+		lastViewedAhItemID = nil
+		merchantBagSnap = nil
+		pendingMerchantMoney.amount = 0
+		pendingMerchantDrops = {}
+		mailSellerSnap = nil
+		pendingMailMoney.amount = 0
+		pendingMailItems = {}
+		return
+	end
+	if event == "PLAYER_LOGIN" or event == "AUCTION_HOUSE_SHOW" then
+		return
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		pendingAhComm = nil
 		pendingAhBid = nil
@@ -914,6 +1064,7 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 			local totalP = tonumber(arg2) or (unitP * pendingAhComm.qty)
 			if totalP > 0 then
 				pendingAhComm.totalPrice = totalP
+				pendingAhComm.ts = now
 			end
 		else
 			pendingAhComm = nil
@@ -923,12 +1074,11 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 	elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
 		local p = pendingAhComm
 		pendingAhComm = nil
+		if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
+			return
+		end
 		if p and (now - (p.ts or 0)) <= 15 and (p.totalPrice or 0) > 0 then
-			local isDupSnipe = lastSnipeRec and lastSnipeRec.itemID == p.itemID
-				and lastSnipeRec.qty == p.qty and (now - (lastSnipeRec.ts or 0)) <= 1.5
-			if not isDupSnipe then
-				ns:RecordTradeFlowPurchase("ah_buy", p.itemID, p.qty, p.totalPrice)
-			end
+			ns:RecordTradeFlowPurchase("ah_buy", p.itemID, p.qty, p.totalPrice)
 		end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
 		if arg1 == "player" and tonumber(arg3) == 13262 then
@@ -936,25 +1086,34 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 		end
 	elseif event == "CHAT_MSG_LOOT" then
 		if lastDisenchantAt > 0 and (now - lastDisenchantAt) <= 3.0 and type(arg1) == "string" then
-			local itemID = tonumber(arg1:match("item:(%d+)"))
-			if itemID and itemID > 0 then
-				local itemName = arg1:match("|h%[(.-)%]|h") or arg1:match("%[(.-)%]")
-				local qty = MatchLootQty(arg1)
-				local craftedItems, craftedNames = EnsureCraftedItemsDB()
-				craftedItems[itemID] = (craftedItems[itemID] or 0) + qty
-				if itemName and itemName ~= "" then
-					craftedNames[itemName] = itemID
+			local lootGuid = select(12, ...)
+			local playerGuid = UnitGUID and UnitGUID("player")
+			if not (lootGuid and lootGuid ~= "" and playerGuid and playerGuid ~= "" and lootGuid ~= playerGuid) then
+				local itemID = tonumber(arg1:match("item:(%d+)"))
+				if itemID and itemID > 0 and ns.DisenchantMatIDs and ns.DisenchantMatIDs[itemID] then
+					local itemName = arg1:match("|h%[(.-)%]|h") or arg1:match("%[(.-)%]")
+					local qty = MatchLootQty(arg1)
+					local craftedItems, craftedNames = EnsureCraftedItemsDB()
+					craftedItems[itemID] = (craftedItems[itemID] or 0) + qty
+					if itemName and itemName ~= "" then
+						craftedNames[itemName] = itemID
+					end
+					PruneCraftedTrack(craftedItems, craftedNames)
 				end
-				PruneCraftedTrack(craftedItems, craftedNames)
 			end
 		end
 	elseif event == "MERCHANT_SHOW" then
 		SnapshotMerchantBags()
 	elseif event == "MERCHANT_CLOSED" then
+		ScanMerchantBagDelta(now, true)
+		FlushPendingMerchantSales(now)
 		merchantBagSnap = nil
+		pendingMerchantMoney = { amount = 0, ts = 0 }
+		pendingMerchantDrops = {}
 	elseif event == "BAG_UPDATE_DELAYED" then
 		if MerchantFrame and MerchantFrame:IsShown() and merchantBagSnap then
-			CheckMerchantSoldCrafted()
+			ScanMerchantBagDelta(now, false)
+			FlushPendingMerchantSales(now)
 		end
 	elseif event == "MAIL_SHOW" then
 		GetDisenchantMatNameMap()
@@ -979,6 +1138,15 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 			if (now - (b.ts or 0)) <= 2.5 and (b.moneyBefore - curM) == b.amount then
 				ns:RecordTradeFlowPurchase("ah_buy", b.itemID, 1, b.amount)
 			end
+		end
+		if MerchantFrame and MerchantFrame:IsShown() and merchantBagSnap then
+			local curM = GetMoney and GetMoney() or 0
+			if curM > merchantMoney then
+				pendingMerchantMoney.amount = (pendingMerchantMoney.amount or 0) + (curM - merchantMoney)
+				pendingMerchantMoney.ts = now
+			end
+			merchantMoney = curM
+			FlushPendingMerchantSales(now)
 		end
 		if MailFrame and MailFrame:IsShown() then
 			local curM = GetMoney and GetMoney() or 0

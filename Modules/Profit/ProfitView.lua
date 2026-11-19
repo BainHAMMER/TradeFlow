@@ -187,12 +187,10 @@ function ProfitMod:CreateView(parent)
 		cb.text:SetPoint("LEFT", cb, "RIGHT", 1, 0)
 		cb.text:SetText(label)
 		local w = math.ceil((cb.text.GetStringWidth and cb.text:GetStringWidth()) or 0)
-		if widthHit and widthHit > 0 and w < 20 then
-			w = widthHit
-		elseif w < 20 then
-			w = widthHit or 60
+		if w < 20 then
+			w = (widthHit and widthHit > 0) and widthHit or 60
 		end
-		cb:SetHitRectInsets(0, -(math.max(widthHit or 0, w + 4)), 0, 0)
+		cb:SetHitRectInsets(0, -(w + 4), 0, 0)
 		cb:SetScript("OnClick", function(self)
 			if ns.db and ns.db.options then
 				ns.db.options[optKey] = self:GetChecked() and true or false
@@ -391,8 +389,13 @@ function ProfitMod:CreateView(parent)
 	end)
 
 	local logSummaryText = logTop:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	logSummaryText:SetPoint("LEFT", clearLogBtn, "RIGHT", 6, 0)
 	logSummaryText:SetPoint("RIGHT", -2, 0)
 	logSummaryText:SetJustifyH("RIGHT")
+	logSummaryText:SetWordWrap(false)
+	if logSummaryText.SetMaxLines then
+		logSummaryText:SetMaxLines(1)
+	end
 	f.logSummaryText = logSummaryText
 
 	local summaryHit = CreateFrame("Frame", nil, logTop)
@@ -999,11 +1002,11 @@ function ProfitMod:OnRefresh()
 	self:RenderRows()
 end
 
-function ProfitMod:OnPricesInvalidated()
+function ProfitMod:OnPricesInvalidated(noRefresh)
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
 	end
-	if self.view and self.view:IsVisible() then
+	if not noRefresh and self.view and self.view:IsVisible() then
 		self:OnRefresh()
 	end
 end

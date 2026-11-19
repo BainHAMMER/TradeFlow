@@ -13,6 +13,7 @@ local lastSnipeListSig = nil
 local pendingUiRefresh = false
 local hookedAuctionFrames = {}
 local pendingBuy = nil
+local pendingSnipeBid = nil
 local buyTokenCounter = 0
 
 local function EnsureSnipeDB()
@@ -383,9 +384,6 @@ function ns:SyncSnipeShoppingList(silent)
 	local parts = {}
 	for _, t in ipairs(targets) do
 		parts[#parts + 1] = (t.itemID or 0) .. ":" .. (t.maxPrice or 0)
-		if t.itemID and ns.TrackTradeFlowAhItem then
-			ns:TrackTradeFlowAhItem(t.itemID)
-		end
 	end
 	local sig = listName .. "|" .. table.concat(parts, ",")
 	if silent and sig == lastSnipeListSig then
@@ -673,6 +671,13 @@ function ns:BuyFirstSnipeHit()
 				CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], pendingBuy.label), pendingBuy.itemID, nil)
 			elseif pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "buying" then
 				self:RefreshSnipeBar()
+				if C_Timer and C_Timer.After then
+					C_Timer.After(6.0, function()
+						if pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "buying" then
+							CancelPendingCommodity(string.format(L["SNIPE_BUY_TIMEOUT"], pendingBuy.label), nil)
+						end
+					end)
+				end
 			end
 		end
 		return
@@ -764,25 +769,34 @@ function ns:BuyFirstSnipeHit()
 			self:Print(L["SNIPE_BUY_NOMONEY"])
 			return
 		end
+		pendingSnipeBid = {
+			itemID = itemID,
+			label = label,
+			amount = bestAuction.buyoutAmount,
+			maxPrice = maxPrice,
+			moneyBefore = money,
+			ts = GetTime and GetTime() or 0,
+		}
 		buyApiBlocked = false
 		buyApiDepth = buyApiDepth + 1
 		C_AuctionHouse.PlaceBid(bestAuction.auctionID, bestAuction.buyoutAmount)
 		buyApiDepth = buyApiDepth - 1
-		if not buyApiBlocked then
-			self:Print(string.format(L["SNIPE_BUY_DONE"], label, 1, ns.FormatMoney(bestAuction.buyoutAmount), ns.FormatMoney(maxPrice)))
-			if self.RecordTradeFlowPurchase then
-				self:RecordTradeFlowPurchase("snipe_buy", itemID, 1, bestAuction.buyoutAmount)
-			end
-			ClearStaleSnipeHit(itemID, nil)
-			self:RefreshSnipeUI()
-		else
+		if buyApiBlocked then
+			pendingSnipeBid = nil
 			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), itemID, nil)
 		end
 	end
 end
 
+function ns:OnExternalCommodityPurchase()
+	if pendingBuy and pendingBuy.state == "confirm" then
+		pendingBuy = nil
+		self:RefreshSnipeUI()
+	end
+end
+
 function ns:IsSnipePurchaseActive()
-	return pendingBuy ~= nil or buyApiDepth > 0
+	return (pendingBuy ~= nil and pendingBuy.state ~= "confirm") or buyApiDepth > 0
 end
 
 function ns:RefreshSnipeBar()
@@ -1017,6 +1031,7 @@ for _, ev in ipairs({
 	"COMMODITY_PRICE_UNAVAILABLE",
 	"COMMODITY_PURCHASE_SUCCEEDED",
 	"COMMODITY_PURCHASE_FAILED",
+	"PLAYER_MONEY",
 	"ADDON_ACTION_BLOCKED",
 }) do
 	pcall(snipeEventFrame.RegisterEvent, snipeEventFrame, ev)
@@ -1073,22 +1088,30 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			elseif totalP and GetMoney and totalP > GetMoney() then
 				CancelPendingCommodity(L["SNIPE_BUY_NOMONEY"], nil)
 			else
+				local confirmTok = pendingBuy.token
 				pendingBuy.state = "confirm"
 				pendingBuy.unitPrice = unitP
 				pendingBuy.totalPrice = totalP or (unitP * pendingBuy.qty)
 				ns:RefreshSnipeBar()
+				if C_Timer and C_Timer.After then
+					C_Timer.After(20.0, function()
+						if pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "confirm" then
+							CancelPendingCommodity(nil, nil)
+						end
+					end)
+				end
 			end
 		end
 	elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
-		if pendingBuy then
+		if pendingBuy and pendingBuy.state == "awaiting" then
 			CancelPendingCommodity(string.format(L["SNIPE_BUY_GONE"], pendingBuy.label), pendingBuy.itemID, nil)
 		end
 	elseif event == "COMMODITY_PURCHASE_FAILED" then
-		if pendingBuy then
+		if pendingBuy and pendingBuy.state == "buying" then
 			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], pendingBuy.label), pendingBuy.itemID, nil)
 		end
 	elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
-		if pendingBuy then
+		if pendingBuy and pendingBuy.state == "buying" then
 			local bought = pendingBuy
 			pendingBuy = nil
 			local totalSpent = bought.totalPrice or ((bought.unitPrice or 0) * bought.qty)
@@ -1099,7 +1122,27 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			ClearStaleSnipeHit(bought.itemID, nil)
 			ns:RefreshSnipeUI()
 		end
+	elseif event == "PLAYER_MONEY" then
+		if pendingSnipeBid then
+			local b = pendingSnipeBid
+			local now = GetTime and GetTime() or 0
+			if (now - (b.ts or 0)) <= 2.5 then
+				local curM = (GetMoney and GetMoney()) or 0
+				if (b.moneyBefore - curM) == b.amount then
+					pendingSnipeBid = nil
+					ns:Print(string.format(L["SNIPE_BUY_DONE"], b.label, 1, ns.FormatMoney(b.amount), ns.FormatMoney(b.maxPrice)))
+					if ns.RecordTradeFlowPurchase then
+						ns:RecordTradeFlowPurchase("snipe_buy", b.itemID, 1, b.amount)
+					end
+					ClearStaleSnipeHit(b.itemID, nil)
+					ns:RefreshSnipeUI()
+				end
+			else
+				pendingSnipeBid = nil
+			end
+		end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
+		pendingSnipeBid = nil
 		if pendingBuy then
 			CancelPendingCommodity(nil, nil)
 		end

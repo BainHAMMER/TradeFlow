@@ -280,6 +280,9 @@ function ns:CreateMainFrame()
 	})
 	f:SetBackdropColor(0.05, 0.045, 0.04, 0.98)
 	f:SetScript("OnHide", function()
+		if ns.ClearReplaceEnchantSpace then
+			ns.ClearReplaceEnchantSpace()
+		end
 		if not ns.bypassIntercept and not ns.isRebuildingFrame and not ns.isClosingFromBlizz then
 			ns.isHidingMain = true
 			if C_TradeSkillUI and C_TradeSkillUI.CloseTradeSkill then
@@ -1034,7 +1037,6 @@ function ns:CreateDetailsView(parent)
 	etSlot.icon:SetPoint("BOTTOMRIGHT", -2, 2)
 	etSlot.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 	etSlot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-	etSlot:RegisterForDrag("LeftButton")
 	local function HandleTargetDrop(_, btn)
 		local rID = d.currentRecipeID
 		if not rID then
@@ -1355,7 +1357,7 @@ function ns:RefreshDetailsView()
 	if d.enchantTargetBar then
 		if metrics.learned and self.IsEnchantRecipe and self:IsEnchantRecipe(recipeID) then
 			local nReag = math.min(#breakdown, 6)
-			local topY = math.max(-222, -64 - nReag * 18 - 6)
+			local topY = -64 - nReag * 18 - 6
 			d.enchantTargetBar:ClearAllPoints()
 			d.enchantTargetBar:SetPoint("TOPLEFT", d, "TOPLEFT", 8, topY)
 			d.enchantTargetBar:SetPoint("TOPRIGHT", d, "TOPRIGHT", -244, topY)
