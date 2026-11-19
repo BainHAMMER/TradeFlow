@@ -512,8 +512,8 @@ local function ClearStaleSnipeHit(itemID, newMinPrice)
 	if itemID and ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID] then
 		if newMinPrice and newMinPrice > 0 then
 			local s = ns.realmDB.ahStock[itemID]
-			s.minPrice = newMinPrice
-			s.tiers = { { price = newMinPrice, qty = s.total or 1 } }
+			s.price = newMinPrice
+			s.tiers = { { newMinPrice, s.total or 1 } }
 			s.isAggregate = true
 			s.ts = (time and time()) or s.ts
 		else
@@ -661,7 +661,9 @@ function ns:BuyFirstSnipeHit()
 				self:Print(L["SNIPE_BUY_WAIT"])
 				return
 			end
-			local confirmTok = pendingBuy.token
+			buyTokenCounter = buyTokenCounter + 1
+			local confirmTok = buyTokenCounter
+			pendingBuy.token = confirmTok
 			pendingBuy.state = "buying"
 			buyApiBlocked = false
 			buyApiDepth = buyApiDepth + 1
@@ -682,7 +684,7 @@ function ns:BuyFirstSnipeHit()
 		end
 		return
 	end
-	if pendingBuy and pendingBuy.state == "awaiting" then
+	if pendingBuy and (pendingBuy.state == "awaiting" or pendingBuy.state == "buying") then
 		return
 	end
 
@@ -738,7 +740,7 @@ function ns:BuyFirstSnipeHit()
 		end
 		if C_Timer and C_Timer.After then
 			C_Timer.After(4.0, function()
-				if pendingBuy and pendingBuy.token == tok and (pendingBuy.state == "awaiting" or pendingBuy.state == "buying") then
+				if pendingBuy and pendingBuy.token == tok and pendingBuy.state == "awaiting" then
 					CancelPendingCommodity(string.format(L["SNIPE_BUY_TIMEOUT"], label), nil)
 				end
 			end)
@@ -943,7 +945,6 @@ function ns:RefreshSnipeBar()
 
 	snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
 
-	local hits = self:GetSnipeHitList()
 	snipeBar.openBtn:SetText(string.format(L["SNIPE_FIND_HIT_BTN"], #hits))
 	if #hits > 0 or pendingBuy then
 		local first = hits[1]

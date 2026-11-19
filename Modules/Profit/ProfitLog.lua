@@ -19,7 +19,7 @@ local ahHooksInstalled = false
 local lastDisenchantAt = 0
 local pendingAhComm = nil
 local pendingAhBid = nil
-local lastViewedAhItemID = nil
+local lastViewedAhItemKey = nil
 local merchantMoney = 0
 local merchantBagSnap = nil
 local pendingMerchantMoney = { amount = 0, ts = 0 }
@@ -671,23 +671,26 @@ local function InstallAhHooks()
 				return
 			end
 			local amt = tonumber(bidAmount)
-			local iid = lastViewedAhItemID
+			local key = lastViewedAhItemKey
+			local iid = key and key.itemID
 			if not (iid and amt and amt > 0 and IsInTradeFlowAhScope(iid)) then
 				return
 			end
-			if auctionID and C_AuctionHouse.MakeItemKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
-				local okKey, itemKey = pcall(C_AuctionHouse.MakeItemKey, iid)
-				if okKey and itemKey then
-					local n = C_AuctionHouse.GetNumItemSearchResults(itemKey) or 0
-					for i = 1, n do
-						local info = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
-						if info and info.auctionID == auctionID then
-							if info.buyoutAmount ~= amt then
-								return
-							end
-							break
-						end
+			if C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo then
+				if not auctionID then
+					return
+				end
+				local matched = false
+				local n = C_AuctionHouse.GetNumItemSearchResults(key) or 0
+				for i = 1, n do
+					local info = C_AuctionHouse.GetItemSearchResultInfo(key, i)
+					if info and info.auctionID == auctionID then
+						matched = (info.buyoutAmount == amt)
+						break
 					end
+				end
+				if not matched then
+					return
 				end
 			end
 			pendingAhBid = {
@@ -975,6 +978,15 @@ local function FlushPendingMailSales(now)
 			ns:RecordCashflowIncome("ah_sell", entry.itemID, entry.count, earned)
 			DecrementCraftedItem(entry.itemID, entry.count)
 			pendingMailMoney.amount = math.max(0, pendingMailMoney.amount - earned)
+			local craftedItems = EnsureCraftedItemsDB()
+			if mailSellerSnap and (craftedItems[entry.itemID] or 0) <= 0 and not (ns.DisenchantMatIDs and ns.DisenchantMatIDs[entry.itemID]) then
+				for k, info in pairs(mailSellerSnap.entries) do
+					if info and info.itemID == entry.itemID then
+						mailSellerSnap.counts[k] = nil
+						mailSellerSnap.entries[k] = nil
+					end
+				end
+			end
 		end
 	end
 end
@@ -1013,6 +1025,7 @@ for _, ev in ipairs({
 	"AUCTION_HOUSE_SHOW",
 	"AUCTION_HOUSE_CLOSED",
 	"ITEM_SEARCH_RESULTS_UPDATED",
+	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"COMMODITY_PRICE_UPDATED",
 	"COMMODITY_PRICE_UNAVAILABLE",
 	"COMMODITY_PURCHASE_SUCCEEDED",
@@ -1039,7 +1052,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	if not IsProfitEnabled() then
 		pendingAhComm = nil
 		pendingAhBid = nil
-		lastViewedAhItemID = nil
+		lastViewedAhItemKey = nil
 		merchantBagSnap = nil
 		pendingMerchantMoney.amount = 0
 		pendingMerchantDrops = {}
@@ -1053,10 +1066,12 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		pendingAhComm = nil
 		pendingAhBid = nil
-		lastViewedAhItemID = nil
+		lastViewedAhItemKey = nil
+	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
+		lastViewedAhItemKey = nil
 	elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
 		if type(arg1) == "table" and arg1.itemID and arg1.itemID > 0 then
-			lastViewedAhItemID = arg1.itemID
+			lastViewedAhItemKey = arg1
 		end
 	elseif event == "COMMODITY_PRICE_UPDATED" then
 		if pendingAhComm and (now - (pendingAhComm.ts or 0)) <= 10 then

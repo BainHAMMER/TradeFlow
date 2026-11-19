@@ -117,7 +117,7 @@ function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, p
 						end
 					end
 					if accept then
-						local cost = unitCraft or 999999
+						local cost = unitCraft or 1e15
 						if rec.skillLine == self.currentSkillLine then
 							cost = cost * 0.95
 						end

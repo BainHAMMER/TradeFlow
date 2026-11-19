@@ -239,6 +239,36 @@ function ns:GetMerchantShoppingMatches()
 	return CollectMerchantMatches()
 end
 
+local function DistributeProRataSpend(actualSpent, items, getCost, onAlloc)
+	if not (actualSpent and actualSpent > 0 and items and #items > 0) then
+		return
+	end
+	local totalEst = 0
+	for _, item in ipairs(items) do
+		totalEst = totalEst + (getCost(item) or 0)
+	end
+	if totalEst <= 0 then
+		return
+	end
+	local remSpent = math.min(actualSpent, math.ceil(totalEst * 1.05))
+	local remEst = totalEst
+	for _, item in ipairs(items) do
+		if remSpent <= 0 then
+			break
+		end
+		local c = getCost(item) or 0
+		if c > 0 then
+			local share = (remEst <= c) and remSpent or math.floor(remSpent * c / remEst + 0.5)
+			share = math.min(share, remSpent)
+			remSpent = remSpent - share
+			remEst = remEst - c
+			if share > 0 then
+				onAlloc(item, share)
+			end
+		end
+	end
+end
+
 local vendorBuyInFlight = false
 
 function ns:BuyVendorShoppingList(onlyItemID)
@@ -308,7 +338,6 @@ function ns:BuyVendorShoppingList(onlyItemID)
 			ns:ScanBagsNow()
 		end
 		local gainedList = {}
-		local totalEst = 0
 		for _, a in ipairs(attempted) do
 			local gained = math.max(0, ns:GetBagCount(a.itemID) - a.beforeBag)
 			if gained > 0 then
@@ -317,27 +346,15 @@ function ns:BuyVendorShoppingList(onlyItemID)
 				local estCost = (a.units > 0) and math.floor((a.cost or 0) * gained / a.units + 0.5) or 0
 				if estCost > 0 then
 					gainedList[#gainedList + 1] = { itemID = a.itemID, gained = gained, estCost = estCost }
-					totalEst = totalEst + estCost
 				end
 			end
 		end
 		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
 		local totalSpent = math.max(0, beforeMoney - afterMoney)
-		if totalSpent > 0 and totalEst > 0 and #gainedList > 0 and ns.RecordTradeFlowPurchase then
-			local remSpent = math.min(totalSpent, math.ceil(totalEst * 1.05))
-			local remEst = totalEst
-			for _, g in ipairs(gainedList) do
-				if remSpent <= 0 then
-					break
-				end
-				local share = (remEst <= g.estCost) and remSpent or math.floor(remSpent * g.estCost / remEst + 0.5)
-				share = math.min(share, remSpent)
-				remSpent = remSpent - share
-				remEst = remEst - g.estCost
-				if share > 0 then
-					ns:RecordTradeFlowPurchase("vendor_buy", g.itemID, g.gained, share)
-				end
-			end
+		if ns.RecordTradeFlowPurchase then
+			DistributeProRataSpend(totalSpent, gainedList, function(g) return g.estCost end, function(g, share)
+				ns:RecordTradeFlowPurchase("vendor_buy", g.itemID, g.gained, share)
+			end)
 		end
 		ns:RefreshVendorBar()
 		if ns.RefreshQueueAndShoppingView then
@@ -897,10 +914,10 @@ local function GetActiveTrainerFrame()
 	return nil
 end
 
-local function CollectTrainerMatches()
+local function CollectTrainerMatches(includeUnavailable)
 	local tf = GetActiveTrainerFrame()
 	if not (tf and GetNumTrainerServices and GetTrainerServiceInfo) then
-		return {}, 0
+		return {}, 0, 0
 	end
 
 	local queue = ns:GetQueue()
@@ -925,7 +942,7 @@ local function CollectTrainerMatches()
 		end
 	end
 	if not next(needLearn) then
-		return {}, 0
+		return {}, 0, GetNumTrainerServices() or 0
 	end
 
 	local matches = {}
@@ -934,7 +951,7 @@ local function CollectTrainerMatches()
 	for i = 1, num do
 		local name, arg2, arg3 = GetTrainerServiceInfo(i)
 		local category = (type(arg2) == "string" and (arg2 == "available" or arg2 == "unavailable" or arg2 == "used" or arg2 == "header")) and arg2 or arg3
-		if category == "available" then
+		if category == "available" or (includeUnavailable and category == "unavailable") then
 			local link = GetTrainerServiceItemLink and GetTrainerServiceItemLink(i)
 			local spellID = link and tonumber(link:match("spell:(%d+)") or link:match("enchant:(%d+)"))
 			if not spellID and C_TooltipInfo and C_TooltipInfo.GetTrainerService then
@@ -965,7 +982,7 @@ local function CollectTrainerMatches()
 			end
 		end
 	end
-	return matches, totalCopper
+	return matches, totalCopper, num
 end
 
 function ns:GetTrainerQueueMatches()
@@ -1003,46 +1020,39 @@ function ns:LearnQueuedTrainerRecipes()
 			ns:ScanPlayerProfessions()
 		end
 		local trainerOpen = (GetActiveTrainerFrame() ~= nil)
-		local stillAvailable = {}
+		local stillNotLearned = {}
+		local trainerReadable = false
 		if trainerOpen then
-			for _, cm in ipairs(CollectTrainerMatches()) do
-				stillAvailable[cm.recipeID] = true
+			local remaining, _, numServices = CollectTrainerMatches(true)
+			trainerReadable = (numServices or 0) > 0
+			for _, cm in ipairs(remaining) do
+				stillNotLearned[cm.recipeID] = true
 			end
 		end
 		local learnedAny = false
 		local learnedPriced = {}
-		local totalBaseCost = 0
 		for _, m in ipairs(attempted) do
-			local learned = (trainerOpen and not stillAvailable[m.recipeID]) or (ns.IsRecipeLearned and ns:IsRecipeLearned(m.recipeID))
+			local learned = (ns.IsRecipeLearned and ns:IsRecipeLearned(m.recipeID)) or (trainerReadable and not stillNotLearned[m.recipeID])
 			if learned then
 				learnedAny = true
 				if ns.charDB and ns.charDB.learned then
 					ns.charDB.learned[m.recipeID] = true
 				end
+				if ns.liveRecipes and ns.liveRecipes[m.recipeID] then
+					ns.liveRecipes[m.recipeID].learned = true
+				end
 				ns:Print(string.format(L["TRAINER_LEARNED_MSG"], m.name or tostring(m.recipeID)))
 				if (m.cost or 0) > 0 then
 					learnedPriced[#learnedPriced + 1] = m
-					totalBaseCost = totalBaseCost + m.cost
 				end
 			end
 		end
 		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
 		local actualSpent = math.max(0, beforeMoney - afterMoney)
-		if actualSpent > 0 and totalBaseCost > 0 and #learnedPriced > 0 and ns.RecordTrainerExpense then
-			local remSpent = math.min(actualSpent, math.ceil(totalBaseCost * 1.05))
-			local remBase = totalBaseCost
-			for _, m in ipairs(learnedPriced) do
-				if remSpent <= 0 then
-					break
-				end
-				local amt = (remBase <= m.cost) and remSpent or math.floor(remSpent * m.cost / remBase + 0.5)
-				amt = math.min(amt, remSpent)
-				remSpent = remSpent - amt
-				remBase = remBase - m.cost
-				if amt > 0 then
-					ns:RecordTrainerExpense(m.recipeID, m.name, amt)
-				end
-			end
+		if ns.RecordTrainerExpense then
+			DistributeProRataSpend(actualSpent, learnedPriced, function(m) return m.cost end, function(m, amt)
+				ns:RecordTrainerExpense(m.recipeID, m.name, amt)
+			end)
 		end
 		if learnedAny then
 			if ns.InvalidateCraftCounts then

@@ -1212,6 +1212,23 @@ local function FindReplaceEnchantPopup()
 	return dlg, btn
 end
 
+local function IsDescendantOf(widget, ancestor)
+	if not (widget and ancestor) then
+		return false
+	end
+	if RegionUtil and RegionUtil.IsDescendantOf then
+		return RegionUtil.IsDescendantOf(widget, ancestor)
+	end
+	local p = widget
+	while p do
+		if p == ancestor then
+			return true
+		end
+		p = p.GetParent and p:GetParent() or nil
+	end
+	return false
+end
+
 local function BindReplaceEnchantSpace()
 	if InCombatLockdown and InCombatLockdown() then
 		return
@@ -1228,7 +1245,7 @@ local function BindReplaceEnchantSpace()
 	end
 	local focus = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
 	if focus then
-		if ns.mainFrame and focus.IsDescendantOf and focus:IsDescendantOf(ns.mainFrame) then
+		if IsDescendantOf(focus, ns.mainFrame) then
 			focus:ClearFocus()
 		else
 			ClearReplaceEnchantSpace()
@@ -1266,7 +1283,7 @@ function ns:ExecuteCraftRecipe(recipeID, count)
 		return false
 	end
 	local focus = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
-	if focus and self.mainFrame and focus.IsDescendantOf and focus:IsDescendantOf(self.mainFrame) then
+	if IsDescendantOf(focus, self.mainFrame) then
 		focus:ClearFocus()
 	end
 	if self.LogTrace then
@@ -1543,8 +1560,13 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		end
 	elseif event == "NEW_RECIPE_LEARNED" then
 		local learnedID = tonumber(arg1)
-		if learnedID and learnedID > 0 and ns.charDB and ns.charDB.learned then
-			ns.charDB.learned[learnedID] = true
+		if learnedID and learnedID > 0 then
+			if ns.charDB and ns.charDB.learned then
+				ns.charDB.learned[learnedID] = true
+			end
+			if ns.liveRecipes and ns.liveRecipes[learnedID] then
+				ns.liveRecipes[learnedID].learned = true
+			end
 		end
 		if ns.InvalidateCraftCounts then
 			ns:InvalidateCraftCounts()

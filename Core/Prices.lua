@@ -435,11 +435,6 @@ function ns:GetReagentBestPrice(itemID, visiting)
 	local bestSource = ahPrice and "ah" or "unknown"
 	local bestRecipeID = nil
 
-	if vendorPrice and (not bestPrice or vendorPrice < bestPrice) then
-		bestPrice = vendorPrice
-		bestSource = "vendor"
-	end
-
 	-- Проверяем, нельзя ли скрафтить этот промежуточный реагент дешевле своей профессией
 	if not visiting[itemID] then
 		local producers = self.ItemProducedBy and self.ItemProducedBy[itemID]

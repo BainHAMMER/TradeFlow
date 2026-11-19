@@ -285,6 +285,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				unitPrice = unitPrice,
 				reqSkill = req,
 				recipeID = c.recipeID,
+				learned = c.learned and true or false,
 			}
 		end
 	end
@@ -299,7 +300,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				local improved = false
 				for _, b in ipairs(c.reagents) do
 					local prod = b.itemID and routeCraftUnit[b.itemID]
-					if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= effectiveReq and prod.unitPrice < (b.unitPrice or math.huge) then
+					if prod and prod.recipeID ~= c.recipeID and (prod.learned or not c.learned) and (prod.reqSkill or 1) <= effectiveReq and prod.unitPrice < (b.unitPrice or math.huge) then
 						improved = true
 						break
 					end
@@ -310,7 +311,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					local allPriced = true
 					for idx, b in ipairs(c.reagents) do
 						local prod = b.itemID and routeCraftUnit[b.itemID]
-						if prod and prod.recipeID ~= c.recipeID and (prod.reqSkill or 1) <= effectiveReq and prod.unitPrice < (b.unitPrice or math.huge) then
+						if prod and prod.recipeID ~= c.recipeID and (prod.learned or not c.learned) and (prod.reqSkill or 1) <= effectiveReq and prod.unitPrice < (b.unitPrice or math.huge) then
 							newReagents[idx] = {
 								itemID = b.itemID,
 								quantity = b.quantity,
