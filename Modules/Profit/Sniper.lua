@@ -73,6 +73,192 @@ function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync)
 	return true
 end
 
+function ns.ParseMoneyInput(text)
+	if text == nil then
+		return nil
+	end
+	local s = tostring(text):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" then
+		return nil
+	end
+	s = s:gsub(",", ".")
+		:gsub("Г", "g"):gsub("г", "g")
+		:gsub("З", "g"):gsub("з", "g")
+		:gsub("С", "s"):gsub("с", "s")
+		:gsub("М", "c"):gsub("м", "c")
+		:gsub("G", "g"):gsub("S", "s"):gsub("C", "c")
+		:gsub("%s+", "")
+	local gStr = s:match("(%d*%.?%d+)g")
+	local sStr = s:match("(%d*%.?%d+)s")
+	local cStr = s:match("(%d*%.?%d+)c")
+	if gStr or sStr or cStr then
+		local rem = s
+		if gStr then rem = rem:gsub(gStr:gsub("%.", "%%.") .. "g", "", 1) end
+		if sStr then rem = rem:gsub(sStr:gsub("%.", "%%.") .. "s", "", 1) end
+		if cStr then rem = rem:gsub(cStr:gsub("%.", "%%.") .. "c", "", 1) end
+		if rem ~= "" then
+			return nil
+		end
+		local total = (tonumber(gStr) or 0) * 10000 + (tonumber(sStr) or 0) * 100 + (tonumber(cStr) or 0)
+		total = math.floor(total + 0.5)
+		return (total > 0) and total or nil
+	end
+	local num = tonumber(s)
+	if not num or num <= 0 then
+		return nil
+	end
+	return math.max(1, math.floor(num * 10000 + 0.5))
+end
+
+function ns.FormatMoneyPlain(copper)
+	local c = math.max(0, math.floor(tonumber(copper) or 0))
+	if c <= 0 then
+		return ""
+	end
+	local g = math.floor(c / 10000)
+	local s = math.floor((c % 10000) / 100)
+	local m = c % 100
+	local parts = {}
+	if g > 0 then parts[#parts + 1] = g .. "g" end
+	if s > 0 then parts[#parts + 1] = s .. "s" end
+	if m > 0 or #parts == 0 then parts[#parts + 1] = m .. "c" end
+	return table.concat(parts, " ")
+end
+
+function ns:ResolveItemIDFromInput(input)
+	if input == nil then
+		return nil
+	end
+	local s = tostring(input):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" then
+		return nil
+	end
+	local fromLink = tonumber(s:match("item:(%d+)"))
+	if fromLink and fromLink > 0 then
+		if C_Item and C_Item.DoesItemExistByID and not C_Item.DoesItemExistByID(fromLink) then
+			return nil
+		end
+		return fromLink
+	end
+	local pureID = tonumber(s:match("^(%d+)$"))
+	if pureID and pureID > 0 then
+		if C_Item and C_Item.DoesItemExistByID and not C_Item.DoesItemExistByID(pureID) then
+			return nil
+		end
+		return pureID
+	end
+	if C_Item and C_Item.GetItemInfoInstant then
+		local ok, id = pcall(C_Item.GetItemInfoInstant, s)
+		if ok and type(id) == "number" and id > 0 then
+			return id
+		end
+	end
+	if C_Item and C_Item.GetItemInfo then
+		local ok, _, link = pcall(C_Item.GetItemInfo, s)
+		local id = ok and link and tonumber(link:match("item:(%d+)"))
+		if id and id > 0 then
+			return id
+		end
+	end
+
+	-- Поиск по известным TradeFlow предметам (сумки, банк, рецепты, распыл, текущие цели снайпа)
+	local qLow = s:lower()
+	local checked = {}
+	local subMatchID, subMatchLen = nil, math.huge
+	local function CheckItem(id)
+		if not (type(id) == "number" and id > 0) or checked[id] then
+			return nil
+		end
+		checked[id] = true
+		local itemName = (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id))
+			or (C_Item and C_Item.GetItemInfo and C_Item.GetItemInfo(id))
+		if type(itemName) == "string" and itemName ~= "" then
+			if itemName == s or itemName:lower() == qLow then
+				return id
+			end
+			if itemName:lower():find(qLow, 1, true) and #itemName < subMatchLen then
+				subMatchID = id
+				subMatchLen = #itemName
+			end
+		end
+		return nil
+	end
+	for id in pairs(EnsureSnipeDB()) do
+		if CheckItem(id) then return id end
+	end
+	if self.charDB then
+		for id in pairs(self.charDB.bags or {}) do
+			if CheckItem(id) then return id end
+		end
+		for id in pairs(self.charDB.bank or {}) do
+			if CheckItem(id) then return id end
+		end
+	end
+	for id in pairs(self.DisenchantMatIDs or {}) do
+		if CheckItem(id) then return id end
+	end
+	for id in pairs(self.VendorPrices or {}) do
+		if CheckItem(id) then return id end
+	end
+	for _, sc in pairs(self.RecipeScrolls or {}) do
+		if sc and sc[1] and CheckItem(sc[1]) then return sc[1] end
+	end
+	for _, rec in pairs(self.RecipeData or {}) do
+		if rec.output and rec.output.itemID and CheckItem(rec.output.itemID) then
+			return rec.output.itemID
+		end
+		if rec.reagents then
+			for _, r in ipairs(rec.reagents) do
+				if r.itemID and CheckItem(r.itemID) then
+					return r.itemID
+				end
+			end
+		end
+	end
+	return subMatchID
+end
+
+function ns:AddManualSnipeTarget(itemInput, priceInput, explicitItemID)
+	local itemID = (type(explicitItemID) == "number" and explicitItemID > 0) and explicitItemID
+		or self:ResolveItemIDFromInput(itemInput)
+	if not itemID or itemID <= 0 or (C_Item and C_Item.DoesItemExistByID and not C_Item.DoesItemExistByID(itemID)) then
+		if self.Print then
+			self:Print(L["SNIPE_ADD_NOT_FOUND"])
+		end
+		return false
+	end
+	local priceStr = tostring(priceInput or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	local maxPrice
+	if priceStr ~= "" then
+		maxPrice = ns.ParseMoneyInput(priceStr)
+		if not maxPrice then
+			if self.Print then
+				self:Print(L["SNIPE_ADD_BAD_PRICE"])
+			end
+			return false
+		end
+	else
+		local curAh = self.GetAuctionPrice and self:GetAuctionPrice(itemID) or nil
+		if curAh and curAh > 0 then
+			maxPrice = math.max(1, math.floor(curAh * 0.80 + 0.5))
+		else
+			if self.Print then
+				self:Print(L["SNIPE_ADD_NEED_PRICE"])
+			end
+			return false
+		end
+	end
+	if not self:AddSnipeTarget(itemID, maxPrice, nil, false) then
+		return false
+	end
+	local name, _, _, link, _, hex = self:GetItemDisplay(itemID)
+	local label = link or ((hex or "|cffffffff") .. (name or ("#" .. itemID)) .. "|r")
+	if self.Print then
+		self:Print(string.format(L["SNIPE_ADD_DONE"], label, ns.FormatMoney(maxPrice)))
+	end
+	return true
+end
+
 function ns:GetRecipeSnipePreview(recipeID, discountRatio, craftPlan)
 	local items = {}
 	local newCount = 0

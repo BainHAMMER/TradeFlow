@@ -145,6 +145,7 @@ function ProfitMod:CreateView(parent)
 	f.subProfitBtn = subProfitBtn
 	f.subSniperBtn = subSniperBtn
 	f.subLogBtn = subLogBtn
+	f.SelectSubMode = SelectSubMode
 	ns.SetTabButtonActive(subProfitBtn, true)
 	ns.SetTabButtonActive(subSniperBtn, false)
 	ns.SetTabButtonActive(subLogBtn, false)
@@ -335,6 +336,162 @@ function ProfitMod:CreateView(parent)
 	end)
 	cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
 	f.cbAutoScan = cbAutoScan
+
+	local snipeAddBox = CreateFrame("EditBox", nil, sniperTop, "InputBoxTemplate")
+	snipeAddBox:SetSize(184, 20)
+	snipeAddBox:SetPoint("TOPLEFT", 112, -24)
+	snipeAddBox:SetAutoFocus(false)
+	snipeAddBox.placeholder = snipeAddBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	snipeAddBox.placeholder:SetPoint("LEFT", 4, 0)
+	snipeAddBox.placeholder:SetText(L["SNIPE_ADD_PLACEHOLDER"])
+
+	local snipePriceBox = CreateFrame("EditBox", nil, sniperTop, "InputBoxTemplate")
+	snipePriceBox:SetSize(92, 20)
+	snipePriceBox:SetPoint("LEFT", snipeAddBox, "RIGHT", 8, 0)
+	snipePriceBox:SetAutoFocus(false)
+	snipePriceBox.placeholder = snipePriceBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	snipePriceBox.placeholder:SetPoint("LEFT", 4, 0)
+	snipePriceBox.placeholder:SetText(L["SNIPE_PRICE_PLACEHOLDER"])
+
+	local function PickCursorItemID()
+		if not (CursorHasItem and CursorHasItem()) then
+			return nil, nil
+		end
+		local itemID, displayName
+		if GetCursorInfo then
+			local kind, id, link = GetCursorInfo()
+			if kind == "item" and id and id > 0 then
+				itemID = id
+				displayName = link and link:match("|h%[(.-)%]|h")
+			end
+		end
+		if not itemID and C_Cursor and C_Cursor.GetCursorItem and C_Item and C_Item.GetItemID then
+			local loc = C_Cursor.GetCursorItem()
+			if loc and loc.IsValid and loc:IsValid() then
+				itemID = C_Item.GetItemID(loc)
+				displayName = C_Item.GetItemName and C_Item.GetItemName(loc)
+			end
+		end
+		if itemID and ClearCursor then
+			ClearCursor()
+		end
+		if itemID and (not displayName or displayName == "") and ns.GetItemDisplay then
+			local dName, _, _, _, loaded = ns:GetItemDisplay(itemID)
+			if loaded and dName then
+				displayName = dName
+			end
+		end
+		return itemID, displayName
+	end
+
+	local function FillItemIntoAddBox(itemID, displayName, focusPrice)
+		snipeAddBox.pickedItemID = itemID
+		local txt = (displayName and displayName ~= "") and displayName or tostring(itemID)
+		snipeAddBox:SetText(txt)
+		snipeAddBox.placeholder:SetShown(false)
+		if focusPrice then
+			snipePriceBox:SetFocus()
+			if snipePriceBox.HighlightText then
+				snipePriceBox:HighlightText()
+			end
+		end
+	end
+
+	local function SubmitManualSnipe()
+		if ns.AddManualSnipeTarget and ns:AddManualSnipeTarget(snipeAddBox:GetText(), snipePriceBox:GetText(), snipeAddBox.pickedItemID) then
+			snipeAddBox.pickedItemID = nil
+			snipeAddBox:SetText("")
+			snipePriceBox:SetText("")
+			snipeAddBox:ClearFocus()
+			snipePriceBox:ClearFocus()
+		end
+	end
+
+	snipeAddBox:SetScript("OnTextChanged", function(self, userInput)
+		self.placeholder:SetShown((self:GetText() or "") == "")
+		if userInput then
+			self.pickedItemID = nil
+		end
+	end)
+	snipeAddBox:SetScript("OnReceiveDrag", function()
+		local id, itemName = PickCursorItemID()
+		if id then
+			FillItemIntoAddBox(id, itemName, true)
+		end
+	end)
+	snipeAddBox:SetScript("OnMouseDown", function()
+		if CursorHasItem and CursorHasItem() then
+			local id, itemName = PickCursorItemID()
+			if id then
+				FillItemIntoAddBox(id, itemName, true)
+			end
+		end
+	end)
+	snipeAddBox:SetScript("OnTabPressed", function() snipePriceBox:SetFocus() end)
+	snipeAddBox:SetScript("OnEnterPressed", SubmitManualSnipe)
+	snipeAddBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	snipeAddBox:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["SNIPE_ADD_BTN"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["SNIPE_ADD_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:Show()
+	end)
+	snipeAddBox:SetScript("OnLeave", GameTooltip_Hide)
+
+	snipePriceBox:SetScript("OnTextChanged", function(self)
+		self.placeholder:SetShown((self:GetText() or "") == "")
+	end)
+	snipePriceBox:SetScript("OnTabPressed", function() snipeAddBox:SetFocus() end)
+	snipePriceBox:SetScript("OnEnterPressed", SubmitManualSnipe)
+	snipePriceBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+	snipePriceBox:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["SNIPE_PRICE_PLACEHOLDER"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["SNIPE_PRICE_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:Show()
+	end)
+	snipePriceBox:SetScript("OnLeave", GameTooltip_Hide)
+
+	local snipeAddBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
+	snipeAddBtn:SetSize(76, 20)
+	snipeAddBtn:SetPoint("LEFT", snipePriceBox, "RIGHT", 5, 0)
+	snipeAddBtn:SetText(L["SNIPE_ADD_BTN"])
+	local function TryAddCursorOrBox()
+		local id = PickCursorItemID()
+		if id and ns.AddManualSnipeTarget then
+			if ns:AddManualSnipeTarget(nil, snipePriceBox:GetText(), id) then
+				snipeAddBox.pickedItemID = nil
+				snipeAddBox:SetText("")
+				snipePriceBox:SetText("")
+			end
+			return
+		end
+		SubmitManualSnipe()
+	end
+	snipeAddBtn:SetScript("OnClick", TryAddCursorOrBox)
+	snipeAddBtn:SetScript("OnReceiveDrag", TryAddCursorOrBox)
+
+	f.snipeAddBox = snipeAddBox
+	f.snipePriceBox = snipePriceBox
+	ns.snipeAddBox = snipeAddBox
+
+	if not ns.snipeInsertLinkHooked and hooksecurefunc and ChatEdit_InsertLink then
+		ns.snipeInsertLinkHooked = true
+		hooksecurefunc("ChatEdit_InsertLink", function(link)
+			local box = ns.snipeAddBox
+			if type(link) == "string" and box and box:IsVisible() and box:HasFocus() then
+				local itemID = tonumber(link:match("item:(%d+)"))
+				if itemID and itemID > 0 then
+					box.pickedItemID = itemID
+					local txt = link:match("|h%[(.-)%]|h") or link
+					box:SetText(txt)
+					if box.SetCursorPosition then
+						box:SetCursorPosition(#txt)
+					end
+				end
+			end
+		end)
+	end
 
 	local logTop = CreateFrame("Frame", nil, f)
 	logTop:SetPoint("TOPLEFT", 8, -28)
@@ -605,7 +762,22 @@ function ProfitMod:CreateView(parent)
 			if not e then
 				return
 			end
-			if f.subMode == "sniper" or (f.subMode == "log" and not e.recipeID and e.itemID) then
+			if f.subMode == "sniper" then
+				if ns:HandleItemClick(e.itemID) then
+					return
+				end
+				if f.snipeAddBox and f.snipePriceBox and e.itemID then
+					local name, _, _, _, loaded = ns:GetItemDisplay(e.itemID)
+					f.snipeAddBox.pickedItemID = e.itemID
+					f.snipeAddBox:SetText((loaded and name) or tostring(e.itemID))
+					f.snipePriceBox:SetText(ns.FormatMoneyPlain and ns.FormatMoneyPlain(e.maxPrice) or "")
+					f.snipePriceBox:SetFocus()
+					if f.snipePriceBox.HighlightText then
+						f.snipePriceBox:HighlightText()
+					end
+				end
+				return
+			elseif f.subMode == "log" and not e.recipeID and e.itemID then
 				ns:HandleItemClick(e.itemID)
 				return
 			end
@@ -1032,6 +1204,7 @@ end
 
 function ProfitMod:OnFrameDestroyed()
 	self.view = nil
+	ns.snipeAddBox = nil
 end
 
 function ProfitMod:OnLanguageChanged()

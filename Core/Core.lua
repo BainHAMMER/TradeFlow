@@ -444,6 +444,15 @@ function ns:HandleItemClick(itemID, recipeID)
 	end
 	local name, _, _, itemLink = self:GetItemDisplay(targetItemID)
 	if IsModifiedClick("CHATLINK") or IsShiftKeyDown() then
+		if self.snipeAddBox and self.snipeAddBox:IsVisible() and self.snipeAddBox:HasFocus() then
+			local label = (name and name ~= "" and not name:find("#%d+")) and name or tostring(targetItemID)
+			self.snipeAddBox.pickedItemID = targetItemID
+			self.snipeAddBox:SetText(label)
+			if self.snipeAddBox.SetCursorPosition then
+				self.snipeAddBox:SetCursorPosition(#label)
+			end
+			return true
+		end
 		local editBox = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow()
 		if editBox and itemLink then
 			ChatEdit_InsertLink(itemLink)
@@ -1678,14 +1687,58 @@ end)
 SLASH_TRADEFLOW1 = "/tradeflow"
 SLASH_TRADEFLOW2 = "/tf"
 SlashCmdList.TRADEFLOW = function(msg)
-	msg = strtrim(msg or ""):lower()
-	if msg == "lang" then
+	local rawMsg = strtrim(msg or "")
+	local low = rawMsg:lower()
+	if low == "lang" then
 		ns:ToggleLanguage()
-	elseif msg == "blizz" or msg == "blizzard" then
+	elseif low == "blizz" or low == "blizzard" then
 		ns:OpenBlizzardProfessions()
-	elseif msg == "log" or msg == "errors" or msg == "debug" then
+	elseif low == "log" or low == "errors" or low == "debug" then
 		if ns.ShowDebugLogWindow then
 			ns:ShowDebugLogWindow()
+		end
+	elseif low == "snipe" or low:sub(1, 6) == "snipe " then
+		local rest = strtrim(rawMsg:sub(7))
+		if rest == "" then
+			if ns.ShowMainWindow then
+				ns:ShowMainWindow()
+			end
+			if ns.mainFrame and ns.mainFrame.SelectTopTab then
+				ns.mainFrame.SelectTopTab("profit")
+			end
+			local mod = ns.modules and ns.modules.byId and ns.modules.byId["profit"]
+			if mod and mod.view and mod.view.SelectSubMode then
+				mod.view.SelectSubMode("sniper")
+			end
+			if ns.Print then
+				ns:Print(L["SNIPE_CMD_USAGE"])
+			end
+		elseif ns.AddManualSnipeTarget then
+			local itemPart, pricePart = rest:match("^(|c%x+|Hitem:%d+.-|h%[.-%]|h|r)%s*(.*)$")
+			if not itemPart then
+				itemPart, pricePart = rest:match("^(|Hitem:%d+.-|h%[.-%]|h)%s*(.*)$")
+			end
+			if not itemPart then
+				itemPart, pricePart = rest:match("^(%d+)%s*(.*)$")
+			end
+			if not itemPart then
+				local words = {}
+				for w in rest:gmatch("%S+") do
+					words[#words + 1] = w
+				end
+				local splitIdx = #words
+				while splitIdx >= 2 and ns.ParseMoneyInput and ns.ParseMoneyInput(words[splitIdx]) do
+					splitIdx = splitIdx - 1
+				end
+				if splitIdx < #words then
+					local candidatePrice = table.concat(words, " ", splitIdx + 1)
+					if ns.ParseMoneyInput and ns.ParseMoneyInput(candidatePrice) then
+						itemPart = table.concat(words, " ", 1, splitIdx)
+						pricePart = candidatePrice
+					end
+				end
+			end
+			ns:AddManualSnipeTarget(itemPart or rest, pricePart)
 		end
 	else
 		if ns.ToggleMainWindow then
