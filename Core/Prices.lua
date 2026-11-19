@@ -226,6 +226,8 @@ function ns.FormatDisenchantCount(y)
 	return string.format("x%d", y.min or math.floor((y.avg or 1) + 0.5))
 end
 
+local deBuddyCache = {}
+
 function ns:GetItemDisenchantInfo(itemID)
 	if self.db and self.db.options and self.db.options.includeDisenchant == false then
 		return nil
@@ -248,11 +250,20 @@ function ns:GetItemDisenchantInfo(itemID)
 	local yields = nil
 	local deApi = _G.DisenchantBuddy and _G.DisenchantBuddy.API and _G.DisenchantBuddy.API.v1
 	if deApi and type(deApi.GetDisenchantResults) == "function" then
-		local ok, dbResults = pcall(deApi.GetDisenchantResults, ADDON_NAME, itemLink or itemID)
-		if ok then
-			yields = ConvertDisenchantBuddyResults(dbResults)
-			if not yields then
+		local cachedDe = deBuddyCache[itemID]
+		if cachedDe ~= nil then
+			if cachedDe == false then
 				return nil
+			end
+			yields = cachedDe
+		else
+			local ok, dbResults = pcall(deApi.GetDisenchantResults, ADDON_NAME, itemLink or itemID)
+			if ok then
+				yields = ConvertDisenchantBuddyResults(dbResults)
+				deBuddyCache[itemID] = yields or false
+				if not yields then
+					return nil
+				end
 			end
 		end
 	end
@@ -544,6 +555,86 @@ function ns:GetRecipeEconomy(recipeID)
 end
 
 local MAX_AH_TIERS = 25
+local AH_STOCK_MAX_AGE = 7 * 86400
+local trackedAhItems = nil
+
+local function EnsureTrackedAhItems()
+	if trackedAhItems then
+		return trackedAhItems
+	end
+	trackedAhItems = {}
+	for _, rec in pairs(ns.RecipeData or {}) do
+		if rec.reagents then
+			for _, r in ipairs(rec.reagents) do
+				if r.itemID then
+					trackedAhItems[r.itemID] = true
+				end
+			end
+		end
+		if type(rec.output) == "table" and rec.output.itemID then
+			trackedAhItems[rec.output.itemID] = true
+		end
+	end
+	for _, sc in pairs(ns.RecipeScrolls or {}) do
+		if sc and sc[1] then
+			trackedAhItems[sc[1]] = true
+		end
+	end
+	for _, byQual in pairs(DE_TABLE) do
+		for _, rows in pairs(byQual) do
+			for _, r in ipairs(rows) do
+				for x = 5, #r, 3 do
+					if r[x] then
+						trackedAhItems[r[x]] = true
+					end
+				end
+			end
+		end
+	end
+	return trackedAhItems
+end
+
+local function IsTrackedAhItem(itemID)
+	if not (itemID and itemID > 0) then
+		return false
+	end
+	local map = EnsureTrackedAhItems()
+	if map[itemID] then
+		return true
+	end
+	local snipes = ns.GetSnipeTargets and ns:GetSnipeTargets()
+	return snipes ~= nil and snipes[itemID] ~= nil
+end
+
+local function PruneAuctionStock()
+	local stock = ns.realmDB and ns.realmDB.ahStock
+	if not stock then
+		return
+	end
+	local now = time and time() or 0
+	for itemID, entry in pairs(stock) do
+		local stale = now > 0 and entry and entry.ts and (now - entry.ts) > AH_STOCK_MAX_AGE
+		if stale or not IsTrackedAhItem(itemID) then
+			stock[itemID] = nil
+		end
+	end
+end
+
+local pendingPriceInvalidation = false
+local function SchedulePriceInvalidation()
+	if pendingPriceInvalidation then
+		return
+	end
+	if C_Timer and C_Timer.After then
+		pendingPriceInvalidation = true
+		C_Timer.After(0.15, function()
+			pendingPriceInvalidation = false
+			ns:InvalidatePrices()
+		end)
+	else
+		ns:InvalidatePrices()
+	end
+end
 
 local function BuildAuctionTiers(qtyByPrice)
 	local prices = {}
@@ -571,16 +662,23 @@ local function RecordAuctionStock(itemID, minPrice, qtyAtMin, totalQty, tiers, i
 	if not (ns.realmDB and itemID and itemID > 0 and minPrice and minPrice > 0) then
 		return
 	end
+	if not IsTrackedAhItem(itemID) then
+		return
+	end
 	ns.realmDB.ahStock = ns.realmDB.ahStock or {}
-	ns.realmDB.ahStock[itemID] = {
-		price = minPrice,
-		qty = qtyAtMin or totalQty or 0,
-		total = totalQty or qtyAtMin or 0,
-		tiers = tiers,
-		isAggregate = isAggregate and true or false,
-		ts = time and time() or 0,
-	}
-	if ns.NotifyModules then
+	local slot = ns.realmDB.ahStock[itemID]
+	if not slot then
+		slot = {}
+		ns.realmDB.ahStock[itemID] = slot
+	end
+	slot.price = minPrice
+	slot.qty = qtyAtMin or totalQty or 0
+	slot.total = totalQty or qtyAtMin or 0
+	slot.tiers = tiers
+	slot.isAggregate = isAggregate and true or false
+	slot.ts = time and time() or 0
+	local snipes = ns.GetSnipeTargets and ns:GetSnipeTargets()
+	if snipes and snipes[itemID] and ns.NotifyModules then
 		ns:NotifyModules("OnAuctionStockUpdated", itemID)
 	end
 end
@@ -655,10 +753,11 @@ end
 
 priceFrame:SetScript("OnEvent", function(_, event, arg1)
 	if event == "PLAYER_LOGIN" then
+		PruneAuctionStock()
 		local api = Auctionator and Auctionator.API and Auctionator.API.v1
 		if api and api.RegisterForDBUpdate then
 			pcall(api.RegisterForDBUpdate, ADDON_NAME, function()
-				ns:InvalidatePrices()
+				SchedulePriceInvalidation()
 			end)
 		end
 		if Auctionator and Auctionator.Database and Auctionator.Database.ProcessScan and hooksecurefunc and not ns.atrScanHooked then
@@ -667,9 +766,10 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				if type(priceInfo) ~= "table" then
 					return
 				end
+				local now = time and time() or 0
 				for dbKey, list in pairs(priceInfo) do
 					local itemID = tonumber(dbKey) or tonumber(tostring(dbKey):match("^(%d+)$"))
-					if itemID and type(list) == "table" and #list > 0 then
+					if itemID and IsTrackedAhItem(itemID) and type(list) == "table" and #list > 0 then
 						local qtyByPrice = {}
 						for _, e in ipairs(list) do
 							local p = e and tonumber(e.price)
@@ -682,7 +782,6 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 						if minP and total > 0 then
 							-- Сводный скан Auctionator (ProcessScan) часто отдаёт 1 запись со всем остатком по minPrice
 							local isAgg = (#tiers <= 1)
-							local now = time and time() or 0
 							local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
 							local keepDetailed = isAgg and prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 120
 							if not keepDetailed then
@@ -695,7 +794,10 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 		end
 	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" and arg1 and C_AuctionHouse and C_AuctionHouse.GetNumCommoditySearchResults then
 		local itemID = tonumber(arg1)
-		local n = itemID and C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
+		if not (itemID and IsTrackedAhItem(itemID)) then
+			return
+		end
+		local n = C_AuctionHouse.GetNumCommoditySearchResults(itemID) or 0
 		if n and n > 0 and C_AuctionHouse.GetCommoditySearchResultInfo then
 			local qtyByPrice = {}
 			for i = 1, math.min(n, 200) do
@@ -707,11 +809,12 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 			local tiers, minP, qtyMin, total = BuildAuctionTiers(qtyByPrice)
 			if minP and total > 0 then
 				RecordAuctionStock(itemID, minP, qtyMin, total, tiers, false)
-				ns:InvalidatePrices()
+				SchedulePriceInvalidation()
 			end
 		elseif itemID and ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID] then
 			ns.realmDB.ahStock[itemID] = nil
-			if ns.NotifyModules then
+			local snipes = ns.GetSnipeTargets and ns:GetSnipeTargets()
+			if snipes and snipes[itemID] and ns.NotifyModules then
 				ns:NotifyModules("OnAuctionStockUpdated", itemID)
 			end
 		end
@@ -721,7 +824,7 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 			local now = time and time() or 0
 			for _, r in ipairs(results) do
 				local itemID = r and r.itemKey and r.itemKey.itemID
-				if itemID and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
+				if itemID and IsTrackedAhItem(itemID) and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
 					local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
 					local keepTiers = prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 60
 					if not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then

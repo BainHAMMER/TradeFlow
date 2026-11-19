@@ -276,6 +276,16 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	end
 
 	-- Предварительно индексируем активных кандидатов по очкам навыка [startSkill .. goalSkill-1]
+	-- и отмечаем только те outputItemID, которые реально используются как реагенты другим кандидатом
+	local consumedByAny = {}
+	for _, c in ipairs(candidates) do
+		for _, b in ipairs(c.reagents or {}) do
+			if b.itemID then
+				consumedByAny[b.itemID] = true
+			end
+		end
+	end
+
 	local recipesAtSkill = {}
 	local fallbackAtSkill = {}
 	for _, c in ipairs(candidates) do
@@ -481,15 +491,18 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					newAhBought[b.itemID] = (newAhBought[b.itemID] or 0) + toBuy
 				end
 			end
-			if cand.outputItemID and cand.outputItemID > 0 then
+			if cand.outputItemID and consumedByAny[cand.outputItemID] then
 				if not prodCopied then
 					newProduced = CopyMap(prevState.produced or {})
 					prodCopied = true
 				end
 				local madeQty = (cand.numMade or 1) * tr.craftsPerPoint
 				newProduced[cand.outputItemID] = (newProduced[cand.outputItemID] or 0) + madeQty
-				newProdReturn = CopyMap(prevState.prodReturn or {})
-				newProdReturn[cand.outputItemID] = (cand.unitReturn or 0) / (cand.numMade or 1)
+				local unitRet = (cand.unitReturn or 0) / (cand.numMade or 1)
+				if (newProdReturn and newProdReturn[cand.outputItemID]) ~= unitRet then
+					newProdReturn = CopyMap(prevState.prodReturn or {})
+					newProdReturn[cand.outputItemID] = unitRet
+				end
 			end
 			local newLearned = prevState.learned
 			if tr.learnFee > 0 then

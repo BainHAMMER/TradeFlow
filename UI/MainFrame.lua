@@ -1696,8 +1696,37 @@ function ns:RefreshMainWindow()
 	self:RefreshQueueAndShoppingView()
 end
 
+function ns:RefreshRankBarOnly()
+	local f = self.mainFrame
+	if not (f and f:IsShown() and f.rankBar) then
+		return
+	end
+	local curProf = self.currentSkillLine and self.playerProfessions[self.currentSkillLine]
+	local rank = (curProf and curProf.rank) or 1
+	local maxRank = (curProf and curProf.maxRank) or 75
+	local profName = self:GetProfessionName(self.currentSkillLine or 171)
+	f.rankBar:SetMinMaxValues(0, math.max(1, maxRank))
+	f.rankBar:SetValue(rank)
+	f.rankBar.text:SetText(string.format("%s  %d / %d", profName, rank, maxRank))
+end
+
+local pendingVisibleRefresh = false
 function ns:RefreshVisibleUI()
-	if self.mainFrame and self.mainFrame:IsShown() then
+	if not (self.mainFrame and self.mainFrame:IsShown()) then
+		return
+	end
+	if pendingVisibleRefresh then
+		return
+	end
+	if C_Timer and C_Timer.After then
+		pendingVisibleRefresh = true
+		C_Timer.After(0.05, function()
+			pendingVisibleRefresh = false
+			if ns.mainFrame and ns.mainFrame:IsShown() then
+				ns:RefreshMainWindow()
+			end
+		end)
+	else
 		self:RefreshMainWindow()
 	end
 end

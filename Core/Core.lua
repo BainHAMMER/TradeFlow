@@ -1440,8 +1440,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "SKILL_LINES_CHANGED" or event == "CHAT_MSG_SKILL" or event == "TRADE_SKILL_UPDATE" then
 		ns:ScanPlayerProfessions()
 		if ns.mainFrame and ns.mainFrame:IsShown() then
-			if ns.RefreshVisibleUI then
-				ns:RefreshVisibleUI()
+			if ns.RefreshRankBarOnly then
+				ns:RefreshRankBarOnly()
 			end
 			ScheduleTradeSkillRefresh()
 		end

@@ -358,13 +358,37 @@ function ns:RefreshRouteView()
 	f.priorityBtn:SetText(prio == "profit" and L["PLANNER_PRIORITY_PROFIT"] or L["PLANNER_PRIORITY_SPEED"])
 
 	local skipCount = 0
-	for _ in pairs((self.charDB and self.charDB.skippedRecipes) or {}) do
+	local skipParts = {}
+	for rid in pairs((self.charDB and self.charDB.skippedRecipes) or {}) do
 		skipCount = skipCount + 1
+		skipParts[skipCount] = tostring(rid)
+	end
+	if skipCount > 1 then
+		table.sort(skipParts)
 	end
 	f.resetSkipsBtn:SetText(string.format(L["PLANNER_RESET_SKIPS"], skipCount))
 	f.resetSkipsBtn:SetShown(skipCount > 0)
 
-	local route = self:BuildLevelingRoute(sl, curRank, target)
+	local opts = (self.db and self.db.options) or {}
+	local routeKey = table.concat({
+		tostring(sl or 0),
+		tostring(curRank),
+		tostring(maxCap),
+		tostring(target),
+		tostring(self.GetPriceRevision and self:GetPriceRevision() or 0),
+		tostring(self.invRev or 0),
+		tostring(opts.includeTrainerInRoute ~= false),
+		tostring(opts.deductVendorInRoute ~= false),
+		tostring(prio),
+		tostring(opts.checkAuctionStock == true),
+		table.concat(skipParts, ","),
+	}, "|")
+	local route = f._cachedRoute
+	if f._cachedRouteKey ~= routeKey or not route then
+		route = self:BuildLevelingRoute(sl, curRank, target)
+		f._cachedRouteKey = routeKey
+		f._cachedRoute = route
+	end
 	f.steps = route.steps or {}
 	local maxOff = math.max(0, #f.steps - VISIBLE_ROWS)
 	if f.offset > maxOff then
