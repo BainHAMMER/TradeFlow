@@ -160,10 +160,14 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 
 	local opts = (self.db and self.db.options) or {}
 	local includeTrainer = opts.includeTrainerInRoute ~= false
+	local includeVendor = opts.includeVendorRecipesInRoute ~= false
+	local includeOther = opts.includeOtherRecipesInRoute == true
 	local deductVendor = opts.deductVendorInRoute ~= false
 	local priority = opts.routePriority or "speed"
 	local checkAhStock = opts.checkAuctionStock == true
 	local skipped = (self.charDB and self.charDB.skippedRecipes) or {}
+	local rawFaction = UnitFactionGroup and UnitFactionGroup("player") or nil
+	local playerFaction = (rawFaction == "Alliance" and "A") or (rawFaction == "Horde" and "H") or nil
 
 	local candidates = {}
 	local recipeList = self.RecipesBySkill and self.RecipesBySkill[skillLine] or {}
@@ -173,12 +177,28 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
 			local scroll = self.RecipeScrolls and self.RecipeScrolls[recipeID]
 			local scrollItemID = scroll and scroll[1] or nil
-			local scrollPrice = (not learned and not isTrainer and scrollItemID) and self:GetAuctionPrice(scrollItemID) or nil
+			local vendorRec = (not learned and not isTrainer) and self.VendorRecipeScrolls and self.VendorRecipeScrolls[recipeID] or nil
+			local isVendorScroll = false
+			local vendorScrollPrice = nil
 			local th = self:GetRecipeThresholds(recipeID)
 			-- Базовые стартовые рецепты (оранжевые с 1, без свитка и тренера) тоже доступны
 			local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
-			local hasKnownAcquisition = learned or isBasic or (includeTrainer and (isTrainer or (scrollPrice and scrollPrice > 0)))
-			local isFallbackScroll = (not hasKnownAcquisition) and includeTrainer and (scrollItemID ~= nil)
+			if vendorRec and not isBasic then
+				local vFac = vendorRec[3]
+				if not vFac or vFac == "" or (playerFaction and vFac == playerFaction) then
+					isVendorScroll = true
+					vendorScrollPrice = vendorRec[2]
+					scrollItemID = scrollItemID or vendorRec[1]
+				end
+			end
+			local isOtherScroll = (not learned and not isBasic and not isTrainer and not isVendorScroll) and (scrollItemID ~= nil)
+			local scrollPrice = (isOtherScroll and includeOther) and self:GetAuctionPrice(scrollItemID) or nil
+			local hasKnownAcquisition = learned
+				or isBasic
+				or (includeTrainer and isTrainer)
+				or (includeVendor and isVendorScroll)
+				or (includeOther and isOtherScroll and scrollPrice and scrollPrice > 0)
+			local isFallbackScroll = (not hasKnownAcquisition) and includeOther and isOtherScroll
 			if hasKnownAcquisition or isFallbackScroll then
 				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
 				if craftCost then
@@ -191,6 +211,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					if not learned and not isBasic then
 						if isTrainer then
 							acquireFee = trainerFee or 0
+						elseif isVendorScroll then
+							acquireFee = vendorScrollPrice or 0
 						elseif scrollPrice and scrollPrice > 0 then
 							acquireFee = scrollPrice
 						end
@@ -201,6 +223,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						reqSkill = learned and 1 or (reqSkill or 1),
 						trainerFee = acquireFee,
 						scrollItemID = (not learned and not isBasic and not isTrainer) and scrollItemID or nil,
+						isVendorScroll = isVendorScroll,
 						isFallback = isFallbackScroll,
 						th = th,
 						craftCost = craftCost,
@@ -579,6 +602,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					reagents = c.reagents,
 					learnFee = p.learnFee,
 					scrollItemID = c.scrollItemID,
+					isVendorScroll = c.isVendorScroll,
 					reqSkill = c.reqSkill,
 				}
 			end

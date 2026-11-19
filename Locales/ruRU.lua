@@ -150,7 +150,13 @@ ns.Locales.ru = {
 
 	-- Калькулятор прокачки
 	["PLANNER_TARGET"] = "Цель:",
-	["PLANNER_INCLUDE_TRAINER"] = "Рецепты у тренера",
+	["PLANNER_SOURCES_LABEL"] = "Рецепты:",
+	["PLANNER_INCLUDE_TRAINER"] = "У тренера",
+	["PLANNER_INCLUDE_TRAINER_TIP"] = "Учитывать неизученные рецепты, которые можно выучить у учителя профессии.",
+	["PLANNER_INCLUDE_VENDOR"] = "У вендора (в наличии)",
+	["PLANNER_INCLUDE_VENDOR_TIP"] = "Учитывать неизученные рецепты, которых нет у тренера, но их свиток всегда есть в наличии у торговца (без лимита, репутации и праздников).",
+	["PLANNER_INCLUDE_OTHER"] = "Прочие",
+	["PLANNER_INCLUDE_OTHER_TIP"] = "Учитывать остальные рецепты со свитками: ограниченный товар у торговцев, добыча, задания, репутация и аукцион.",
 	["PLANNER_PRIORITY_SPEED"] = "Приоритет: Скорость",
 	["PLANNER_PRIORITY_PROFIT"] = "Приоритет: Прибыль",
 	["PLANNER_LOW_STOCK"] = "|cffff8800Мало на аукционе|r",
@@ -165,6 +171,8 @@ ns.Locales.ru = {
 	["PLANNER_STEP_BOOK"] = "Прочитать книгу: %s (навык %d) - %s",
 	["PLANNER_STEP_QUEST"] = "Задание на ранг: %s (навык %d)",
 	["PLANNER_STEP_LEARN"] = "Выучить у тренера (навык %d, %s)",
+	["PLANNER_STEP_VENDOR_SCROLL"] = "Вендор (навык %d, %s)",
+	["PLANNER_STEP_VENDOR_SCROLL_FREE"] = "Вендор (навык %d)",
 	["PLANNER_STEP_SCROLL_AH"] = "Рецепт/свиток (навык %d, %s)",
 	["PLANNER_STEP_SCROLL"] = "Рецепт/свиток (навык %d)",
 	["PLANNER_INCOMPLETE"] = "до %d/%d - нет доступных рецептов",

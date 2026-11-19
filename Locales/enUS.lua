@@ -150,7 +150,13 @@ ns.Locales.en = {
 
 	-- Leveling Calculator
 	["PLANNER_TARGET"] = "Target:",
-	["PLANNER_INCLUDE_TRAINER"] = "Trainer recipes",
+	["PLANNER_SOURCES_LABEL"] = "Recipes:",
+	["PLANNER_INCLUDE_TRAINER"] = "Trainer",
+	["PLANNER_INCLUDE_TRAINER_TIP"] = "Include unlearned recipes taught by profession trainers.",
+	["PLANNER_INCLUDE_VENDOR"] = "Vendor (in stock)",
+	["PLANNER_INCLUDE_VENDOR_TIP"] = "Include non-trainer recipes whose scroll is always in stock at a friendly vendor (no limited stock, reputation, or seasonal gates).",
+	["PLANNER_INCLUDE_OTHER"] = "Other",
+	["PLANNER_INCLUDE_OTHER_TIP"] = "Include all other recipe scrolls: limited-stock vendors, drops, quests, reputation, and Auction House.",
 	["PLANNER_PRIORITY_SPEED"] = "Priority: Speed",
 	["PLANNER_PRIORITY_PROFIT"] = "Priority: Profit",
 	["PLANNER_LOW_STOCK"] = "|cffff8800Low AH stock|r",
@@ -165,6 +171,8 @@ ns.Locales.en = {
 	["PLANNER_STEP_BOOK"] = "Read book: %s (skill %d) - %s",
 	["PLANNER_STEP_QUEST"] = "Rank quest: %s (skill %d)",
 	["PLANNER_STEP_LEARN"] = "Learn at trainer (skill %d, %s)",
+	["PLANNER_STEP_VENDOR_SCROLL"] = "Vendor (skill %d, %s)",
+	["PLANNER_STEP_VENDOR_SCROLL_FREE"] = "Vendor (skill %d)",
 	["PLANNER_STEP_SCROLL_AH"] = "Recipe scroll (skill %d, %s)",
 	["PLANNER_STEP_SCROLL"] = "Recipe scroll (skill %d)",
 	["PLANNER_INCOMPLETE"] = "reached %d/%d - no priced recipes",

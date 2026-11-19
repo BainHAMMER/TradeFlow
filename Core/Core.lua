@@ -1352,6 +1352,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		ns.db.options = ns.db.options or {
 			autoSubcrafts = true,
 			includeTrainerInRoute = true,
+			includeVendorRecipesInRoute = true,
+			includeOtherRecipesInRoute = false,
 			deductVendorInRoute = true,
 			includeDisenchant = true,
 			tooltipExtraInfo = false,

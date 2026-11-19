@@ -16,7 +16,7 @@ function ns:CreateRouteView(parent)
 	local top = CreateFrame("Frame", nil, f)
 	top:SetPoint("TOPLEFT", 8, -6)
 	top:SetPoint("TOPRIGHT", -8, -6)
-	top:SetHeight(48)
+	top:SetHeight(70)
 
 	local targetLbl = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	targetLbl:SetPoint("TOPLEFT", 2, -4)
@@ -69,28 +69,10 @@ function ns:CreateRouteView(parent)
 		prevBtn = b
 	end
 
-	-- Галочки опций расчёта — во 2-й строке слева
-	local function MakeCheck(label, optKey, xOff, hitW)
-		local cb = CreateFrame("CheckButton", nil, top, "UICheckButtonTemplate")
-		cb:SetSize(20, 20)
-		cb:SetPoint("TOPLEFT", xOff, -26)
-		cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		cb.text:SetPoint("LEFT", cb, "RIGHT", 2, 0)
-		cb.text:SetText(label)
-		cb:SetHitRectInsets(0, -(hitW or 115), 0, 0)
-		cb:SetScript("OnClick", function(self)
-			ns.db.options[optKey] = self:GetChecked() and true or false
-			ns:RefreshRouteView()
-		end)
-		return cb
-	end
-
-	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", 0, 115)
-
-	-- Переключатель приоритета маршрута: Скорость (оранжевые/гарантированные) <-> Прибыль (дешевле/выгоднее)
+	-- Переключатель приоритета маршрута во 2-й строке слева: Скорость <-> Прибыль
 	local priorityBtn = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
 	priorityBtn:SetSize(148, 20)
-	priorityBtn:SetPoint("TOPLEFT", 134, -26)
+	priorityBtn:SetPoint("TOPLEFT", 2, -25)
 	priorityBtn:SetScript("OnClick", function()
 		if ns.db and ns.db.options then
 			local cur = ns.db.options.routePriority or "speed"
@@ -99,6 +81,45 @@ function ns:CreateRouteView(parent)
 		ns:RefreshRouteView()
 	end)
 	f.priorityBtn = priorityBtn
+
+	-- Источники неизученных рецептов в 3-й строке: Тренер / Вендор (всегда в наличии) / Прочие
+	local sourcesLbl = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	sourcesLbl:SetPoint("TOPLEFT", 2, -53)
+	sourcesLbl:SetText(L["PLANNER_SOURCES_LABEL"])
+
+	local function MakeCheck(label, optKey, anchorTo, xGap, fallbackHitW, tipText)
+		local cb = CreateFrame("CheckButton", nil, top, "UICheckButtonTemplate")
+		cb:SetSize(20, 20)
+		cb:SetPoint("LEFT", anchorTo, "RIGHT", xGap, 0)
+		cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		cb.text:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+		cb.text:SetText(label)
+		local w = math.ceil((cb.text.GetStringWidth and cb.text:GetStringWidth()) or 0)
+		if w < 20 then
+			w = fallbackHitW or 60
+		end
+		cb:SetHitRectInsets(0, -(w + 4), 0, 0)
+		cb:SetScript("OnClick", function(self)
+			if ns.db and ns.db.options then
+				ns.db.options[optKey] = self:GetChecked() and true or false
+			end
+			ns:RefreshRouteView()
+		end)
+		if tipText then
+			cb:SetScript("OnEnter", function(self)
+				GameTooltip:SetOwner(self, "ANCHOR_TOP")
+				GameTooltip:SetText(label, 1, 0.82, 0)
+				GameTooltip:AddLine(tipText, 1, 1, 1, true)
+				GameTooltip:Show()
+			end)
+			cb:SetScript("OnLeave", GameTooltip_Hide)
+		end
+		return cb
+	end
+
+	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", sourcesLbl, 6, 62, L["PLANNER_INCLUDE_TRAINER_TIP"])
+	f.cbVendorScrolls = MakeCheck(L["PLANNER_INCLUDE_VENDOR"], "includeVendorRecipesInRoute", f.cbTrainer.text, 10, 140, L["PLANNER_INCLUDE_VENDOR_TIP"])
+	f.cbOtherRecipes = MakeCheck(L["PLANNER_INCLUDE_OTHER"], "includeOtherRecipesInRoute", f.cbVendorScrolls.text, 10, 52, L["PLANNER_INCLUDE_OTHER_TIP"])
 
 	-- Кнопка сброса скрытых (исключённых) рецептов (размещена по центру внизу, чтобы не теснить переключатель режима)
 	local resetSkips = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -118,12 +139,12 @@ function ns:CreateRouteView(parent)
 	f.summaryText:SetJustifyH("RIGHT")
 
 	f.returnText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	f.returnText:SetPoint("TOPRIGHT", -6, -22)
+	f.returnText:SetPoint("TOPRIGHT", -6, -24)
 	f.returnText:SetJustifyH("RIGHT")
 
 	-- Список шагов маршрута
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
-	listBox:SetPoint("TOPLEFT", 8, -56)
+	listBox:SetPoint("TOPLEFT", 8, -78)
 	listBox:SetPoint("BOTTOMRIGHT", -8, 34)
 	listBox:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -301,7 +322,11 @@ function ns:RenderRouteRows()
 				row.icon:SetTexture(icon)
 				row.title:SetText(dc.hex .. name .. "|r")
 				local subText = string.format(L["PLANNER_STEP_CRAFT"], st.fromSkill, st.toSkill, st.crafts or 1, st.avgChance or 100)
-				if st.scrollItemID and st.learnFee and st.learnFee > 0 then
+				if st.isVendorScroll and st.learnFee and st.learnFee > 0 then
+					subText = subText .. " | |cff66d9ff" .. string.format(L["PLANNER_STEP_VENDOR_SCROLL"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
+				elseif st.isVendorScroll then
+					subText = subText .. " | |cff66d9ff" .. string.format(L["PLANNER_STEP_VENDOR_SCROLL_FREE"], st.reqSkill or 1) .. "|r"
+				elseif st.scrollItemID and st.learnFee and st.learnFee > 0 then
 					subText = subText .. " | |cffffd100" .. string.format(L["PLANNER_STEP_SCROLL_AH"], st.reqSkill or 1, ns.FormatMoney(st.learnFee)) .. "|r"
 				elseif st.scrollItemID then
 					subText = subText .. " | |cff88ccff" .. string.format(L["PLANNER_STEP_SCROLL"], st.reqSkill or 1) .. "|r"
@@ -353,8 +378,11 @@ function ns:RefreshRouteView()
 	if not f.targetBox:HasFocus() then
 		f.targetBox:SetText(tostring(target))
 	end
-	f.cbTrainer:SetChecked(self.db.options.includeTrainerInRoute ~= false)
-	local prio = (self.db and self.db.options and self.db.options.routePriority) or "speed"
+	local opts = (self.db and self.db.options) or {}
+	f.cbTrainer:SetChecked(opts.includeTrainerInRoute ~= false)
+	f.cbVendorScrolls:SetChecked(opts.includeVendorRecipesInRoute ~= false)
+	f.cbOtherRecipes:SetChecked(opts.includeOtherRecipesInRoute == true)
+	local prio = opts.routePriority or "speed"
 	f.priorityBtn:SetText(prio == "profit" and L["PLANNER_PRIORITY_PROFIT"] or L["PLANNER_PRIORITY_SPEED"])
 
 	local skipCount = 0
@@ -369,7 +397,6 @@ function ns:RefreshRouteView()
 	f.resetSkipsBtn:SetText(string.format(L["PLANNER_RESET_SKIPS"], skipCount))
 	f.resetSkipsBtn:SetShown(skipCount > 0)
 
-	local opts = (self.db and self.db.options) or {}
 	local routeKey = table.concat({
 		tostring(sl or 0),
 		tostring(curRank),
@@ -378,6 +405,9 @@ function ns:RefreshRouteView()
 		tostring(self.GetPriceRevision and self:GetPriceRevision() or 0),
 		tostring(self.invRev or 0),
 		tostring(opts.includeTrainerInRoute ~= false),
+		tostring(opts.includeVendorRecipesInRoute ~= false),
+		tostring(opts.includeOtherRecipesInRoute == true),
+		tostring(UnitFactionGroup and UnitFactionGroup("player") or ""),
 		tostring(opts.deductVendorInRoute ~= false),
 		tostring(prio),
 		tostring(opts.checkAuctionStock == true),
