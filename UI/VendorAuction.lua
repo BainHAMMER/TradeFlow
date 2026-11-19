@@ -39,6 +39,9 @@ function ns:SyncAuctionatorShoppingList(silent)
 		if item.source ~= "vendor" and buyQty > 0 then
 			ahItems[#ahItems + 1] = item
 			sigParts[#sigParts + 1] = item.itemID .. ":" .. buyQty
+			if self.TrackTradeFlowAhItem then
+				self:TrackTradeFlowAhItem(item.itemID)
+			end
 		end
 	end
 
@@ -236,9 +239,16 @@ function ns:BuyVendorShoppingList(onlyItemID)
 	if #matches == 0 then
 		return
 	end
+	local beforeMoney = (GetMoney and GetMoney()) or 0
+	local attempted = {}
 	local maxStackFn = GetMerchantItemMaxStack
 	for _, m in ipairs(matches) do
 		if not onlyItemID or m.itemID == onlyItemID then
+			attempted[#attempted + 1] = {
+				itemID = m.itemID,
+				units = m.batches * m.stackSize,
+				cost = m.cost or 0,
+			}
 			if m.stackSize > 1 then
 				-- Для предметов, продающихся пачками (напр. по 5 шт), BuyMerchantItem(slot) без аргумента покупает 1 пачку
 				for _ = 1, m.batches do
@@ -260,6 +270,20 @@ function ns:BuyVendorShoppingList(onlyItemID)
 	end
 	if C_Timer and C_Timer.After then
 		C_Timer.After(0.3, function()
+			local afterMoney = (GetMoney and GetMoney()) or beforeMoney
+			local remSpent = math.max(0, beforeMoney - afterMoney)
+			if remSpent > 0 and ns.RecordTradeFlowPurchase then
+				for _, a in ipairs(attempted) do
+					if remSpent <= 0 then
+						break
+					end
+					if (a.cost or 0) > 0 and (a.units or 0) > 0 and (a.cost <= remSpent + 1) then
+						local amt = math.min(a.cost, remSpent)
+						remSpent = remSpent - amt
+						ns:RecordTradeFlowPurchase("vendor_buy", a.itemID, a.units, amt)
+					end
+				end
+			end
 			ns:ScanBagsNow()
 			ns:RefreshVendorBar()
 			if ns.RefreshQueueAndShoppingView then
@@ -895,9 +919,12 @@ function ns:LearnQueuedTrainerRecipes()
 	if #matches == 0 or not BuyTrainerService then
 		return
 	end
+	local beforeMoney = (GetMoney and GetMoney()) or 0
+	local attempted = {}
 	-- Покупаем с конца списка, чтобы скрытие выученных строк не сдвигало индексы оставшихся
 	for i = #matches, 1, -1 do
 		local m = matches[i]
+		attempted[#attempted + 1] = m
 		pcall(BuyTrainerService, m.index)
 		self:Print(string.format(L["TRAINER_LEARNED_MSG"], m.name or tostring(m.recipeID)))
 	end
@@ -905,6 +932,20 @@ function ns:LearnQueuedTrainerRecipes()
 		C_Timer.After(0.25, function()
 			if ns.ScanPlayerProfessions then
 				ns:ScanPlayerProfessions()
+			end
+			local afterMoney = (GetMoney and GetMoney()) or beforeMoney
+			local remSpent = math.max(0, beforeMoney - afterMoney)
+			if remSpent > 0 and ns.RecordTrainerExpense then
+				for _, m in ipairs(attempted) do
+					if remSpent <= 0 then
+						break
+					end
+					if (m.cost or 0) > 0 and (m.cost <= remSpent + 1) then
+						local amt = math.min(m.cost, remSpent)
+						remSpent = remSpent - amt
+						ns:RecordTrainerExpense(m.recipeID, m.name, amt)
+					end
+				end
 			end
 			ns:RefreshTrainerBar()
 			if ns.RefreshVisibleUI then

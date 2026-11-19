@@ -1358,6 +1358,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			includeDisenchant = true,
 			tooltipExtraInfo = false,
 			checkAuctionStock = false,
+			profitLogMode = "craft",
 			routePriority = "speed",
 			filterCraftable = false,
 			filterSkillUp = false,

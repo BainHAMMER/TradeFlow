@@ -314,9 +314,33 @@ function ProfitMod:CreateView(parent)
 	f.logTop = logTop
 	f.logPeriod = "today"
 
+	local modeBtn = CreateFrame("Button", nil, logTop, "UIPanelButtonTemplate")
+	modeBtn:SetSize(106, 20)
+	modeBtn:SetPoint("LEFT", 0, 0)
+	modeBtn:SetScript("OnClick", function()
+		if ns.db and ns.db.options then
+			local cur = ns.GetProfitLogMode and ns:GetProfitLogMode() or "craft"
+			ns.db.options.profitLogMode = (cur == "cashflow") and "craft" or "cashflow"
+		end
+		f.offset = 0
+		ProfitMod:OnRefresh()
+	end)
+	modeBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(self:GetText(), 1, 0.82, 0)
+		GameTooltip:AddLine(L["PROFIT_LOG_MODE_TIP"], 1, 1, 1, true)
+		if ns.HasAuctionatorForLog and not ns:HasAuctionatorForLog() then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(L["PROFIT_LOG_MODE_NO_ATR"], 1, 0.45, 0.25, true)
+		end
+		GameTooltip:Show()
+	end)
+	modeBtn:SetScript("OnLeave", GameTooltip_Hide)
+	f.modeBtn = modeBtn
+
 	local periodBtn = CreateFrame("Button", nil, logTop, "UIPanelButtonTemplate")
-	periodBtn:SetSize(124, 20)
-	periodBtn:SetPoint("LEFT", 0, 0)
+	periodBtn:SetSize(84, 20)
+	periodBtn:SetPoint("LEFT", modeBtn, "RIGHT", 4, 0)
 	periodBtn:SetScript("OnClick", function()
 		f.logPeriod = (f.logPeriod == "today") and "all" or "today"
 		f.offset = 0
@@ -325,12 +349,12 @@ function ProfitMod:CreateView(parent)
 	f.periodBtn = periodBtn
 
 	local clearLogBtn = CreateFrame("Button", nil, logTop, "UIPanelButtonTemplate")
-	clearLogBtn:SetSize(82, 20)
+	clearLogBtn:SetSize(72, 20)
 	clearLogBtn:SetPoint("LEFT", periodBtn, "RIGHT", 4, 0)
 	clearLogBtn:SetText(L["QUEUE_CLEAR"])
 	clearLogBtn:SetScript("OnClick", function()
 		if ns.ClearProfitLog then
-			ns:ClearProfitLog()
+			ns:ClearProfitLog(ns.GetProfitLogMode and ns:GetProfitLogMode() or "craft")
 		end
 	end)
 
@@ -338,6 +362,23 @@ function ProfitMod:CreateView(parent)
 	logSummaryText:SetPoint("RIGHT", -2, 0)
 	logSummaryText:SetJustifyH("RIGHT")
 	f.logSummaryText = logSummaryText
+
+	local summaryHit = CreateFrame("Frame", nil, logTop)
+	summaryHit:SetAllPoints(logSummaryText)
+	summaryHit:EnableMouse(true)
+	summaryHit:SetScript("OnEnter", function(self)
+		local s = f.logSummary
+		if not s then
+			return
+		end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(f.modeBtn and f.modeBtn:GetText() or L["PROFIT_LOG_MODE_CRAFT"], 1, 0.82, 0)
+		GameTooltip:AddLine(string.format(L["PROFIT_LOG_SUMMARY_TIP_SPENT"], ns.FormatMoney(s.spent or s.cost or 0)), 1, 0.45, 0.45)
+		GameTooltip:AddLine(string.format(L["PROFIT_LOG_SUMMARY_TIP_EARNED"], ns.FormatMoney(s.earned or s.revenue or 0)), 0.4, 1, 0.4)
+		GameTooltip:AddLine(string.format(L["PROFIT_LOG_SUMMARY_TIP_NET"], ns.FormatMoney(s.profit or 0, true)), 1, 1, 1)
+		GameTooltip:Show()
+	end)
+	summaryHit:SetScript("OnLeave", GameTooltip_Hide)
 
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
 	listBox:SetPoint("TOPLEFT", 8, -78)
@@ -529,7 +570,7 @@ function ProfitMod:CreateView(parent)
 			if not e then
 				return
 			end
-			if f.subMode == "sniper" then
+			if f.subMode == "sniper" or (f.subMode == "log" and not e.recipeID and e.itemID) then
 				ns:HandleItemClick(e.itemID)
 				return
 			end
@@ -597,6 +638,8 @@ function ProfitMod:CreateView(parent)
 					end
 					GameTooltip:Show()
 				end
+			elseif e.itemID and ns.ShowItemTooltip then
+				ns:ShowItemTooltip(self, e.itemID)
 			end
 		end)
 		row:SetScript("OnLeave", GameTooltip_Hide)
@@ -616,7 +659,8 @@ function ProfitMod:RenderRows()
 	local list = f.entries or {}
 	local isSniper = (f.subMode == "sniper")
 	local isLog = (f.subMode == "log")
-	f.emptyLabel:SetText(isSniper and L["SNIPE_EMPTY"] or (isLog and L["PROFIT_LOG_EMPTY"] or L["PROFIT_EMPTY"]))
+	local logMode = isLog and (ns.GetProfitLogMode and ns:GetProfitLogMode() or "craft") or nil
+	f.emptyLabel:SetText(isSniper and L["SNIPE_EMPTY"] or (isLog and ((logMode == "cashflow") and L["PROFIT_LOG_CASH_EMPTY"] or L["PROFIT_LOG_EMPTY"]) or L["PROFIT_EMPTY"]))
 	f.emptyLabel:SetShown(#list == 0)
 
 	for i = 1, VISIBLE_ROWS do
@@ -626,23 +670,62 @@ function ProfitMod:RenderRows()
 		if e then
 			row:Show()
 			if isLog then
-				local name, icon, _, _, _, hex = ns:GetRecipeDisplay(e.recipeID)
-				row.icon:SetTexture(icon)
 				local timeStr = (date and e.ts and e.ts > 0) and date("%H:%M", e.ts) or ""
 				local charTag = (e.charKey and e.charKey ~= "" and e.charKey ~= ns:CharKey())
 					and (" |cff66ccff[" .. e.charKey .. "]|r") or ""
-				local cnt = e.count or 1
-				local cntStr
-				if math.abs(cnt - math.floor(cnt + 0.5)) >= 0.01 then
-					cntStr = (cnt < 0.1) and string.format("x%.2f", cnt) or string.format("x%.1f", cnt)
+				if logMode == "cashflow" then
+					local name, icon, hex
+					if e.kind == "trainer" or not e.itemID then
+						name = e.name or (e.recipeID and select(1, ns:GetRecipeDisplay(e.recipeID))) or "?"
+						icon = "Interface\\Icons\\INV_Misc_Book_11"
+						hex = "|cffffd100"
+					else
+						local dName, dIcon, _, _, _, dHex = ns:GetItemDisplay(e.itemID)
+						name = dName or e.name or ("#" .. e.itemID)
+						icon = dIcon or "Interface\\Icons\\INV_Misc_QuestionMark"
+						hex = dHex or "|cffffffff"
+					end
+					row.icon:SetTexture(icon)
+					local cnt = math.max(1, math.floor((e.count or 1) + 0.5))
+					local cntTag = (cnt > 1) and string.format(" |cffffd100x%d|r", cnt) or ""
+					row.title:SetText(string.format("%s%s|r%s |cff888888%s|r%s", hex, name, cntTag, timeStr, charTag))
+					local kindKey = "PROFIT_LOG_KIND_" .. string.upper(e.kind or "ah_buy")
+					local kindTag = L[kindKey] or e.kind or ""
+					local amt = e.amount or 0
+					if cnt > 1 then
+						local unitP = math.floor(math.abs(amt) / cnt + 0.5)
+						row.sub:SetText(string.format(L["PROFIT_LOG_UNIT_FMT"], kindTag, ns.FormatMoney(unitP)))
+					else
+						row.sub:SetText(kindTag)
+					end
+					row.profitText:ClearAllPoints()
+					row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+					row.profitText:SetText(ns.FormatMoney(amt, true))
+				elseif e.kind == "trainer" then
+					local name = e.name or (e.recipeID and select(1, ns:GetRecipeDisplay(e.recipeID))) or "?"
+					row.icon:SetTexture("Interface\\Icons\\INV_Misc_Book_11")
+					row.title:SetText(string.format("|cffffd100%s|r |cff888888%s|r%s", name, timeStr, charTag))
+					row.sub:SetText(L["PROFIT_LOG_KIND_TRAINER"])
+					row.profitText:ClearAllPoints()
+					row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+					row.profitText:SetText(ns.FormatMoney(e.profit or 0, true))
 				else
-					cntStr = string.format("x%d", math.floor(cnt + 0.5))
+					local name, icon, _, _, _, hex = ns:GetRecipeDisplay(e.recipeID)
+					row.icon:SetTexture(icon)
+					local cnt = e.count or 1
+					local cntStr
+					if math.abs(cnt - math.floor(cnt + 0.5)) >= 0.01 then
+						cntStr = (cnt < 0.1) and string.format("x%.2f", cnt) or string.format("x%.1f", cnt)
+					else
+						cntStr = string.format("x%d", math.floor(cnt + 0.5))
+					end
+					row.title:SetText(string.format("%s%s|r |cffffd100%s|r |cff888888%s|r%s", hex or "|cffffffff", name, cntStr, timeStr, charTag))
+					local srcTag = FormatChannelTag(e.source, nil) .. (e.usedRealCost and L["PROFIT_LOG_REAL_COST_TAG"] or "")
+					row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], srcTag, ns.FormatMoney(e.cost), ns.FormatMoney(e.revenue)))
+					row.profitText:ClearAllPoints()
+					row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+					row.profitText:SetText(ns.FormatMoney(e.profit or 0, true))
 				end
-				row.title:SetText(string.format("%s%s|r |cffffd100%s|r |cff888888%s|r%s", hex or "|cffffffff", name, cntStr, timeStr, charTag))
-				row.sub:SetText(string.format(L["PROFIT_SUB_FMT"], FormatChannelTag(e.source, nil), ns.FormatMoney(e.cost), ns.FormatMoney(e.revenue)))
-				row.profitText:ClearAllPoints()
-				row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-				row.profitText:SetText(ns.FormatMoney(e.profit or 0, true))
 				row.marginText:SetText("")
 				row.snipeBtn:Hide()
 				row.queueBtn:Hide()
@@ -742,8 +825,9 @@ function ProfitMod:OnRefresh()
 	end
 	local targets = ns.GetSnipeTargetList and ns:GetSnipeTargetList() or {}
 	f.subSniperBtn:SetText(string.format(L["PROFIT_SUBTAB_SNIPER"], #targets))
-	local fullLog = (ns.realmDB and ns.realmDB.profitLog) or {}
-	f.subLogBtn:SetText(string.format(L["PROFIT_SUBTAB_LOG"], #fullLog))
+	local logMode = ns.GetProfitLogMode and ns:GetProfitLogMode() or "craft"
+	local activeLog = (ns.realmDB and ((logMode == "cashflow") and ns.realmDB.cashflowLog or ns.realmDB.profitLog)) or {}
+	f.subLogBtn:SetText(string.format(L["PROFIT_SUBTAB_LOG"], #activeLog))
 
 	local isSniper = (f.subMode == "sniper")
 	local isLog = (f.subMode == "log")
@@ -755,9 +839,15 @@ function ProfitMod:OnRefresh()
 	f.listBox:SetPoint("BOTTOMRIGHT", -8, 6)
 
 	if isLog then
-		local summary = ns.GetProfitLogSummary and ns:GetProfitLogSummary(f.logPeriod or "today") or { entries = {}, craftsTotal = 0, profit = 0 }
+		local summary = ns.GetProfitLogSummary and ns:GetProfitLogSummary(f.logPeriod or "today", logMode) or { entries = {}, craftsTotal = 0, opsTotal = 0, profit = 0 }
+		f.logSummary = summary
+		f.modeBtn:SetText((logMode == "cashflow") and L["PROFIT_LOG_MODE_CASH"] or L["PROFIT_LOG_MODE_CRAFT"])
 		f.periodBtn:SetText((f.logPeriod == "today") and L["PROFIT_LOG_TODAY"] or L["PROFIT_LOG_ALL"])
-		f.logSummaryText:SetText(string.format(L["PROFIT_LOG_SUMMARY"], ns.FormatMoney(summary.profit or 0, true), summary.craftsTotal or 0))
+		if logMode == "cashflow" then
+			f.logSummaryText:SetText(string.format(L["PROFIT_LOG_CASH_SUMMARY"], ns.FormatMoney(summary.profit or 0, true), summary.opsTotal or 0))
+		else
+			f.logSummaryText:SetText(string.format(L["PROFIT_LOG_SUMMARY"], ns.FormatMoney(summary.profit or 0, true), summary.craftsTotal or 0))
+		end
 		f.entries = summary.entries or {}
 		local maxOff = math.max(0, #f.entries - VISIBLE_ROWS)
 		if f.offset > maxOff then
