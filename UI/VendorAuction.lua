@@ -6,9 +6,30 @@ local L = ns.L
 -- 2. Панель и кнопка «Докупить по списку» в окне торговца (MERCHANT_SHOW)
 -------------------------------------------------------------------------------
 local lastSyncedSignature = nil
+local shoppingSyncToken = 0
+local syncDebounceGen = 0
+local syncDebouncePending = false
+local syncPendingBgOnly = true
+local ahSyncDeferred = false
 local vendorBar = nil
 local bankBar = nil
 local trainerBar = nil
+
+local function IsAuctionHouseOpen()
+	return (AuctionHouseFrame and AuctionHouseFrame:IsShown())
+		or (AuctionFrame and AuctionFrame:IsShown())
+		or false
+end
+
+local function IsPlayerCasting()
+	if UnitCastingInfo and UnitCastingInfo("player") then
+		return true
+	end
+	if UnitChannelInfo and UnitChannelInfo("player") then
+		return true
+	end
+	return false
+end
 
 function ns:GetAuctionatorListName()
 	return "TradeFlow: " .. self:CharKey()
@@ -21,14 +42,60 @@ local function RunSafe(tag, fn, ...)
 	return pcall(fn, ...)
 end
 
+-- Дебаунс фоновой синхронизации Auctionator, чтобы крафт и сумки успевали синхронизироваться
+function ns:ScheduleAuctionatorSync(backgroundOnly)
+	if not syncDebouncePending then
+		syncPendingBgOnly = (backgroundOnly == true)
+	elseif not backgroundOnly then
+		syncPendingBgOnly = false
+	end
+	syncDebouncePending = true
+	syncDebounceGen = syncDebounceGen + 1
+	local gen = syncDebounceGen
+	local delay = backgroundOnly and 0.45 or 0.15
+	if C_Timer and C_Timer.After then
+		C_Timer.After(delay, function()
+			if gen ~= syncDebounceGen then
+				return
+			end
+			local bgOnly = syncPendingBgOnly
+			syncDebouncePending = false
+			syncPendingBgOnly = true
+			ns:SyncAuctionatorShoppingList(true, bgOnly)
+		end)
+	else
+		local bgOnly = syncPendingBgOnly
+		syncDebouncePending = false
+		syncPendingBgOnly = true
+		self:SyncAuctionatorShoppingList(true, bgOnly)
+	end
+end
+
 -- Автоматическое создание / обновление / удаление Shopping List в Auctionator
-function ns:SyncAuctionatorShoppingList(silent)
+function ns:SyncAuctionatorShoppingList(silent, backgroundOnly)
+	if not silent then
+		syncDebounceGen = syncDebounceGen + 1
+		syncDebouncePending = false
+		syncPendingBgOnly = true
+		ahSyncDeferred = false
+	end
 	local api = Auctionator and Auctionator.API and Auctionator.API.v1
 	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then
 		if not silent then
 			self:Print(L["ATR_NOT_FOUND"])
 		end
 		return
+	end
+
+	if silent and backgroundOnly then
+		if IsAuctionHouseOpen() then
+			ahSyncDeferred = true
+			return
+		end
+		if IsPlayerCasting() then
+			self:ScheduleAuctionatorSync(true)
+			return
+		end
 	end
 
 	local shopping = self:GetShoppingList()
@@ -43,6 +110,8 @@ function ns:SyncAuctionatorShoppingList(silent)
 	end
 
 	local sig = table.concat(sigParts, ",")
+	shoppingSyncToken = shoppingSyncToken + 1
+	local token = shoppingSyncToken
 	if silent and sig == lastSyncedSignature then
 		return
 	end
@@ -60,6 +129,13 @@ function ns:SyncAuctionatorShoppingList(silent)
 	end
 
 	self:WithLoadedItems(ahItems, function()
+		if token ~= shoppingSyncToken then
+			return
+		end
+		if silent and backgroundOnly and IsAuctionHouseOpen() then
+			ahSyncDeferred = true
+			return
+		end
 		local searches = {}
 		for _, item in ipairs(ahItems) do
 			local name, _, _, _, loaded = self:GetItemDisplay(item.itemID)
@@ -91,8 +167,7 @@ function ns:SearchShoppingListOnAH()
 	if not api then
 		return
 	end
-	local ahOpen = (AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (AuctionFrame and AuctionFrame:IsShown())
-	if not ahOpen then
+	if not IsAuctionHouseOpen() then
 		self:Print(L["AH_NOT_OPEN"])
 		return
 	end
@@ -464,11 +539,17 @@ for _, ev in ipairs({
 	"TRAINER_SHOW",
 	"TRAINER_UPDATE",
 	"TRAINER_CLOSED",
+	"AUCTION_HOUSE_CLOSED",
 }) do
 	pcall(merchantEventFrame.RegisterEvent, merchantEventFrame, ev)
 end
 merchantEventFrame:SetScript("OnEvent", function(_, event)
-	if event == "MERCHANT_CLOSED" then
+	if event == "AUCTION_HOUSE_CLOSED" then
+		if ahSyncDeferred then
+			ahSyncDeferred = false
+			ns:ScheduleAuctionatorSync(true)
+		end
+	elseif event == "MERCHANT_CLOSED" then
 		if vendorBar then
 			vendorBar:Hide()
 		end

@@ -489,9 +489,11 @@ function ns:ProcessQueue()
 	end
 end
 
-function ns:OnQueueUpdated()
-	if self.SyncAuctionatorShoppingList then
-		self:SyncAuctionatorShoppingList(true)
+function ns:OnQueueUpdated(fromCraft)
+	if self.ScheduleAuctionatorSync then
+		self:ScheduleAuctionatorSync(fromCraft == true)
+	elseif self.SyncAuctionatorShoppingList then
+		self:SyncAuctionatorShoppingList(true, fromCraft == true)
 	end
 	if self.RefreshVendorBar then
 		self:RefreshVendorBar()
@@ -502,8 +504,10 @@ function ns:OnQueueUpdated()
 end
 
 function ns:OnInventoryUpdated()
-	if self.SyncAuctionatorShoppingList then
-		self:SyncAuctionatorShoppingList(true)
+	if self.ScheduleAuctionatorSync then
+		self:ScheduleAuctionatorSync(true)
+	elseif self.SyncAuctionatorShoppingList then
+		self:SyncAuctionatorShoppingList(true, true)
 	end
 	if self.RefreshVendorBar then
 		self:RefreshVendorBar()
@@ -551,7 +555,7 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 				table.remove(queue, matchedIndex)
 				PromoteOrphanSubcrafts(queue)
 			end
-			ns:OnQueueUpdated()
+			ns:OnQueueUpdated(true)
 		end
 	elseif event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" then
 		if spellID == ns.activeCastRecipeID then

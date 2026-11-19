@@ -10,6 +10,7 @@ local lastSoundAt = -10
 local lastAutoScanAt = -30
 local lastChatHitAt = {}
 local lastSnipeListSig = nil
+local snipeSyncToken = 0
 local pendingUiRefresh = false
 local hookedAuctionFrames = {}
 local pendingBuy = nil
@@ -572,6 +573,8 @@ function ns:SyncSnipeShoppingList(silent)
 		parts[#parts + 1] = (t.itemID or 0) .. ":" .. (t.maxPrice or 0)
 	end
 	local sig = listName .. "|" .. table.concat(parts, ",")
+	snipeSyncToken = snipeSyncToken + 1
+	local token = snipeSyncToken
 	if silent and sig == lastSnipeListSig then
 		return
 	end
@@ -588,6 +591,9 @@ function ns:SyncSnipeShoppingList(silent)
 	end
 
 	self:WithLoadedItems(targets, function()
+		if token ~= snipeSyncToken then
+			return
+		end
 		local searches = {}
 		for _, t in ipairs(targets) do
 			local name, _, _, _, loaded = self:GetItemDisplay(t.itemID)
