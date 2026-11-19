@@ -225,6 +225,9 @@ function ns:CreateQueueAndShoppingView(parent)
 	end
 	processBtn:SetScript("PreClick", function(self)
 		self._wasSwitchSkill = self.pendingSkillLine
+		if self._wasSwitchSkill and ns.PrepareSecureProfSwitch then
+			ns:PrepareSecureProfSwitch()
+		end
 	end)
 	processBtn:SetScript("PostClick", function(self)
 		local sw = self._wasSwitchSkill
@@ -553,12 +556,10 @@ function ns:RefreshQueueAndShoppingView()
 			f.processBtn.pendingSkillLine = switchProf
 			if not inCombat then
 				f.processBtn:SetEnabled(true)
-				local profInfo = self.playerProfessions and self.playerProfessions[switchProf]
-				local spellID = (switchProf == 186 and 2656) or (profInfo and profInfo.spellID) or (self.PROF_SPELLS and self.PROF_SPELLS[switchProf])
-				local spellName = spellID and ((C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)) or (GetSpellInfo and GetSpellInfo(spellID)))
-				if spellName or spellID then
+				local spellAttr = self.GetProfessionSpellAttr and self:GetProfessionSpellAttr(switchProf) or nil
+				if spellAttr then
 					f.processBtn:SetAttribute("type", "spell")
-					f.processBtn:SetAttribute("spell", spellName or spellID)
+					f.processBtn:SetAttribute("spell", spellAttr)
 				else
 					f.processBtn:SetAttribute("type", nil)
 					f.processBtn:SetAttribute("spell", nil)

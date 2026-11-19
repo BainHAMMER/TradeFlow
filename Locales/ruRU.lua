@@ -149,6 +149,7 @@ ns.Locales.ru = {
 	["BTN_QUEUE_ADD"] = "В очередь",
 	["BTN_QUEUE_ALL"] = "В очередь все",
 	["BTN_CRAFT_NOW"] = "Создать",
+	["BTN_OPEN_PROF"] = "Открыть проф.",
 	["AUTO_SUBCRAFTS"] = "Добавлять промежуточные реагенты",
 	["RECIPE_UNLEARNED_TAG"] = "Не изучено (тренер: %s, навык %d)",
 	["RECIPE_UNLEARNED_SCROLL"] = "Не изучено (свиток, навык %d)",

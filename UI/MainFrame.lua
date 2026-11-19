@@ -280,6 +280,7 @@ function ns:CreateMainFrame()
 	})
 	f:SetBackdropColor(0.05, 0.045, 0.04, 0.98)
 	f:SetScript("OnHide", function()
+		ns._lastEnchantCraftAt = nil
 		if ns.ClearReplaceEnchantSpace then
 			ns.ClearReplaceEnchantSpace()
 		end
@@ -321,18 +322,27 @@ function ns:CreateMainFrame()
 	title:SetText("|cffffd100" .. L["ADDON_TITLE"] .. "|r")
 	f.headerTitle = title
 
-	-- Кнопки переключения профессий персонажа
+	-- Кнопки переключения профессий персонажа (SecureActionButton чтобы реально переключать окно C_TradeSkillUI без taint)
 	f.profButtons = {}
 	for i = 1, 6 do
-		local pb = CreateFrame("Button", nil, header, "BackdropTemplate")
+		local pb = CreateFrame("Button", nil, header, "SecureActionButtonTemplate,BackdropTemplate")
 		pb:SetSize(28, 28)
 		pb:SetPoint("LEFT", title, "RIGHT", 14 + (i - 1) * 32, 0)
 		StylePanel(pb, 0.10, 0.10, 0.10, 0.95)
+		pb:RegisterForClicks("AnyUp")
+		if not (InCombatLockdown and InCombatLockdown()) then
+			pb:SetAttribute("useOnKeyDown", false)
+		end
 		pb.tex = pb:CreateTexture(nil, "ARTWORK")
 		pb.tex:SetPoint("TOPLEFT", 3, -3)
 		pb.tex:SetPoint("BOTTOMRIGHT", -3, 3)
 		pb.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-		pb:SetScript("OnClick", function(self)
+		pb:SetScript("PreClick", function(self)
+			if self.skillLine and self:GetAttribute("type") == "spell" and ns.PrepareSecureProfSwitch then
+				ns:PrepareSecureProfSwitch()
+			end
+		end)
+		pb:SetScript("PostClick", function(self)
 			if self.skillLine then
 				ns:SwitchToProfession(self.skillLine)
 			end
@@ -1143,11 +1153,27 @@ function ns:CreateDetailsView(parent)
 		end
 	end)
 
-	local craftNowBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
+	local craftNowBtn = CreateFrame("Button", nil, d, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	craftNowBtn:SetSize(115, 24)
 	craftNowBtn:SetPoint("BOTTOMRIGHT", -8, 5)
 	craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
-	craftNowBtn:SetScript("OnClick", function()
+	craftNowBtn:RegisterForClicks("AnyUp")
+	if not (InCombatLockdown and InCombatLockdown()) then
+		craftNowBtn:SetAttribute("useOnKeyDown", false)
+	end
+	craftNowBtn:SetScript("PreClick", function(self)
+		self._wasSwitchSkill = self.pendingSkillLine
+		if self._wasSwitchSkill and ns.PrepareSecureProfSwitch then
+			ns:PrepareSecureProfSwitch()
+		end
+	end)
+	craftNowBtn:SetScript("PostClick", function(self)
+		local sw = self._wasSwitchSkill
+		self._wasSwitchSkill = nil
+		if sw then
+			ns:SwitchToProfession(sw)
+			return
+		end
 		local rID = d.currentRecipeID
 		if not rID then
 			return
@@ -1196,7 +1222,13 @@ function ns:RefreshDetailsView()
 		end
 		for i = 1, 6 do d.reagentRows[i]:Hide() end
 		self:UpdateEconBox(d, nil)
-		d.craftNowBtn:SetEnabled(false)
+		d.craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
+		d.craftNowBtn.pendingSkillLine = nil
+		if not (InCombatLockdown and InCombatLockdown()) then
+			d.craftNowBtn:SetAttribute("type", nil)
+			d.craftNowBtn:SetAttribute("spell", nil)
+			d.craftNowBtn:SetEnabled(false)
+		end
 		return
 	end
 
@@ -1389,7 +1421,34 @@ function ns:RefreshDetailsView()
 		profit = profit,
 		costPerSkillUp = metrics.costPerSkillUp,
 	})
-	d.craftNowBtn:SetEnabled(metrics.learned and (self:GetRecipeCraftCounts(recipeID) > 0))
+	local canCraft = metrics.learned and (self:GetRecipeCraftCounts(recipeID) > 0)
+	local recipeSL = (rec and rec.skillLine) or self.currentSkillLine
+	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
+	local needSwitch = canCraft and recipeSL and (activeClientSL ~= recipeSL)
+	local inCombat = InCombatLockdown and InCombatLockdown()
+	if needSwitch then
+		local spellAttr = self.GetProfessionSpellAttr and self:GetProfessionSpellAttr(recipeSL) or nil
+		d.craftNowBtn:SetText(L["BTN_OPEN_PROF"])
+		d.craftNowBtn.pendingSkillLine = recipeSL
+		if not inCombat then
+			d.craftNowBtn:SetEnabled(true)
+			if spellAttr then
+				d.craftNowBtn:SetAttribute("type", "spell")
+				d.craftNowBtn:SetAttribute("spell", spellAttr)
+			else
+				d.craftNowBtn:SetAttribute("type", nil)
+				d.craftNowBtn:SetAttribute("spell", nil)
+			end
+		end
+	else
+		d.craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
+		d.craftNowBtn.pendingSkillLine = nil
+		if not inCombat then
+			d.craftNowBtn:SetEnabled(canCraft)
+			d.craftNowBtn:SetAttribute("type", nil)
+			d.craftNowBtn:SetAttribute("spell", nil)
+		end
+	end
 end
 
 -------------------------------------------------------------------------------
@@ -1661,6 +1720,8 @@ function ns:RefreshMainWindow()
 		self.currentSkillLine = profList[1].skillLine
 	end
 
+	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
+	local inCombat = InCombatLockdown and InCombatLockdown()
 	for i = 1, #f.profButtons do
 		local btn = f.profButtons[i]
 		local p = profList[i]
@@ -1672,8 +1733,23 @@ function ns:RefreshMainWindow()
 			else
 				btn:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.8)
 			end
+			if not inCombat then
+				local spellAttr = (p.skillLine ~= activeClientSL and self.GetProfessionSpellAttr) and self:GetProfessionSpellAttr(p.skillLine) or nil
+				if spellAttr then
+					btn:SetAttribute("type", "spell")
+					btn:SetAttribute("spell", spellAttr)
+				else
+					btn:SetAttribute("type", nil)
+					btn:SetAttribute("spell", nil)
+				end
+			end
 			btn:Show()
 		else
+			btn.skillLine = nil
+			if not inCombat then
+				btn:SetAttribute("type", nil)
+				btn:SetAttribute("spell", nil)
+			end
 			btn:Hide()
 		end
 	end

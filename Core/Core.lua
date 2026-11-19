@@ -656,6 +656,14 @@ function ns:IsRecipeLearned(recipeID)
 	return false
 end
 
+local function NonZero(v)
+	return (v and v ~= 0) and v or nil
+end
+
+local function NonEmpty(s)
+	return (type(s) == "string" and s ~= "") and s or nil
+end
+
 function ns:ScanActiveTradeSkill(preserveSkillLine)
 	if not C_TradeSkillUI then
 		return false
@@ -669,10 +677,14 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 
 	local baseInfo = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
 	local childInfo = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
-	local rawID = (childInfo and childInfo.parentProfessionID) or (baseInfo and baseInfo.professionID)
-	local rawName = (childInfo and childInfo.parentProfessionName) or (baseInfo and baseInfo.professionName)
-	local rank = (childInfo and childInfo.skillLevel) or (baseInfo and baseInfo.skillLevel) or 0
-	local maxRank = (childInfo and childInfo.maxSkillLevel) or (baseInfo and baseInfo.maxSkillLevel) or 0
+	local rawID = NonZero(childInfo and childInfo.parentProfessionID)
+		or NonZero(childInfo and childInfo.professionID)
+		or NonZero(baseInfo and baseInfo.professionID)
+	local rawName = NonEmpty(childInfo and childInfo.parentProfessionName)
+		or NonEmpty(baseInfo and baseInfo.professionName)
+		or NonEmpty(childInfo and childInfo.professionName)
+	local rank = NonZero(childInfo and childInfo.skillLevel) or NonZero(baseInfo and baseInfo.skillLevel) or 0
+	local maxRank = NonZero(childInfo and childInfo.maxSkillLevel) or NonZero(baseInfo and baseInfo.maxSkillLevel) or 0
 
 	local skillLine = ns.NormalizeSkillLine(rawID, rawName)
 	if not skillLine or not self.PROF_SPELLS[skillLine] then
@@ -880,8 +892,12 @@ function ns:GetActiveClientSkillLine()
 	end
 	local baseInfo = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
 	local childInfo = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
-	local rawID = (childInfo and childInfo.parentProfessionID) or (baseInfo and baseInfo.professionID)
-	local rawName = (childInfo and childInfo.parentProfessionName) or (baseInfo and baseInfo.professionName)
+	local rawID = NonZero(childInfo and childInfo.parentProfessionID)
+		or NonZero(childInfo and childInfo.professionID)
+		or NonZero(baseInfo and baseInfo.professionID)
+	local rawName = NonEmpty(childInfo and childInfo.parentProfessionName)
+		or NonEmpty(baseInfo and baseInfo.professionName)
+		or NonEmpty(childInfo and childInfo.professionName)
 	local norm = ns.NormalizeSkillLine(rawID, rawName)
 	if norm and self.PROF_SPELLS[norm] then
 		return norm
@@ -943,6 +959,38 @@ function ns:OpenClientTradeSkill(skillLine, recipeID)
 	-- В WoW 1.60.1 вызов OpenTradeSkill / CastSpellByName из обычного скрипта блокируется Blizzard (ADDON_ACTION_BLOCKED).
 	-- Переключение профессии в клиенте выполняется только через SecureActionButtonTemplate.
 	return self:GetActiveClientSkillLine() == skillLine
+end
+
+function ns:GetProfessionSpellAttr(skillLine)
+	if not skillLine then
+		return nil
+	end
+	local profInfo = self.playerProfessions and self.playerProfessions[skillLine]
+	local spellID = (skillLine == 186 and 2656)
+		or (profInfo and profInfo.spellID)
+		or (self.PROF_SPELLS and self.PROF_SPELLS[skillLine])
+	if not spellID then
+		return nil
+	end
+	local spellName = (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID))
+		or (GetSpellInfo and GetSpellInfo(spellID))
+	return spellName or spellID
+end
+
+local profSwitchToken = 0
+function ns:PrepareSecureProfSwitch()
+	profSwitchToken = profSwitchToken + 1
+	local tok = profSwitchToken
+	self.isSwitchingProfession = true
+	self.preferTradeFlow = true
+	self.bypassIntercept = false
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.35, function()
+			if profSwitchToken == tok then
+				ns.isSwitchingProfession = false
+			end
+		end)
+	end
 end
 
 -------------------------------------------------------------------------------
@@ -1267,6 +1315,7 @@ local function BindReplaceEnchantSpace()
 			popupConfirmProxy:SetAttribute("clickbutton", btn)
 			SetOverrideBindingClick(popupBindOwner, true, "SPACE", "TradeFlowPopupConfirmBtn")
 		end
+		ns._lastEnchantCraftAt = now
 	end
 end
 
@@ -1517,6 +1566,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		ns:ScanPlayerProfessions()
 		local ok = ns:ScanActiveTradeSkill()
 		if ok then
+			ns.isSwitchingProfession = false
 			ns.blizzardOwnsTradeSkill = false
 		elseif event == "TRADE_SKILL_SHOW" and not ns.isSwitchingProfession and not ns.bypassIntercept then
 			-- Профессия, которой нет в TradeFlow (рыбалка): её показывает окно Blizzard.
