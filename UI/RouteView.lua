@@ -16,10 +16,10 @@ function ns:CreateRouteView(parent)
 	local top = CreateFrame("Frame", nil, f)
 	top:SetPoint("TOPLEFT", 8, -6)
 	top:SetPoint("TOPRIGHT", -8, -6)
-	top:SetHeight(70)
+	top:SetHeight(64)
 
 	local targetLbl = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	targetLbl:SetPoint("TOPLEFT", 2, -4)
+	targetLbl:SetPoint("TOPLEFT", 2, -5)
 	targetLbl:SetText(L["PLANNER_TARGET"])
 
 	local targetBox = CreateFrame("EditBox", nil, top, "InputBoxTemplate")
@@ -69,10 +69,10 @@ function ns:CreateRouteView(parent)
 		prevBtn = b
 	end
 
-	-- Переключатель приоритета маршрута во 2-й строке слева: Скорость <-> Прибыль
+	-- Переключатель приоритета маршрута в правом верхнем углу (над «Затраты» / «Возврат»)
 	local priorityBtn = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
 	priorityBtn:SetSize(148, 20)
-	priorityBtn:SetPoint("TOPLEFT", 2, -25)
+	priorityBtn:SetPoint("TOPRIGHT", -2, -1)
 	priorityBtn:SetScript("OnClick", function()
 		if ns.db and ns.db.options then
 			local cur = ns.db.options.routePriority or "speed"
@@ -82,15 +82,14 @@ function ns:CreateRouteView(parent)
 	end)
 	f.priorityBtn = priorityBtn
 
-	-- Источники неизученных рецептов в 3-й строке: Тренер / Вендор (всегда в наличии) / Прочие
+	-- Источники неизученных рецептов в две компактные строки слева (на уровне Затрат/Возврата)
 	local sourcesLbl = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	sourcesLbl:SetPoint("TOPLEFT", 2, -53)
+	sourcesLbl:SetPoint("TOPLEFT", 2, -28)
 	sourcesLbl:SetText(L["PLANNER_SOURCES_LABEL"])
 
-	local function MakeCheck(label, optKey, anchorTo, xGap, fallbackHitW, tipText)
+	local function MakeCheck(label, optKey, fallbackHitW, tipText)
 		local cb = CreateFrame("CheckButton", nil, top, "UICheckButtonTemplate")
 		cb:SetSize(20, 20)
-		cb:SetPoint("LEFT", anchorTo, "RIGHT", xGap, 0)
 		cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		cb.text:SetPoint("LEFT", cb, "RIGHT", 2, 0)
 		cb.text:SetText(label)
@@ -117,9 +116,14 @@ function ns:CreateRouteView(parent)
 		return cb
 	end
 
-	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", sourcesLbl, 6, 62, L["PLANNER_INCLUDE_TRAINER_TIP"])
-	f.cbVendorScrolls = MakeCheck(L["PLANNER_INCLUDE_VENDOR"], "includeVendorRecipesInRoute", f.cbTrainer.text, 10, 140, L["PLANNER_INCLUDE_VENDOR_TIP"])
-	f.cbOtherRecipes = MakeCheck(L["PLANNER_INCLUDE_OTHER"], "includeOtherRecipesInRoute", f.cbVendorScrolls.text, 10, 52, L["PLANNER_INCLUDE_OTHER_TIP"])
+	f.cbTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "includeTrainerInRoute", 62, L["PLANNER_INCLUDE_TRAINER_TIP"])
+	f.cbTrainer:SetPoint("LEFT", sourcesLbl, "RIGHT", 6, 0)
+
+	f.cbOtherRecipes = MakeCheck(L["PLANNER_INCLUDE_OTHER"], "includeOtherRecipesInRoute", 52, L["PLANNER_INCLUDE_OTHER_TIP"])
+	f.cbOtherRecipes:SetPoint("LEFT", f.cbTrainer.text, "RIGHT", 12, 0)
+
+	f.cbVendorScrolls = MakeCheck(L["PLANNER_INCLUDE_VENDOR"], "includeVendorRecipesInRoute", 140, L["PLANNER_INCLUDE_VENDOR_TIP"])
+	f.cbVendorScrolls:SetPoint("TOPLEFT", f.cbTrainer, "BOTTOMLEFT", 0, 0)
 
 	-- Кнопка сброса скрытых (исключённых) рецептов (размещена по центру внизу, чтобы не теснить переключатель режима)
 	local resetSkips = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -133,18 +137,18 @@ function ns:CreateRouteView(parent)
 	end)
 	f.resetSkipsBtn = resetSkips
 
-	-- Отдельные поля справа: 1) Затраты (реагенты + тренер) и 2) Расчётный возврат (вендор / аукцион)
+	-- Отдельные поля справа под приоритетом: 1) Затраты и 2) Расчётный возврат
 	f.summaryText = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	f.summaryText:SetPoint("TOPRIGHT", -6, -4)
+	f.summaryText:SetPoint("TOPRIGHT", -6, -28)
 	f.summaryText:SetJustifyH("RIGHT")
 
 	f.returnText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	f.returnText:SetPoint("TOPRIGHT", -6, -24)
+	f.returnText:SetPoint("TOPRIGHT", -6, -48)
 	f.returnText:SetJustifyH("RIGHT")
 
 	-- Список шагов маршрута
 	local listBox = CreateFrame("Frame", nil, f, "BackdropTemplate")
-	listBox:SetPoint("TOPLEFT", 8, -78)
+	listBox:SetPoint("TOPLEFT", 8, -72)
 	listBox:SetPoint("BOTTOMRIGHT", -8, 34)
 	listBox:SetBackdrop({
 		bgFile = "Interface\\Buttons\\WHITE8X8",
