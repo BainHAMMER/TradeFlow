@@ -555,7 +555,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			end
 			local c = p.cand
 			local lastStep = steps[#steps]
-			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID and not (p.learnFee and p.learnFee > 0) and not c.scrollItemID then
+			if lastStep and lastStep.kind == "craft" and lastStep.recipeID == c.recipeID and not (p.learnFee and p.learnFee > 0) then
 				lastStep.toSkill = p.s + 1
 				lastStep.expectedCrafts = lastStep.expectedCrafts + (1 / p.chance)
 				lastStep.chanceSum = lastStep.chanceSum + p.chance
@@ -658,7 +658,7 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local prev = merged[#merged]
 			if prev and prev.kind == "craft" and st.kind == "craft"
 				and prev.recipeID == st.recipeID and prev.toSkill == st.fromSkill
-				and (not st.learnFee or st.learnFee == 0) and not st.scrollItemID
+				and (not st.learnFee or st.learnFee == 0)
 			then
 				prev.toSkill = st.toSkill
 				prev.points = prev.points + st.points
