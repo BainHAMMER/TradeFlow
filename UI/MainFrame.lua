@@ -322,12 +322,17 @@ function ns:CreateMainFrame()
 	title:SetText("|cffffd100" .. L["ADDON_TITLE"] .. "|r")
 	f.headerTitle = title
 
-	-- Кнопки переключения профессий персонажа (SecureActionButton чтобы реально переключать окно C_TradeSkillUI без taint)
+	-- Кнопки переключения профессий персонажа (SecureActionButton нельзя якорить к FontString/Texture, только к Frame)
+	local titleW = (title.GetStringWidth and title:GetStringWidth()) or 0
+	if titleW < 60 then
+		titleW = 82
+	end
+	local profStartX = math.min(152, 42 + math.ceil(titleW) + 14)
 	f.profButtons = {}
 	for i = 1, 6 do
 		local pb = CreateFrame("Button", nil, header, "SecureActionButtonTemplate,BackdropTemplate")
 		pb:SetSize(28, 28)
-		pb:SetPoint("LEFT", title, "RIGHT", 14 + (i - 1) * 32, 0)
+		pb:SetPoint("LEFT", header, "LEFT", profStartX + (i - 1) * 32, 0)
 		StylePanel(pb, 0.10, 0.10, 0.10, 0.95)
 		pb:RegisterForClicks("AnyUp")
 		if not (InCombatLockdown and InCombatLockdown()) then

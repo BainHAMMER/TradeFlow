@@ -413,12 +413,14 @@ function ProfitMod:CreateView(parent)
 			self.pickedItemID = nil
 		end
 	end)
-	snipeAddBox:SetScript("OnReceiveDrag", function()
-		local id, itemName = PickCursorItemID()
-		if id then
-			FillItemIntoAddBox(id, itemName, true)
-		end
-	end)
+	if snipeAddBox.HasScript and snipeAddBox:HasScript("OnReceiveDrag") then
+		snipeAddBox:SetScript("OnReceiveDrag", function()
+			local id, itemName = PickCursorItemID()
+			if id then
+				FillItemIntoAddBox(id, itemName, true)
+			end
+		end)
+	end
 	snipeAddBox:SetScript("OnMouseDown", function()
 		if CursorHasItem and CursorHasItem() then
 			local id, itemName = PickCursorItemID()
