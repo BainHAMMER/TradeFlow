@@ -5,7 +5,13 @@ local L = ns.L
 -- Снайпер материалов: целевые пороги цен, пассивный перехват сканов AH и плашка
 -------------------------------------------------------------------------------
 local MAX_SNIPE_STOCK_AGE = 3600 -- не сигналим по вчерашнему кэшу (> 1 часа)
+local DEFAULT_SNIPE_MAX_SPEND = 100000 -- 10g по умолчанию за 1 клик выкупа
+local DEFAULT_SNIPE_MAX_QTY = 200
+local DEFAULT_SNIPE_MIN_RESERVE = 0
 local snipeBar = nil
+local sniperSettingsFrame = nil
+local sniperSettingsAnchorKind = nil
+local sniperSettingsSpecialRegistered = false
 local lastSoundAt = -10
 local lastAutoScanAt = -30
 local lastChatHitAt = {}
@@ -124,6 +130,111 @@ function ns.FormatMoneyPlain(copper)
 	if s > 0 then parts[#parts + 1] = s .. "s" end
 	if m > 0 or #parts == 0 then parts[#parts + 1] = m .. "c" end
 	return table.concat(parts, " ")
+end
+
+function ns:GetSnipeBuyLimits()
+	local opts = self.db and self.db.options
+	local maxSpend = (opts and opts.snipeMaxSpend ~= nil) and tonumber(opts.snipeMaxSpend) or DEFAULT_SNIPE_MAX_SPEND
+	local maxQty = (opts and opts.snipeMaxQty ~= nil) and tonumber(opts.snipeMaxQty) or DEFAULT_SNIPE_MAX_QTY
+	local minReserve = (opts and opts.snipeMinReserve ~= nil) and tonumber(opts.snipeMinReserve) or DEFAULT_SNIPE_MIN_RESERVE
+	maxSpend = math.max(0, math.floor((maxSpend or 0) + 0.5))
+	maxQty = math.max(0, math.floor((maxQty or 0) + 0.5))
+	minReserve = math.max(0, math.floor((minReserve or 0) + 0.5))
+	return maxSpend, maxQty, minReserve
+end
+
+function ns:FormatSnipeLimitsSummary()
+	local maxSpend, maxQty, minReserve = self:GetSnipeBuyLimits()
+	local parts = {}
+	if maxSpend > 0 then
+		parts[#parts + 1] = "<= " .. self.FormatMoney(maxSpend)
+	end
+	if minReserve > 0 then
+		parts[#parts + 1] = L["SNIPE_LIMIT_MIN_RESERVE"] .. " " .. self.FormatMoney(minReserve)
+	end
+	if maxQty > 0 then
+		parts[#parts + 1] = "x" .. maxQty
+	end
+	if #parts == 0 then
+		return L["SNIPE_LIMIT_UNLIMITED"]
+	end
+	return table.concat(parts, " | ")
+end
+
+local function ComputeAvailableSnipeBudget(money)
+	local maxSpend, maxQty, minReserve = ns:GetSnipeBuyLimits()
+	local m = math.max(0, tonumber(money) or 0)
+	local avail = math.max(0, m - minReserve)
+	local budget = (maxSpend > 0) and math.min(avail, maxSpend) or avail
+	return budget, maxQty, maxSpend, minReserve
+end
+
+local function ClassifyBudgetBlock(money, price, maxSpend, minReserve)
+	local m = math.max(0, tonumber(money) or 0)
+	if m < price then
+		return "nomoney"
+	end
+	if minReserve > 0 and (m - minReserve) < price then
+		return "reserve"
+	end
+	if maxSpend > 0 and price > maxSpend then
+		return "budget"
+	end
+	return "nomoney"
+end
+
+local function ValidateBuyoutSpend(totalPrice, money)
+	local tp = tonumber(totalPrice) or 0
+	local m = math.max(0, tonumber(money) or 0)
+	if tp <= 0 then
+		return true, nil
+	end
+	local maxSpend, _, minReserve = ns:GetSnipeBuyLimits()
+	if tp > m then
+		return false, L["SNIPE_BUY_NOMONEY"]
+	end
+	if minReserve > 0 and (m - tp) < minReserve then
+		return false, string.format(L["SNIPE_BUY_RESERVE_CAP"], ns.FormatMoney(minReserve))
+	end
+	if maxSpend > 0 and tp > maxSpend then
+		return false, string.format(L["SNIPE_BUY_BUDGET_CAP"], ns.FormatMoney(tp), ns.FormatMoney(maxSpend))
+	end
+	return true, nil
+end
+
+local function ParseOptionalMoneyLimit(text)
+	local s = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" or s == "0" then
+		return 0
+	end
+	local norm = s:gsub(",", ".")
+		:gsub("Г", "g"):gsub("г", "g")
+		:gsub("З", "g"):gsub("з", "g")
+		:gsub("С", "s"):gsub("с", "s")
+		:gsub("М", "c"):gsub("м", "c")
+		:gsub("G", "g"):gsub("S", "s"):gsub("C", "c")
+		:gsub("%s+", "")
+	if norm == "0.0"
+		or norm:match("^0+[gsc]$")
+		or norm:match("^0+g0+s$")
+		or norm:match("^0+g0+s0+c$")
+		or norm:match("^0+s0+c$")
+	then
+		return 0
+	end
+	return ns.ParseMoneyInput(s)
+end
+
+local function ParseOptionalQtyLimit(text)
+	local s = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" then
+		return 0
+	end
+	local n = tonumber(s:match("^(%d+)$"))
+	if n == nil or n < 0 then
+		return nil
+	end
+	return math.floor(n)
 end
 
 function ns:ResolveItemIDFromInput(input)
@@ -758,11 +869,12 @@ end
 
 local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 	local money = (GetMoney and GetMoney()) or 0
+	local budget, qtyCap, maxSpend, minReserve = ComputeAvailableSnipeBudget(money)
 	if C_AuctionHouse and C_AuctionHouse.GetNumCommoditySearchResults and C_AuctionHouse.GetCommoditySearchResultInfo then
 		local ok, n = pcall(C_AuctionHouse.GetNumCommoditySearchResults, itemID)
 		if ok and type(n) == "number" and n > 0 then
 			local buyQty, spent, liveMin = 0, 0, nil
-			local sawAffordableCheap = false
+			local blockedKind = nil
 			for i = 1, math.min(n, 200) do
 				local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
 				local p = info and info.unitPrice
@@ -772,17 +884,23 @@ local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 						liveMin = p
 					end
 					if p <= maxPrice then
-						local canAfford = math.floor((money - spent) / p)
+						local remQty = (qtyCap > 0) and (qtyCap - buyQty) or q
+						if remQty <= 0 then
+							break
+						end
+						local canAfford = math.floor((budget - spent) / p)
 						if canAfford > 0 then
-							sawAffordableCheap = true
-							local take = math.min(q, canAfford)
+							local take = math.min(q, canAfford, remQty)
 							buyQty = buyQty + take
 							spent = spent + take * p
-							if take < q then
+							if take < q or (qtyCap > 0 and buyQty >= qtyCap) then
 								break
 							end
 						elseif buyQty == 0 then
-							return 0, "nomoney", liveMin
+							blockedKind = ClassifyBudgetBlock(money, p, maxSpend, minReserve)
+							break
+						else
+							break
 						end
 					end
 				end
@@ -790,7 +908,7 @@ local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 			if buyQty > 0 then
 				return buyQty, nil, liveMin
 			end
-			return 0, sawAffordableCheap and "nomoney" or "gone", liveMin
+			return 0, blockedKind or "gone", liveMin
 		end
 	end
 
@@ -799,16 +917,22 @@ local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 		local buyQty, spent = 0, 0
 		for _, t in ipairs(stock.tiers) do
 			if t.price <= maxPrice and (t.qty or 0) > 0 then
-				local canAfford = math.floor((money - spent) / t.price)
+				local remQty = (qtyCap > 0) and (qtyCap - buyQty) or t.qty
+				if remQty <= 0 then
+					break
+				end
+				local canAfford = math.floor((budget - spent) / t.price)
 				if canAfford > 0 then
-					local take = math.min(t.qty, canAfford)
+					local take = math.min(t.qty, canAfford, remQty)
 					buyQty = buyQty + take
 					spent = spent + take * t.price
-					if take < t.qty then
+					if take < t.qty or (qtyCap > 0 and buyQty >= qtyCap) then
 						break
 					end
 				elseif buyQty == 0 then
-					return 0, "nomoney", t.price
+					return 0, ClassifyBudgetBlock(money, t.price, maxSpend, minReserve), t.price
+				else
+					break
 				end
 			end
 		end
@@ -819,11 +943,14 @@ local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 	end
 
 	if hit and hit.bestPrice and hit.bestPrice <= maxPrice then
-		if money < hit.bestPrice then
-			return 0, "nomoney", hit.bestPrice
+		if budget < hit.bestPrice then
+			return 0, ClassifyBudgetBlock(money, hit.bestPrice, maxSpend, minReserve), hit.bestPrice
 		end
 		local desired = (hit.totalCheapQty and hit.totalCheapQty > 0) and hit.totalCheapQty or (hit.qty or 1)
-		local qty = math.min(desired, math.floor(money / math.max(1, hit.bestPrice)))
+		local qty = math.min(desired, math.floor(budget / math.max(1, hit.bestPrice)))
+		if qtyCap > 0 then
+			qty = math.min(qty, qtyCap)
+		end
 		if qty > 0 then
 			return qty, nil, hit.bestPrice
 		end
@@ -840,8 +967,9 @@ function ns:BuyFirstSnipeHit()
 	end
 	if pendingBuy and pendingBuy.state == "confirm" then
 		local money = (GetMoney and GetMoney()) or 0
-		if (pendingBuy.totalPrice or 0) > money then
-			CancelPendingCommodity(L["SNIPE_BUY_NOMONEY"], nil)
+		local okSpend, errMsg = ValidateBuyoutSpend(pendingBuy.totalPrice or 0, money)
+		if not okSpend then
+			CancelPendingCommodity(errMsg, nil)
 			return
 		end
 		if (pendingBuy.unitPrice or 0) > pendingBuy.maxPrice then
@@ -900,8 +1028,13 @@ function ns:BuyFirstSnipeHit()
 		end
 		local qty, errKind, liveMin = ComputeCommodityBuyQty(itemID, maxPrice, first)
 		if qty <= 0 then
+			local maxSpend, _, minReserve = self:GetSnipeBuyLimits()
 			if errKind == "nomoney" then
 				self:Print(L["SNIPE_BUY_NOMONEY"])
+			elseif errKind == "reserve" then
+				self:Print(string.format(L["SNIPE_BUY_RESERVE_CAP"], ns.FormatMoney(minReserve)))
+			elseif errKind == "budget" then
+				self:Print(string.format(L["SNIPE_BUY_BUDGET_CAP"], ns.FormatMoney(liveMin or maxPrice), ns.FormatMoney(maxSpend)))
 			else
 				CancelPendingCommodity(string.format(L["SNIPE_BUY_GONE"], label), itemID, liveMin)
 			end
@@ -959,8 +1092,9 @@ function ns:BuyFirstSnipeHit()
 			return
 		end
 		local money = (GetMoney and GetMoney()) or 0
-		if bestAuction.buyoutAmount > money then
-			self:Print(L["SNIPE_BUY_NOMONEY"])
+		local okSpend, errMsg = ValidateBuyoutSpend(bestAuction.buyoutAmount, money)
+		if not okSpend then
+			self:Print(errMsg)
 			return
 		end
 		pendingSnipeBid = {
@@ -1023,13 +1157,31 @@ function ns:RefreshSnipeBar()
 
 		snipeBar.label = snipeBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		snipeBar.label:SetPoint("LEFT", 10, 0)
-		snipeBar.label:SetPoint("RIGHT", -240, 0)
+		snipeBar.label:SetPoint("RIGHT", -318, 0)
 		snipeBar.label:SetJustifyH("LEFT")
 		snipeBar.label:SetWordWrap(false)
 
+		snipeBar.settingsBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
+		snipeBar.settingsBtn:SetSize(72, 24)
+		snipeBar.settingsBtn:SetPoint("RIGHT", -8, 0)
+		snipeBar.settingsBtn:SetScript("OnClick", function(self)
+			if ns.ToggleSniperSettingsFrame then
+				ns:ToggleSniperSettingsFrame(self, "ah")
+			end
+		end)
+		snipeBar.settingsBtn:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_SETTINGS_TITLE"], 1, 0.82, 0)
+			GameTooltip:AddLine(L["SNIPE_SETTINGS_TIP"], 0.85, 0.85, 0.85, true)
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(string.format(L["SNIPE_LIMIT_SUMMARY_FMT"], ns:FormatSnipeLimitsSummary()), 0.4, 0.9, 1, true)
+			GameTooltip:Show()
+		end)
+		snipeBar.settingsBtn:SetScript("OnLeave", GameTooltip_Hide)
+
 		snipeBar.scanBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
 		snipeBar.scanBtn:SetSize(112, 24)
-		snipeBar.scanBtn:SetPoint("RIGHT", -8, 0)
+		snipeBar.scanBtn:SetPoint("RIGHT", snipeBar.settingsBtn, "LEFT", -6, 0)
 		snipeBar.scanBtn:SetScript("OnClick", function()
 			ns:SearchSnipeTargetsOnAH()
 		end)
@@ -1113,6 +1265,8 @@ function ns:RefreshSnipeBar()
 			else
 				GameTooltip:SetText(string.format(L["SNIPE_BUY_BTN"], 1):gsub("%s*x%d+", ""), 1, 0.82, 0)
 				GameTooltip:AddLine(L["SNIPE_BUY_TIP"], 0.85, 0.85, 0.85, true)
+				GameTooltip:AddLine(" ")
+				GameTooltip:AddLine(string.format(L["SNIPE_LIMIT_SUMMARY_FMT"], ns:FormatSnipeLimitsSummary()), 0.4, 0.9, 1, true)
 			end
 			GameTooltip:Show()
 		end)
@@ -1135,6 +1289,7 @@ function ns:RefreshSnipeBar()
 		snipeBar:SetPoint("BOTTOMRIGHT", ah, "TOPRIGHT", 0, 2)
 	end
 
+	snipeBar.settingsBtn:SetText(L["SNIPE_SETTINGS_BAR_BTN"])
 	snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
 
 	snipeBar.openBtn:SetText(string.format(L["SNIPE_FIND_HIT_BTN"], #hits))
@@ -1152,7 +1307,11 @@ function ns:RefreshSnipeBar()
 		elseif first then
 			local qty = ComputeCommodityBuyQty(first.itemID, first.maxPrice or 0, first)
 			if qty <= 0 then
+				local _, qtyCap = self:GetSnipeBuyLimits()
 				qty = (first.totalCheapQty and first.totalCheapQty > 0) and first.totalCheapQty or (first.qty or 1)
+				if qtyCap > 0 then
+					qty = math.min(qty, qtyCap)
+				end
 			end
 			snipeBar.buyBtn:SetText(string.format(L["SNIPE_BUY_BTN"], qty))
 			snipeBar.buyBtn:SetEnabled(true)
@@ -1211,6 +1370,195 @@ function ns:RefreshSnipeUI()
 	else
 		ApplySnipeUIRefresh()
 	end
+end
+
+function ns:HideSniperSettingsFrame(onlyAnchorKind)
+	if sniperSettingsFrame and sniperSettingsFrame:IsShown() then
+		if not onlyAnchorKind or sniperSettingsAnchorKind == onlyAnchorKind then
+			sniperSettingsFrame:Hide()
+		end
+	end
+end
+
+function ns:ResetSniperSettingsFrame()
+	if sniperSettingsFrame then
+		sniperSettingsFrame:Hide()
+		sniperSettingsFrame = nil
+		sniperSettingsAnchorKind = nil
+	end
+end
+
+local function FillSniperSettingsInputs(sf)
+	local maxSpend, maxQty, minReserve = ns:GetSnipeBuyLimits()
+	sf.maxSpendBox:SetText((maxSpend > 0) and ns.FormatMoneyPlain(maxSpend) or "0")
+	sf.minReserveBox:SetText((minReserve > 0) and ns.FormatMoneyPlain(minReserve) or "0")
+	sf.maxQtyBox:SetText(tostring(maxQty or 0))
+	sf.cbAutoScan:SetChecked(ns.db and ns.db.options and ns.db.options.snipeAutoScan == true)
+end
+
+function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
+	if not sniperSettingsFrame then
+		local sf = CreateFrame("Frame", "TradeFlowSniperSettingsFrame", UIParent, "BackdropTemplate")
+		sf:SetSize(350, 216)
+		sf:SetFrameStrata("DIALOG")
+		sf:SetToplevel(true)
+		sf:SetClampedToScreen(true)
+		sf:SetMovable(true)
+		sf:EnableMouse(true)
+		sf:RegisterForDrag("LeftButton")
+		sf:SetScript("OnDragStart", sf.StartMoving)
+		sf:SetScript("OnDragStop", sf.StopMovingOrSizing)
+		if sf.SetBackdrop then
+			sf:SetBackdrop({
+				bgFile = "Interface\\Buttons\\WHITE8X8",
+				edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+				tile = true, tileSize = 16, edgeSize = 12,
+				insets = { left = 3, right = 3, top = 3, bottom = 3 },
+			})
+			sf:SetBackdropColor(0.07, 0.065, 0.055, 0.98)
+			sf:SetBackdropBorderColor(0.55, 0.45, 0.25, 0.9)
+		end
+		sf:Hide()
+
+		local title = sf:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		title:SetPoint("TOPLEFT", 12, -10)
+		title:SetText("|cffffd100" .. L["SNIPE_SETTINGS_TITLE"] .. "|r")
+
+		local close = CreateFrame("Button", nil, sf, "UIPanelCloseButton")
+		close:SetPoint("TOPRIGHT", -2, -2)
+		close:SetScript("OnClick", function() sf:Hide() end)
+
+		local function MakeLimitRow(labelText, tipTitle, tipText, y)
+			local box = CreateFrame("EditBox", nil, sf, "InputBoxTemplate")
+			box:SetSize(106, 20)
+			box:SetPoint("TOPRIGHT", -14, y + 3)
+			box:SetAutoFocus(false)
+			box.placeholder = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+			box.placeholder:SetPoint("LEFT", 4, 0)
+			box.placeholder:SetText(L["SNIPE_LIMIT_ZERO_PH"])
+			box:SetScript("OnTextChanged", function(self)
+				self.placeholder:SetShown((self:GetText() or "") == "")
+			end)
+			box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+			box:SetScript("OnEnter", function(self)
+				GameTooltip:SetOwner(self, "ANCHOR_TOP")
+				GameTooltip:SetText(tipTitle, 1, 0.82, 0)
+				GameTooltip:AddLine(tipText, 0.85, 0.85, 0.85, true)
+				GameTooltip:Show()
+			end)
+			box:SetScript("OnLeave", GameTooltip_Hide)
+
+			local lbl = sf:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			lbl:SetPoint("TOPLEFT", 12, y)
+			lbl:SetPoint("RIGHT", box, "LEFT", -8, 0)
+			lbl:SetJustifyH("LEFT")
+			lbl:SetText(labelText)
+			return box
+		end
+
+		sf.maxSpendBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_SPEND"], L["SNIPE_LIMIT_MAX_SPEND"], L["SNIPE_LIMIT_MAX_SPEND_TIP"], -38)
+		sf.minReserveBox = MakeLimitRow(L["SNIPE_LIMIT_MIN_RESERVE"], L["SNIPE_LIMIT_MIN_RESERVE"], L["SNIPE_LIMIT_MIN_RESERVE_TIP"], -70)
+		sf.maxQtyBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY_TIP"], -102)
+
+		local cbAutoScan = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
+		cbAutoScan:SetSize(22, 22)
+		cbAutoScan:SetPoint("TOPLEFT", 10, -128)
+		cbAutoScan.text = cbAutoScan:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 4, 0)
+		cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
+		cbAutoScan:SetHitRectInsets(0, -240, 0, 0)
+		cbAutoScan:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
+			GameTooltip:AddLine(L["SNIPE_AUTOSCAN_TIP"], 0.85, 0.85, 0.85, true)
+			GameTooltip:Show()
+		end)
+		cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
+		sf.cbAutoScan = cbAutoScan
+
+		local hint = sf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+		hint:SetPoint("TOPLEFT", 12, -156)
+		hint:SetPoint("RIGHT", -12, 0)
+		hint:SetJustifyH("LEFT")
+		hint:SetText(L["SNIPE_LIMIT_HINT"])
+
+		local function SaveLimits()
+			local maxSpend = ParseOptionalMoneyLimit(sf.maxSpendBox:GetText())
+			if maxSpend == nil then
+				ns:Print(L["SNIPE_ADD_BAD_PRICE"])
+				return
+			end
+			local minReserve = ParseOptionalMoneyLimit(sf.minReserveBox:GetText())
+			if minReserve == nil then
+				ns:Print(L["SNIPE_ADD_BAD_PRICE"])
+				return
+			end
+			local maxQty = ParseOptionalQtyLimit(sf.maxQtyBox:GetText())
+			if maxQty == nil then
+				ns:Print(L["SNIPE_LIMIT_BAD_QTY"])
+				return
+			end
+			if ns.db and ns.db.options then
+				ns.db.options.snipeMaxSpend = maxSpend
+				ns.db.options.snipeMinReserve = minReserve
+				ns.db.options.snipeMaxQty = maxQty
+				ns.db.options.snipeAutoScan = cbAutoScan:GetChecked() and true or false
+			end
+			sf:Hide()
+			ns:RefreshSnipeUI()
+			ns:Print(string.format(L["SNIPE_LIMIT_SAVED"], ns:FormatSnipeLimitsSummary()))
+		end
+
+		sf.maxSpendBox:SetScript("OnTabPressed", function() sf.minReserveBox:SetFocus() end)
+		sf.minReserveBox:SetScript("OnTabPressed", function() sf.maxQtyBox:SetFocus() end)
+		sf.maxQtyBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
+		sf.maxSpendBox:SetScript("OnEnterPressed", SaveLimits)
+		sf.minReserveBox:SetScript("OnEnterPressed", SaveLimits)
+		sf.maxQtyBox:SetScript("OnEnterPressed", SaveLimits)
+
+		local saveBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+		saveBtn:SetSize(158, 22)
+		saveBtn:SetPoint("BOTTOMLEFT", 12, 10)
+		saveBtn:SetText(L["SNIPE_LIMIT_SAVE"])
+		saveBtn:SetScript("OnClick", SaveLimits)
+
+		local resetBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+		resetBtn:SetSize(158, 22)
+		resetBtn:SetPoint("BOTTOMRIGHT", -12, 10)
+		resetBtn:SetText(L["SNIPE_LIMIT_RESET"])
+		resetBtn:SetScript("OnClick", function()
+			if ns.db and ns.db.options then
+				ns.db.options.snipeMaxSpend = DEFAULT_SNIPE_MAX_SPEND
+				ns.db.options.snipeMinReserve = DEFAULT_SNIPE_MIN_RESERVE
+				ns.db.options.snipeMaxQty = DEFAULT_SNIPE_MAX_QTY
+			end
+			FillSniperSettingsInputs(sf)
+			ns:RefreshSnipeUI()
+			ns:Print(string.format(L["SNIPE_LIMIT_SAVED"], ns:FormatSnipeLimitsSummary()))
+		end)
+
+		if not sniperSettingsSpecialRegistered then
+			sniperSettingsSpecialRegistered = true
+			tinsert(UISpecialFrames, "TradeFlowSniperSettingsFrame")
+		end
+		sniperSettingsFrame = sf
+	end
+
+	local sf = sniperSettingsFrame
+	local newKind = anchorKind or ((anchorBtn and snipeBar and anchorBtn == snipeBar.settingsBtn) and "ah" or "tab")
+	if sf:IsShown() and sniperSettingsAnchorKind == newKind then
+		sf:Hide()
+		return
+	end
+	sniperSettingsAnchorKind = newKind
+	sf:ClearAllPoints()
+	if anchorBtn and anchorBtn.IsVisible and anchorBtn:IsVisible() then
+		sf:SetPoint("TOPRIGHT", anchorBtn, "BOTTOMRIGHT", 0, -4)
+	else
+		sf:SetPoint("CENTER")
+	end
+	FillSniperSettingsInputs(sf)
+	sf:Show()
 end
 
 local snipeEventFrame = CreateFrame("Frame")
@@ -1278,20 +1626,25 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 					pendingBuy.itemID,
 					unitP or effUnit
 				)
-			elseif totalP and GetMoney and totalP > GetMoney() then
-				CancelPendingCommodity(L["SNIPE_BUY_NOMONEY"], nil)
 			else
-				local confirmTok = pendingBuy.token
-				pendingBuy.state = "confirm"
-				pendingBuy.unitPrice = unitP
-				pendingBuy.totalPrice = totalP or (unitP * pendingBuy.qty)
-				ns:RefreshSnipeBar()
-				if C_Timer and C_Timer.After then
-					C_Timer.After(20.0, function()
-						if pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "confirm" then
-							CancelPendingCommodity(nil, nil)
-						end
-					end)
+				local money = (GetMoney and GetMoney()) or 0
+				local calcTotal = totalP or (unitP * pendingBuy.qty)
+				local okSpend, errMsg = ValidateBuyoutSpend(calcTotal, money)
+				if not okSpend then
+					CancelPendingCommodity(errMsg, nil)
+				else
+					local confirmTok = pendingBuy.token
+					pendingBuy.state = "confirm"
+					pendingBuy.unitPrice = unitP
+					pendingBuy.totalPrice = calcTotal
+					ns:RefreshSnipeBar()
+					if C_Timer and C_Timer.After then
+						C_Timer.After(20.0, function()
+							if pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "confirm" then
+								CancelPendingCommodity(nil, nil)
+							end
+						end)
+					end
 				end
 			end
 		end
@@ -1342,6 +1695,7 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		if snipeBar then
 			snipeBar:Hide()
 		end
+		ns:HideSniperSettingsFrame("ah")
 	elseif next(ns:GetSnipeTargets()) ~= nil then
 		ns:RefreshSnipeUI()
 	end

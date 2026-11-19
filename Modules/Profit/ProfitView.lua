@@ -134,6 +134,9 @@ function ProfitMod:CreateView(parent)
 	local function SelectSubMode(mode)
 		f.subMode = mode
 		f.offset = 0
+		if mode ~= "sniper" and ns.HideSniperSettingsFrame then
+			ns:HideSniperSettingsFrame("tab")
+		end
 		ns.SetTabButtonActive(subProfitBtn, mode == "profit")
 		ns.SetTabButtonActive(subSniperBtn, mode == "sniper")
 		ns.SetTabButtonActive(subLogBtn, mode == "log")
@@ -263,7 +266,7 @@ function ProfitMod:CreateView(parent)
 	f.sniperTop = sniperTop
 
 	local importShopBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	importShopBtn:SetSize(124, 20)
+	importShopBtn:SetSize(116, 20)
 	importShopBtn:SetPoint("TOPLEFT", 0, 0)
 	importShopBtn:SetText(L["SNIPE_IMPORT_SHOP"])
 	importShopBtn:SetScript("OnClick", function()
@@ -273,7 +276,7 @@ function ProfitMod:CreateView(parent)
 	end)
 
 	local scanSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	scanSnipeBtn:SetSize(100, 20)
+	scanSnipeBtn:SetSize(94, 20)
 	scanSnipeBtn:SetPoint("LEFT", importShopBtn, "RIGHT", 4, 0)
 	scanSnipeBtn:SetText(L["SNIPE_SCAN_BTN"])
 	scanSnipeBtn:SetScript("OnClick", function()
@@ -290,7 +293,7 @@ function ProfitMod:CreateView(parent)
 	scanSnipeBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	local repriceBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	repriceBtn:SetSize(98, 20)
+	repriceBtn:SetSize(88, 20)
 	repriceBtn:SetPoint("LEFT", scanSnipeBtn, "RIGHT", 4, 0)
 	repriceBtn:SetText(L["SNIPE_REPRICE_BTN"])
 	repriceBtn:SetScript("OnClick", function()
@@ -307,7 +310,7 @@ function ProfitMod:CreateView(parent)
 	repriceBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	local clearSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
-	clearSnipeBtn:SetSize(78, 20)
+	clearSnipeBtn:SetSize(72, 20)
 	clearSnipeBtn:SetPoint("LEFT", repriceBtn, "RIGHT", 4, 0)
 	clearSnipeBtn:SetText(L["QUEUE_CLEAR"])
 	clearSnipeBtn:SetScript("OnClick", function()
@@ -315,6 +318,28 @@ function ProfitMod:CreateView(parent)
 			ns:ClearSnipeTargets()
 		end
 	end)
+
+	local snipeSettingsBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
+	snipeSettingsBtn:SetSize(94, 20)
+	snipeSettingsBtn:SetPoint("LEFT", clearSnipeBtn, "RIGHT", 4, 0)
+	snipeSettingsBtn:SetText(L["SNIPE_SETTINGS_BTN"])
+	snipeSettingsBtn:SetScript("OnClick", function(self)
+		if ns.ToggleSniperSettingsFrame then
+			ns:ToggleSniperSettingsFrame(self, "tab")
+		end
+	end)
+	snipeSettingsBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText(L["SNIPE_SETTINGS_TITLE"], 1, 0.82, 0)
+		GameTooltip:AddLine(L["SNIPE_SETTINGS_TIP"], 0.85, 0.85, 0.85, true)
+		if ns.FormatSnipeLimitsSummary then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(string.format(L["SNIPE_LIMIT_SUMMARY_FMT"], ns:FormatSnipeLimitsSummary()), 0.4, 0.9, 1, true)
+		end
+		GameTooltip:Show()
+	end)
+	snipeSettingsBtn:SetScript("OnLeave", GameTooltip_Hide)
+	f.snipeSettingsBtn = snipeSettingsBtn
 
 	local cbAutoScan = CreateFrame("CheckButton", nil, sniperTop, "UICheckButtonTemplate")
 	cbAutoScan:SetSize(20, 20)
@@ -1210,6 +1235,9 @@ function ProfitMod:OnFrameDestroyed()
 end
 
 function ProfitMod:OnLanguageChanged()
+	if ns.ResetSniperSettingsFrame then
+		ns:ResetSniperSettingsFrame()
+	end
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
 	end
@@ -1236,6 +1264,9 @@ function ProfitMod:OnEnable()
 end
 
 function ProfitMod:OnDisable()
+	if ns.HideSniperSettingsFrame then
+		ns:HideSniperSettingsFrame()
+	end
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
 	end

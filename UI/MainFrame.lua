@@ -281,6 +281,9 @@ function ns:CreateMainFrame()
 	f:SetBackdropColor(0.05, 0.045, 0.04, 0.98)
 	f:SetScript("OnHide", function()
 		ns._lastEnchantCraftAt = nil
+		if ns.HideSniperSettingsFrame then
+			ns:HideSniperSettingsFrame("tab")
+		end
 		if ns.ClearReplaceEnchantSpace then
 			ns.ClearReplaceEnchantSpace()
 		end
@@ -723,6 +726,9 @@ function ns:CreateMainFrame()
 			tabKey = "details"
 		end
 		f.topTab = tabKey
+		if tabKey ~= "profit" and ns.HideSniperSettingsFrame then
+			ns:HideSniperSettingsFrame("tab")
+		end
 		for _, t in ipairs(topTabs) do
 			local active = (t.key == tabKey)
 			if active and t.mod and not t.view then
@@ -1821,6 +1827,9 @@ function ns:ShowMainWindow()
 end
 
 function ns:HideMainWindow()
+	if self.HideSniperSettingsFrame then
+		self:HideSniperSettingsFrame("tab")
+	end
 	if self.settingsFrame and self.settingsFrame:IsShown() then
 		self.settingsFrame:Hide()
 	end

@@ -1525,6 +1525,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			filterSkillUp = false,
 			showUnlearned = false,
 			sortMode = "difficulty",
+			snipeMaxSpend = 100000,
+			snipeMinReserve = 0,
+			snipeMaxQty = 200,
 		}
 		ns.db.vendorPrices = ns.db.vendorPrices or {}
 		ns.db.trainerFees = ns.db.trainerFees or {}
