@@ -318,6 +318,11 @@ function ns:BuildProfitList(opts)
 	local onlyOwned = opts.onlyOwned == true
 	local includeAlts = opts.includeAlts == true
 	local freshOnly = opts.freshOnly == true
+	local includeTrainer = opts.includeTrainer == true
+	local includeVendor = opts.includeVendor == true
+	local includeOther = opts.includeOther == true
+	local rawFaction = UnitFactionGroup and UnitFactionGroup("player") or nil
+	local playerFaction = (rawFaction == "Alliance" and "A") or (rawFaction == "Horde" and "H") or nil
 
 	local key = table.concat({
 		tostring(self.lang or "ru"),
@@ -327,6 +332,10 @@ function ns:BuildProfitList(opts)
 		onlyOwned and "1" or "0",
 		includeAlts and "1" or "0",
 		freshOnly and "1" or "0",
+		includeTrainer and "1" or "0",
+		includeVendor and "1" or "0",
+		includeOther and "1" or "0",
+		tostring(playerFaction or ""),
 	}, "|")
 	local curPriceRev = self.GetPriceRevision and self:GetPriceRevision() or 0
 	local curInvRev = self.invRev or 0
@@ -334,8 +343,9 @@ function ns:BuildProfitList(opts)
 		return profitCache
 	end
 
+	local includeAnyUnlearned = includeTrainer or includeVendor or includeOther
 	local collected = {}
-	-- 1. Текущий персонаж: все изученные профессии (статическая база + liveRecipes)
+	-- 1. Текущий персонаж: изученные (+ выбранные неизученные) рецепты активных профессий
 	for sl in pairs(self.playerProfessions or {}) do
 		if profFilter == 0 or profFilter == sl then
 			local list = self.RecipesBySkill and self.RecipesBySkill[sl]
@@ -347,6 +357,22 @@ function ns:BuildProfitList(opts)
 							skillLine = sl,
 							isAlt = false,
 						}
+					elseif includeAnyUnlearned and self.ClassifyUnlearnedRecipe then
+						local srcKind, reqSkill, baseFee, scrollItemID = self:ClassifyUnlearnedRecipe(recipeID, playerFaction)
+						if (srcKind == "trainer" and includeTrainer)
+							or (srcKind == "vendor" and includeVendor)
+							or (srcKind == "other" and includeOther)
+						then
+							collected[recipeID] = {
+								recipeID = recipeID,
+								skillLine = sl,
+								isAlt = false,
+								unlearnedSource = srcKind,
+								reqSkill = reqSkill or 1,
+								acquireFee = baseFee,
+								scrollItemID = scrollItemID,
+							}
+						end
 					end
 				end
 			end
@@ -409,11 +435,17 @@ function ns:BuildProfitList(opts)
 			local passFresh = (not freshOnly) or (not ageDays or ageDays <= 3)
 			if passFresh then
 				local craftNow = 0
-				if not meta.isAlt and self.GetRecipeCraftCounts then
+				if not meta.isAlt and not meta.unlearnedSource and self.GetRecipeCraftCounts then
 					local direct, withCraft, _, _, withBank = self:GetRecipeCraftCounts(recipeID)
 					craftNow = math.max(direct or 0, withCraft or 0, withBank or 0)
 				end
 				if not onlyOwned or craftNow > 0 then
+					local profRank = (self.playerProfessions and self.playerProfessions[meta.skillLine] and self.playerProfessions[meta.skillLine].rank) or 0
+					local canLearnNow = (not meta.unlearnedSource) or (profRank >= (meta.reqSkill or 1))
+					local acquireFee = meta.acquireFee
+					if meta.unlearnedSource == "other" and meta.scrollItemID and self.GetAuctionPrice then
+						acquireFee = self:GetAuctionPrice(meta.scrollItemID)
+					end
 					local margin = (craftCost and craftCost > 0) and math.floor((evalProfit / craftCost) * 100 + 0.5) or 999
 					entries[#entries + 1] = {
 						recipeID = recipeID,
@@ -424,6 +456,11 @@ function ns:BuildProfitList(opts)
 						qualityHex = hex,
 						isAlt = meta.isAlt,
 						ownerName = meta.ownerName,
+						unlearnedSource = meta.unlearnedSource,
+						reqSkill = meta.reqSkill,
+						acquireFee = acquireFee,
+						scrollItemID = meta.scrollItemID,
+						canLearnNow = canLearnNow,
 						craftCost = craftCost,
 						outputValue = evalOut,
 						profit = evalProfit,

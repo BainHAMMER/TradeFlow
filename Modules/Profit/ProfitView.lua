@@ -6,8 +6,13 @@ local L = ns.L
 -------------------------------------------------------------------------------
 local ROW_H = 27
 local VISIBLE_ROWS = 8
+local PROFIT_VISIBLE_ROWS = 7
 local CHANNELS = { "all", "safe", "ah" }
 local SORTS = { "profit", "gph", "margin", "craftable" }
+
+local function GetVisibleRows(f)
+	return (f and f.subMode == "profit") and PROFIT_VISIBLE_ROWS or VISIBLE_ROWS
+end
 
 local ProfitMod = {
 	id = "profit",
@@ -97,6 +102,9 @@ function ProfitMod:GetFilters()
 		onlyOwned = opts.profitOnlyOwned == true,
 		includeAlts = opts.profitIncludeAlts == true,
 		freshOnly = opts.profitFreshOnly ~= false,
+		includeTrainer = opts.profitIncludeTrainer == true,
+		includeVendor = opts.profitIncludeVendor == true,
+		includeOther = opts.profitIncludeOther == true,
 	}
 end
 
@@ -144,7 +152,7 @@ function ProfitMod:CreateView(parent)
 	local top = CreateFrame("Frame", nil, f)
 	top:SetPoint("TOPLEFT", 8, -28)
 	top:SetPoint("TOPRIGHT", -8, -28)
-	top:SetHeight(48)
+	top:SetHeight(68)
 	f.profitTop = top
 
 	local channelBtn = CreateFrame("Button", nil, top, "UIPanelButtonTemplate")
@@ -171,14 +179,20 @@ function ProfitMod:CreateView(parent)
 	end)
 	f.sortBtn = sortBtn
 
-	local function MakeCheck(label, optKey, xAnchor, relativeTo, widthHit)
+	local function MakeCheck(label, optKey, xAnchor, relativeTo, widthHit, tipText)
 		local cb = CreateFrame("CheckButton", nil, top, "UICheckButtonTemplate")
 		cb:SetSize(20, 20)
 		cb:SetPoint("LEFT", relativeTo, "RIGHT", xAnchor, 0)
 		cb.text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		cb.text:SetPoint("LEFT", cb, "RIGHT", 1, 0)
 		cb.text:SetText(label)
-		cb:SetHitRectInsets(0, -widthHit, 0, 0)
+		local w = math.ceil((cb.text.GetStringWidth and cb.text:GetStringWidth()) or 0)
+		if widthHit and widthHit > 0 and w < 20 then
+			w = widthHit
+		elseif w < 20 then
+			w = widthHit or 60
+		end
+		cb:SetHitRectInsets(0, -(math.max(widthHit or 0, w + 4)), 0, 0)
 		cb:SetScript("OnClick", function(self)
 			if ns.db and ns.db.options then
 				ns.db.options[optKey] = self:GetChecked() and true or false
@@ -186,6 +200,15 @@ function ProfitMod:CreateView(parent)
 			f.offset = 0
 			ProfitMod:OnRefresh()
 		end)
+		if tipText then
+			cb:SetScript("OnEnter", function(self)
+				GameTooltip:SetOwner(self, "ANCHOR_TOP")
+				GameTooltip:SetText(label, 1, 0.82, 0)
+				GameTooltip:AddLine(tipText, 1, 1, 1, true)
+				GameTooltip:Show()
+			end)
+			cb:SetScript("OnLeave", GameTooltip_Hide)
+		end
 		return cb
 	end
 
@@ -223,6 +246,15 @@ function ProfitMod:CreateView(parent)
 	countText:SetPoint("TOPRIGHT", -2, -28)
 	countText:SetJustifyH("RIGHT")
 	f.countText = countText
+
+	-- 3-я строка фильтров: включение неизученных рецептов (Тренер / Вендор / Прочие)
+	local sourcesLbl = top:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	sourcesLbl:SetPoint("TOPLEFT", 0, -51)
+	sourcesLbl:SetText(L["PLANNER_SOURCES_LABEL"])
+
+	f.cbSrcTrainer = MakeCheck(L["PLANNER_INCLUDE_TRAINER"], "profitIncludeTrainer", 6, sourcesLbl, 62, L["PLANNER_INCLUDE_TRAINER_TIP"])
+	f.cbSrcVendor = MakeCheck(L["PLANNER_INCLUDE_VENDOR"], "profitIncludeVendor", 10, f.cbSrcTrainer.text, 140, L["PLANNER_INCLUDE_VENDOR_TIP"])
+	f.cbSrcOther = MakeCheck(L["PLANNER_INCLUDE_OTHER"], "profitIncludeOther", 10, f.cbSrcVendor.text, 52, L["PLANNER_INCLUDE_OTHER_TIP"])
 
 	local sniperTop = CreateFrame("Frame", nil, f)
 	sniperTop:SetPoint("TOPLEFT", 8, -28)
@@ -394,7 +426,7 @@ function ProfitMod:CreateView(parent)
 	listBox:SetBackdropBorderColor(0.38, 0.30, 0.16, 0.75)
 	listBox:EnableMouseWheel(true)
 	listBox:SetScript("OnMouseWheel", function(_, delta)
-		local maxOff = math.max(0, #f.entries - VISIBLE_ROWS)
+		local maxOff = math.max(0, #f.entries - GetVisibleRows(f))
 		f.offset = math.max(0, math.min(maxOff, f.offset - delta * 2))
 		ProfitMod:RenderRows()
 	end)
@@ -577,15 +609,16 @@ function ProfitMod:CreateView(parent)
 			if ns:HandleItemClick(e.outItemID, e.recipeID) then
 				return
 			end
-			local canCraftHere = (not e.isAlt) and (not e.charKey or e.charKey == ns:CharKey()) and ns:IsRecipeLearned(e.recipeID)
+			local isOwnChar = (not e.isAlt) and (not e.charKey or e.charKey == ns:CharKey())
+			local canOpenDetails = isOwnChar and (ns:IsRecipeLearned(e.recipeID) or e.unlearnedSource ~= nil)
 			if button == "RightButton" then
-				if canCraftHere and ns.QueueAddRecipe then
+				if isOwnChar and ns.QueueAddRecipe then
 					ns:QueueAddRecipe(e.recipeID, 1)
 				end
 				return
 			end
 			local sl = e.skillLine or (ns.GetRecipeRecord and (ns:GetRecipeRecord(e.recipeID) or {}).skillLine)
-			if canCraftHere and sl and ns.playerProfessions[sl] then
+			if canOpenDetails and sl and ns.playerProfessions[sl] then
 				if ns.mainFrame and ns.mainFrame.SelectTopTab then
 					ns.mainFrame.SelectTopTab("details", true)
 				end
@@ -630,6 +663,21 @@ function ProfitMod:CreateView(parent)
 							GameTooltip:AddLine(string.format(L["PROFIT_GPH_BUY_SUB"], table.concat(names, ", ")), 1, 0.85, 0.4, true)
 						end
 					end
+					if e.unlearnedSource then
+						if not addedGap then
+							GameTooltip:AddLine(" ")
+							addedGap = true
+						end
+						local tagKey = (e.unlearnedSource == "trainer" and "PROFIT_UNLEARNED_TRAINER")
+							or (e.unlearnedSource == "vendor" and "PROFIT_UNLEARNED_VENDOR")
+							or "PROFIT_UNLEARNED_OTHER"
+						local srcLabel = string.format(L[tagKey], e.reqSkill or 1)
+						if e.acquireFee and e.acquireFee > 0 then
+							GameTooltip:AddLine(string.format(L["PROFIT_UNLEARNED_TIP_FEE"], srcLabel, ns.FormatMoney(e.acquireFee)), 1, 0.82, 0, true)
+						else
+							GameTooltip:AddLine(string.format(L["PROFIT_UNLEARNED_TIP_NOFEE"], srcLabel), 0.7, 0.85, 1, true)
+						end
+					end
 					if e.isAlt and e.ownerName then
 						if not addedGap then
 							GameTooltip:AddLine(" ")
@@ -663,9 +711,10 @@ function ProfitMod:RenderRows()
 	f.emptyLabel:SetText(isSniper and L["SNIPE_EMPTY"] or (isLog and ((logMode == "cashflow") and L["PROFIT_LOG_CASH_EMPTY"] or L["PROFIT_LOG_EMPTY"]) or L["PROFIT_EMPTY"]))
 	f.emptyLabel:SetShown(#list == 0)
 
+	local visRows = GetVisibleRows(f)
 	for i = 1, VISIBLE_ROWS do
 		local row = f.rows[i]
-		local e = list[i + f.offset]
+		local e = (i <= visRows) and list[i + f.offset] or nil
 		row.entryData = e
 		if e then
 			row:Show()
@@ -778,7 +827,22 @@ function ProfitMod:RenderRows()
 				local profTag = string.format("|cff66ccff[%s]|r", GetShortProfName(e.skillLine))
 				local altTag = (e.isAlt and e.ownerName) and string.format(" |cffffa040[%s]|r", e.ownerName) or ""
 				local cntTag = (e.craftNow and e.craftNow > 0) and string.format(" |cff40ff40[%d]|r", e.craftNow) or ""
-				row.title:SetText(string.format("%s%s|r %s%s%s", e.qualityHex or "|cffffffff", e.name, profTag, cntTag, altTag))
+				local srcBadge = ""
+				if e.unlearnedSource then
+					local tagKey, colorHex
+					if e.unlearnedSource == "trainer" then
+						tagKey = "PROFIT_UNLEARNED_TRAINER"
+						colorHex = e.canLearnNow and "|cffffd100" or "|cffff8840"
+					elseif e.unlearnedSource == "vendor" then
+						tagKey = "PROFIT_UNLEARNED_VENDOR"
+						colorHex = e.canLearnNow and "|cff66d9ff" or "|cff8899aa"
+					else
+						tagKey = "PROFIT_UNLEARNED_OTHER"
+						colorHex = e.canLearnNow and "|cff88ccff" or "|cff888899"
+					end
+					srcBadge = string.format(" %s[%s]|r", colorHex, string.format(L[tagKey], e.reqSkill or 1))
+				end
+				row.title:SetText(string.format("%s%s|r %s%s%s%s", e.qualityHex or "|cffffffff", e.name, profTag, srcBadge, cntTag, altTag))
 
 				local filters = self:GetFilters()
 				local useGph = (filters.sortBy == "gph") and e.gph and e.gph > 0
@@ -835,7 +899,7 @@ function ProfitMod:OnRefresh()
 	f.sniperTop:SetShown(isSniper)
 	f.logTop:SetShown(isLog)
 	f.listBox:ClearAllPoints()
-	f.listBox:SetPoint("TOPLEFT", 8, isLog and -56 or -78)
+	f.listBox:SetPoint("TOPLEFT", 8, isLog and -56 or (isSniper and -78 or -98))
 	f.listBox:SetPoint("BOTTOMRIGHT", -8, 6)
 
 	if isLog then
@@ -922,10 +986,13 @@ function ProfitMod:OnRefresh()
 	f.freshBtn:SetText(filters.freshOnly and L["PROFIT_FRESH_ON"] or L["PROFIT_FRESH_OFF"])
 	f.cbOwned:SetChecked(filters.onlyOwned)
 	f.cbAlts:SetChecked(filters.includeAlts)
+	f.cbSrcTrainer:SetChecked(filters.includeTrainer)
+	f.cbSrcVendor:SetChecked(filters.includeVendor)
+	f.cbSrcOther:SetChecked(filters.includeOther)
 
 	f.entries = ns.BuildProfitList and ns:BuildProfitList(filters) or {}
 	f.countText:SetText(string.format(L["PROFIT_FOUND"], #f.entries))
-	local maxOff = math.max(0, #f.entries - VISIBLE_ROWS)
+	local maxOff = math.max(0, #f.entries - GetVisibleRows(f))
 	if f.offset > maxOff then
 		f.offset = maxOff
 	end

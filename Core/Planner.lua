@@ -144,6 +144,38 @@ local function GetRankMilestone(skillLine, targetCap)
 	return nil
 end
 
+-- Классифицирует неизученный рецепт по источнику получения для игрока заданной фракции:
+-- "trainer" | "vendor" (всегда в наличии) | "other" (прочие свитки/лимит/дроп/АХ) | nil (базовый/без источника)
+function ns:ClassifyUnlearnedRecipe(recipeID, playerFaction)
+	if not recipeID then
+		return nil
+	end
+	if self.BasicRecipes and self.BasicRecipes[recipeID] then
+		return nil
+	end
+	if not playerFaction then
+		local rawFaction = UnitFactionGroup and UnitFactionGroup("player") or nil
+		playerFaction = (rawFaction == "Alliance" and "A") or (rawFaction == "Horde" and "H") or nil
+	end
+	local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
+	if isTrainer then
+		return "trainer", reqSkill or 1, trainerFee or 0, nil
+	end
+	local scroll = self.RecipeScrolls and self.RecipeScrolls[recipeID]
+	local scrollItemID = scroll and scroll[1] or nil
+	local vendorRec = self.VendorRecipeScrolls and self.VendorRecipeScrolls[recipeID] or nil
+	if vendorRec then
+		local vFac = vendorRec[3]
+		if not vFac or vFac == "" or (playerFaction and vFac == playerFaction) then
+			return "vendor", reqSkill or 1, vendorRec[2] or 0, scrollItemID or vendorRec[1]
+		end
+	end
+	if scrollItemID then
+		return "other", reqSkill or 1, nil, scrollItemID
+	end
+	return nil
+end
+
 -- Строит пошаговый маршрут прокачки от currentSkill до targetSkill
 function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	if not skillLine then
@@ -174,25 +206,20 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 	for _, recipeID in ipairs(recipeList) do
 		if not skipped[recipeID] then
 			local learned = self:IsRecipeLearned(recipeID)
-			local reqSkill, trainerFee, isTrainer = self:GetRecipeRequiredSkill(recipeID)
-			local scroll = self.RecipeScrolls and self.RecipeScrolls[recipeID]
-			local scrollItemID = scroll and scroll[1] or nil
-			local vendorRec = (not learned and not isTrainer) and self.VendorRecipeScrolls and self.VendorRecipeScrolls[recipeID] or nil
-			local isVendorScroll = false
-			local vendorScrollPrice = nil
-			local th = self:GetRecipeThresholds(recipeID)
-			-- Базовые стартовые рецепты (оранжевые с 1, без свитка и тренера) тоже доступны
 			local isBasic = self.BasicRecipes and self.BasicRecipes[recipeID]
-			if vendorRec and not isBasic then
-				local vFac = vendorRec[3]
-				if not vFac or vFac == "" or (playerFaction and vFac == playerFaction) then
-					isVendorScroll = true
-					vendorScrollPrice = vendorRec[2]
-					scrollItemID = scrollItemID or vendorRec[1]
-				end
+			local srcKind, reqSkill, baseFee, scrollItemID = nil, 1, 0, nil
+			if learned then
+				reqSkill = 1
+			elseif isBasic then
+				reqSkill = select(1, self:GetRecipeRequiredSkill(recipeID)) or 1
+			else
+				srcKind, reqSkill, baseFee, scrollItemID = self:ClassifyUnlearnedRecipe(recipeID, playerFaction)
 			end
-			local isOtherScroll = (not learned and not isBasic and not isTrainer and not isVendorScroll) and (scrollItemID ~= nil)
-			local scrollPrice = (isOtherScroll and includeOther) and self:GetAuctionPrice(scrollItemID) or nil
+			local isTrainer = (srcKind == "trainer")
+			local isVendorScroll = (srcKind == "vendor")
+			local isOtherScroll = (srcKind == "other")
+			local scrollPrice = (isOtherScroll and includeOther and scrollItemID) and self:GetAuctionPrice(scrollItemID) or nil
+			local th = self:GetRecipeThresholds(recipeID)
 			local hasKnownAcquisition = learned
 				or isBasic
 				or (includeTrainer and isTrainer)
@@ -209,10 +236,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					local unitReturn = deductVendor and effectiveDeduct or math.max(outVal or 0, vendorSell)
 					local acquireFee = 0
 					if not learned and not isBasic then
-						if isTrainer then
-							acquireFee = trainerFee or 0
-						elseif isVendorScroll then
-							acquireFee = vendorScrollPrice or 0
+						if isTrainer or isVendorScroll then
+							acquireFee = baseFee or 0
 						elseif scrollPrice and scrollPrice > 0 then
 							acquireFee = scrollPrice
 						end
