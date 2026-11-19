@@ -68,6 +68,19 @@ local DE_TABLE = {
 	},
 }
 
+ns.DisenchantMatIDs = {}
+for _, byQual in pairs(DE_TABLE) do
+	for _, rows in pairs(byQual) do
+		for _, r in ipairs(rows) do
+			for x = 5, #r, 3 do
+				if r[x] and r[x] > 0 then
+					ns.DisenchantMatIDs[r[x]] = true
+				end
+			end
+		end
+	end
+end
+
 local function DisenchantRow(classID, quality, iLevel)
 	local rows = DE_TABLE[classID] and DE_TABLE[classID][quality]
 	if not rows then

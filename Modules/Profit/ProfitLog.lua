@@ -12,8 +12,11 @@ local COALESCE_SECONDS = 30
 ns._trackedAhBuyItems = ns._trackedAhBuyItems or {}
 
 local consumedReagentSet = nil
+local disenchantNameMap = nil
+local soldSubjectPattern = nil
 local ahHooksInstalled = false
 local lastSnipeRec = nil
+local lastDisenchantAt = 0
 local pendingAhComm = nil
 local pendingAhBid = nil
 local lastViewedAhItemID = nil
@@ -21,6 +24,8 @@ local merchantMoney = 0
 local merchantBagSnap = nil
 local mailMoney = 0
 local mailSellerSnap = nil
+local pendingMailMoney = { amount = 0, ts = 0 }
+local pendingMailItems = {}
 
 local function HasAuctionator()
 	local api = _G.Auctionator and Auctionator.API and Auctionator.API.v1
@@ -672,27 +677,116 @@ local function CheckMerchantSoldCrafted()
 	merchantMoney = curMoney
 end
 
-local function BuildMailSellerSnap()
-	if not (HasAuctionator() and GetInboxNumItems and GetInboxHeaderInfo and GetInboxInvoiceInfo) then
+local MAIL_PAIR_WINDOW = 5
+
+local function GetDisenchantMatNameMap()
+	disenchantNameMap = disenchantNameMap or {}
+	if not ns.DisenchantMatIDs then
+		return disenchantNameMap
+	end
+	for itemID in pairs(ns.DisenchantMatIDs) do
+		local name = ns.GetItemDisplay and select(1, ns:GetItemDisplay(itemID))
+		if (not name or name == "" or name:find("^#")) and C_Item and C_Item.GetItemNameByID then
+			name = C_Item.GetItemNameByID(itemID)
+		end
+		if name and name ~= "" and not name:find("^#") then
+			disenchantNameMap[name] = itemID
+		elseif ns.RequestItemData then
+			ns:RequestItemData(itemID)
+		end
+	end
+	return disenchantNameMap
+end
+
+local function ResolveTrackedSellItemID(cleanName)
+	if not cleanName or cleanName == "" then
 		return nil
 	end
 	local _, craftedNames = EnsureCraftedItemsDB()
-	if not next(craftedNames) then
+	if craftedNames[cleanName] then
+		return craftedNames[cleanName]
+	end
+	return GetDisenchantMatNameMap()[cleanName]
+end
+
+local function GetAuctionSoldSubjectPattern()
+	if soldSubjectPattern ~= nil then
+		return soldSubjectPattern or nil
+	end
+	local tmpl = _G.AUCTION_SOLD_MAIL_SUBJECT
+	if type(tmpl) ~= "string" or tmpl == "" then
+		soldSubjectPattern = false
+		return nil
+	end
+	local escaped = tmpl:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+	soldSubjectPattern = "^" .. escaped:gsub("%%%%s", "(.+)") .. "$"
+	return soldSubjectPattern
+end
+
+local function ParseSoldItemName(rawName)
+	if type(rawName) ~= "string" or rawName == "" then
+		return nil, 1
+	end
+	local clean, suffixQty = rawName:match("^(.-)%s*%((%d+)%)%s*$")
+	if not clean then
+		clean, suffixQty = rawName:match("^(.-)%s+[xX](%d+)%s*$")
+	end
+	if not clean then
+		clean, suffixQty = rawName:match("^(.-)%s+х(%d+)%s*$")
+	end
+	if not clean then
+		clean, suffixQty = rawName:match("^(.-)%s+Х(%d+)%s*$")
+	end
+	clean = (clean or rawName):gsub("^%s+", ""):gsub("%s+$", "")
+	return clean, tonumber(suffixQty) or 1
+end
+
+local function MatchLootQty(msg)
+	return tonumber(
+		msg:match("|h|r%s*[xX](%d+)")
+		or msg:match("|h|r%s*х(%d+)")
+		or msg:match("|h|r%s*Х(%d+)")
+		or msg:match("%]%s*[xX](%d+)")
+		or msg:match("%]%s*х(%d+)")
+		or msg:match("%]%s*Х(%d+)")
+	) or 1
+end
+
+local function BuildMailSellerSnap()
+	if not (HasAuctionator() and GetInboxNumItems and GetInboxHeaderInfo) then
 		return nil
 	end
 	local counts = {}
 	local entries = {}
+	local subjPat = GetAuctionSoldSubjectPattern()
 	local n = GetInboxNumItems() or 0
 	for i = 1, n do
 		local _, _, sender, subject, money = GetInboxHeaderInfo(i)
 		if money and money > 0 then
-			local ok, invoiceType, itemName, _, _, _, _, _, _, _, _, count = pcall(GetInboxInvoiceInfo, i)
-			if ok and invoiceType == "seller" and itemName and itemName ~= "" and craftedNames[itemName] then
-				local qty = math.max(1, tonumber(count) or 1)
-				local key = (sender or "") .. "|" .. (subject or "") .. "|" .. itemName .. "|" .. qty .. "|" .. money
-				counts[key] = (counts[key] or 0) + 1
-				if not entries[key] then
-					entries[key] = { itemName = itemName, count = qty, money = money }
+			local invoiceType, itemName, count
+			if GetInboxInvoiceInfo then
+				local ok, iType, iName, _, _, _, _, _, _, _, _, iCount = pcall(GetInboxInvoiceInfo, i)
+				if ok then
+					invoiceType, itemName, count = iType, iName, iCount
+				end
+			end
+			if (not itemName or itemName == "") and subjPat and type(subject) == "string" then
+				local extracted = subject:match(subjPat)
+				if extracted and extracted ~= "" then
+					invoiceType = invoiceType or "seller"
+					itemName = extracted
+				end
+			end
+			if invoiceType == "seller" and itemName and itemName ~= "" then
+				local cleanName, suffixQty = ParseSoldItemName(itemName)
+				local itemID = ResolveTrackedSellItemID(cleanName)
+				if itemID then
+					local qty = math.max(1, tonumber(count) or suffixQty or 1)
+					local key = (sender or "") .. "|" .. (subject or "") .. "|" .. itemID .. "|" .. qty .. "|" .. money
+					counts[key] = (counts[key] or 0) + 1
+					if not entries[key] then
+						entries[key] = { itemID = itemID, count = qty, money = money }
+					end
 				end
 			end
 		end
@@ -700,40 +794,81 @@ local function BuildMailSellerSnap()
 	return { counts = counts, entries = entries }
 end
 
-local function CheckMailSellerCollected()
-	if not (mailSellerSnap and MailFrame and MailFrame:IsShown()) then
+local function FlushPendingMailSales(now)
+	if (now - (pendingMailMoney.ts or 0)) > MAIL_PAIR_WINDOW then
+		pendingMailMoney.amount = 0
+		pendingMailMoney.ts = 0
+	end
+	local kept = {}
+	for _, entry in ipairs(pendingMailItems) do
+		if (now - (entry.ts or 0)) <= MAIL_PAIR_WINDOW then
+			kept[#kept + 1] = entry
+		end
+	end
+	pendingMailItems = kept
+
+	if (pendingMailMoney.amount or 0) <= 0 or #pendingMailItems == 0 then
 		return
 	end
-	local curMoney = GetMoney and GetMoney() or 0
+
+	local craftedItems = EnsureCraftedItemsDB()
+	while (pendingMailMoney.amount or 0) > 0 and #pendingMailItems > 0 do
+		local matchIdx = nil
+		for idx, entry in ipairs(pendingMailItems) do
+			if math.abs(entry.money - pendingMailMoney.amount) <= 5 then
+				matchIdx = idx
+				break
+			end
+		end
+		if not matchIdx then
+			for idx, entry in ipairs(pendingMailItems) do
+				if entry.money <= (pendingMailMoney.amount + 5) then
+					matchIdx = idx
+					break
+				end
+			end
+		end
+		if not matchIdx then
+			break
+		end
+		local entry = table.remove(pendingMailItems, matchIdx)
+		local earned = math.min(entry.money, pendingMailMoney.amount)
+		if earned > 0 then
+			ns:RecordCashflowIncome("ah_sell", entry.itemID, entry.count, earned)
+			if craftedItems[entry.itemID] then
+				craftedItems[entry.itemID] = math.max(0, craftedItems[entry.itemID] - entry.count)
+			end
+			pendingMailMoney.amount = math.max(0, pendingMailMoney.amount - earned)
+		end
+	end
+end
+
+local function CheckMailSellerUpdate(now)
+	if not (MailFrame and MailFrame:IsShown()) then
+		return
+	end
 	local curSnap = BuildMailSellerSnap()
-	if curMoney > mailMoney and curSnap then
-		local gained = curMoney - mailMoney
-		local craftedItems, craftedNames = EnsureCraftedItemsDB()
+	if mailSellerSnap and curSnap then
 		for key, prevCount in pairs(mailSellerSnap.counts) do
 			local curCount = curSnap.counts[key] or 0
 			local collected = prevCount - curCount
 			if collected > 0 then
 				local info = mailSellerSnap.entries[key]
-				local itemID = info and craftedNames[info.itemName]
-				if itemID and info.money > 0 then
+				if info and info.itemID and (info.money or 0) > 0 then
 					for _ = 1, collected do
-						if info.money <= gained + 5 then
-							local earned = math.min(info.money, gained)
-							if earned > 0 then
-								ns:RecordCashflowIncome("ah_sell", itemID, info.count, earned)
-								if craftedItems[itemID] then
-									craftedItems[itemID] = math.max(0, craftedItems[itemID] - info.count)
-								end
-								gained = math.max(0, gained - earned)
-							end
-						end
+						pendingMailItems[#pendingMailItems + 1] = {
+							itemID = info.itemID,
+							count = info.count,
+							money = info.money,
+							ts = now,
+						}
 					end
 				end
 			end
 		end
 	end
 	mailSellerSnap = curSnap
-	mailMoney = curMoney
+	FlushPendingMailSales(now)
 end
 
 local txFrame = CreateFrame("Frame")
@@ -753,11 +888,13 @@ for _, ev in ipairs({
 	"MAIL_CLOSED",
 	"MAIL_INBOX_UPDATE",
 	"PLAYER_MONEY",
+	"UNIT_SPELLCAST_SUCCEEDED",
+	"CHAT_MSG_LOOT",
 }) do
 	pcall(txFrame.RegisterEvent, txFrame, ev)
 end
 
-txFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
+txFrame:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
 	local now = GetTime and GetTime() or 0
 	if event == "PLAYER_LOGIN" then
 		InstallAhHooks()
@@ -793,6 +930,24 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 				ns:RecordTradeFlowPurchase("ah_buy", p.itemID, p.qty, p.totalPrice)
 			end
 		end
+	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+		if arg1 == "player" and tonumber(arg3) == 13262 then
+			lastDisenchantAt = now
+		end
+	elseif event == "CHAT_MSG_LOOT" then
+		if lastDisenchantAt > 0 and (now - lastDisenchantAt) <= 3.0 and type(arg1) == "string" then
+			local itemID = tonumber(arg1:match("item:(%d+)"))
+			if itemID and itemID > 0 then
+				local itemName = arg1:match("|h%[(.-)%]|h") or arg1:match("%[(.-)%]")
+				local qty = MatchLootQty(arg1)
+				local craftedItems, craftedNames = EnsureCraftedItemsDB()
+				craftedItems[itemID] = (craftedItems[itemID] or 0) + qty
+				if itemName and itemName ~= "" then
+					craftedNames[itemName] = itemID
+				end
+				PruneCraftedTrack(craftedItems, craftedNames)
+			end
+		end
 	elseif event == "MERCHANT_SHOW" then
 		SnapshotMerchantBags()
 	elseif event == "MERCHANT_CLOSED" then
@@ -802,18 +957,19 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			CheckMerchantSoldCrafted()
 		end
 	elseif event == "MAIL_SHOW" then
+		GetDisenchantMatNameMap()
 		mailMoney = GetMoney and GetMoney() or 0
+		pendingMailMoney = { amount = 0, ts = 0 }
+		pendingMailItems = {}
 		mailSellerSnap = BuildMailSellerSnap()
 	elseif event == "MAIL_CLOSED" then
+		FlushPendingMailSales(now)
 		mailSellerSnap = nil
+		pendingMailMoney = { amount = 0, ts = 0 }
+		pendingMailItems = {}
 	elseif event == "MAIL_INBOX_UPDATE" then
 		if MailFrame and MailFrame:IsShown() then
-			if mailSellerSnap then
-				CheckMailSellerCollected()
-			else
-				mailMoney = GetMoney and GetMoney() or 0
-				mailSellerSnap = BuildMailSellerSnap()
-			end
+			CheckMailSellerUpdate(now)
 		end
 	elseif event == "PLAYER_MONEY" then
 		if pendingAhBid then
@@ -824,8 +980,14 @@ txFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 				ns:RecordTradeFlowPurchase("ah_buy", b.itemID, 1, b.amount)
 			end
 		end
-		if MailFrame and MailFrame:IsShown() and mailSellerSnap then
-			CheckMailSellerCollected()
+		if MailFrame and MailFrame:IsShown() then
+			local curM = GetMoney and GetMoney() or 0
+			if curM > mailMoney then
+				pendingMailMoney.amount = (pendingMailMoney.amount or 0) + (curM - mailMoney)
+				pendingMailMoney.ts = now
+			end
+			mailMoney = curM
+			FlushPendingMailSales(now)
 		end
 	end
 end)

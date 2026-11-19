@@ -63,6 +63,7 @@ ns.Locales.en = {
 	["PROFIT_FOUND"] = "Found: %d",
 	["PROFIT_EMPTY"] = "No profitable recipes match the filters (open professions or scan AH prices).",
 	["PROFIT_SUB_FMT"] = "%s | %s -> %s",
+	["PROFIT_LOG_SUB_FMT"] = "%s | %s -> ~%s",
 	["PROFIT_SRC_VENDOR"] = "Vendor",
 	["PROFIT_SRC_DE"] = "Disenchant -5%",
 	["PROFIT_SRC_AH"] = "Auction -5%",

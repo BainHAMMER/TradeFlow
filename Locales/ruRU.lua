@@ -63,6 +63,7 @@ ns.Locales.ru = {
 	["PROFIT_FOUND"] = "Найдено: %d",
 	["PROFIT_EMPTY"] = "Нет прибыльных рецептов под выбранные фильтры (откройте профессии или обновите цены Auctionator).",
 	["PROFIT_SUB_FMT"] = "%s | %s -> %s",
+	["PROFIT_LOG_SUB_FMT"] = "%s | %s -> ~%s",
 	["PROFIT_SRC_VENDOR"] = "Торговец",
 	["PROFIT_SRC_DE"] = "Распыл -5%",
 	["PROFIT_SRC_AH"] = "Аукцион -5%",
