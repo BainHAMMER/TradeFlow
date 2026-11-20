@@ -138,6 +138,158 @@ function ns:FindBestProducerRecipe(itemID, visiting, allowUnlearned, queueSet, p
 	return bestID, bestUnitCraft
 end
 
+local function DrainDeficitFromPool(itemID, deficit, pool, queueSet, parentSkillLine, visiting)
+	if not itemID or itemID <= 0 or deficit <= 0 then
+		return
+	end
+	visiting = visiting or {}
+	if visiting[itemID] then
+		return
+	end
+	visiting[itemID] = true
+	local prodRecipeID = ns:FindBestProducerRecipe(itemID, visiting, false, queueSet, parentSkillLine)
+	if prodRecipeID then
+		local prodRec = ns:GetRecipeRecord(prodRecipeID)
+		if prodRec and prodRec.reagents and #prodRec.reagents > 0 then
+			local numMade = (prodRec.numMade and prodRec.numMade > 0) and prodRec.numMade or 1
+			local subCrafts = math.ceil(deficit / numMade)
+			for _, cr in ipairs(prodRec.reagents) do
+				local cNeed = cr.quantity * subCrafts
+				local cHave = math.max(0, pool[cr.itemID] or 0)
+				local cTake = math.min(cHave, cNeed)
+				pool[cr.itemID] = cHave - cTake
+				local cShort = cNeed - cTake
+				if cShort > 0 and not ns:IsVendorItem(cr.itemID) then
+					DrainDeficitFromPool(cr.itemID, cShort, pool, queueSet, prodRec.skillLine or parentSkillLine, visiting)
+				end
+			end
+			local surplus = subCrafts * numMade - deficit
+			if surplus > 0 then
+				pool[itemID] = (pool[itemID] or 0) + surplus
+			end
+		end
+	end
+	visiting[itemID] = nil
+end
+
+local function GetCraftableReagentFromPool(itemID, pool, visiting)
+	if not itemID or itemID <= 0 then
+		return 0, 0
+	end
+	visiting = visiting or {}
+	if visiting[itemID] then
+		return 0, 0
+	end
+	local producers = ns.ItemProducedBy and ns.ItemProducedBy[itemID]
+	if not producers or #producers == 0 then
+		return 0, 0
+	end
+	visiting[itemID] = true
+	local bestDirect = 0
+	local bestVendor = 0
+	for _, childRecipeID in ipairs(producers) do
+		if ns:IsRecipeLearned(childRecipeID) then
+			local rec = ns:GetRecipeRecord(childRecipeID)
+			if rec and rec.reagents and #rec.reagents > 0 then
+				local maxDirect = 99999
+				local maxVendor = 99999
+				local allVendorChild = true
+				for _, r in ipairs(rec.reagents) do
+					local have = math.max(0, pool[r.itemID] or 0)
+					local subD, subV = GetCraftableReagentFromPool(r.itemID, pool, visiting)
+					maxDirect = math.min(maxDirect, math.floor((have + subD) / r.quantity))
+					if not ns:IsVendorItem(r.itemID) then
+						allVendorChild = false
+						maxVendor = math.min(maxVendor, math.floor((have + subV) / r.quantity))
+					end
+				end
+				if allVendorChild then
+					maxVendor = maxDirect
+				end
+				local numMade = (rec.numMade and rec.numMade > 0) and rec.numMade or 1
+				if maxDirect < 99999 then
+					bestDirect = math.max(bestDirect, maxDirect * numMade)
+				end
+				if maxVendor < 99999 then
+					bestVendor = math.max(bestVendor, maxVendor * numMade)
+				end
+			end
+		end
+	end
+	visiting[itemID] = nil
+	return bestDirect, bestVendor
+end
+
+-- Сколько единиц рецепта ещё можно поставить в очередь из не занятых текущей очередью материалов
+function ns:GetRemainingCraftableCount(recipeID, includeBank)
+	if not recipeID then
+		return 0, 0, 0, 0
+	end
+	local rec = self:GetRecipeRecord(recipeID)
+	if not rec or not rec.reagents or #rec.reagents == 0 then
+		return 0, 0, 0, 0
+	end
+	local queue = self:GetQueue()
+	local queueSet = {}
+	for _, cmd in ipairs(queue) do
+		if cmd.recipeID then
+			queueSet[cmd.recipeID] = true
+		end
+	end
+	local allowSub = not (self.db and self.db.options and self.db.options.autoSubcrafts == false)
+	local pool = {}
+	setmetatable(pool, {
+		__index = function(t, itemID)
+			local v = self:GetBagCount(itemID) + (includeBank and self.GetBankCount and self:GetBankCount(itemID) or 0)
+			rawset(t, itemID, v)
+			return v
+		end,
+	})
+	for _, cmd in ipairs(queue) do
+		local qRec = self:GetRecipeRecord(cmd.recipeID)
+		if qRec then
+			for _, r in ipairs(qRec.reagents) do
+				local need = r.quantity * cmd.count
+				local have = math.max(0, pool[r.itemID] or 0)
+				local take = math.min(have, need)
+				pool[r.itemID] = have - take
+				local short = need - take
+				if short > 0 and allowSub and not self:IsVendorItem(r.itemID) then
+					DrainDeficitFromPool(r.itemID, short, pool, queueSet, qRec.skillLine or self.currentSkillLine)
+				end
+			end
+			if qRec.outputItemID and qRec.outputItemID > 0 then
+				pool[qRec.outputItemID] = (pool[qRec.outputItemID] or 0) + ((qRec.numMade or 1) * cmd.count)
+			end
+		end
+	end
+
+	local direct = 99999
+	local withCraft = 99999
+	local withVendor = 99999
+	local allVendor = true
+	for _, r in ipairs(rec.reagents) do
+		local have = math.max(0, pool[r.itemID] or 0)
+		local subD, subV = 0, 0
+		if allowSub then
+			subD, subV = GetCraftableReagentFromPool(r.itemID, pool)
+		end
+		direct = math.min(direct, math.floor(have / r.quantity))
+		withCraft = math.min(withCraft, math.floor((have + subD) / r.quantity))
+		if not self:IsVendorItem(r.itemID) then
+			allVendor = false
+			withVendor = math.min(withVendor, math.floor((have + subV) / r.quantity))
+		end
+	end
+	if allVendor then
+		withVendor = direct
+	end
+	if direct >= 99999 then direct = 0 end
+	if withCraft >= 99999 then withCraft = 0 end
+	if withVendor >= 99999 then withVendor = 0 end
+	return math.max(direct, withCraft, withVendor), direct, withCraft, withVendor
+end
+
 -- Добавление или слияние команды в очередь со строгим сохранением топологического порядка (DAG)
 local function InsertOrMergeStep(queue, step)
 	local rec = ns:GetRecipeRecord(step.recipeID)

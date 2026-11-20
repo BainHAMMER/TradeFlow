@@ -178,6 +178,7 @@ ns.Locales.ru = {
 	["BANK_SHORT"] = "Б:",
 	["BTN_QUEUE_ADD"] = "В очередь",
 	["BTN_QUEUE_ALL"] = "В очередь все",
+	["QUEUE_ALL_RESERVED"] = "Все доступные материалы для этого рецепта уже заняты в очереди.",
 	["BTN_CRAFT_NOW"] = "Создать",
 	["BTN_OPEN_PROF"] = "Открыть проф.",
 	["AUTO_SUBCRAFTS"] = "Добавлять промежуточные реагенты",

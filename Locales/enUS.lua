@@ -178,6 +178,7 @@ ns.Locales.en = {
 	["BANK_SHORT"] = "B:",
 	["BTN_QUEUE_ADD"] = "Queue",
 	["BTN_QUEUE_ALL"] = "Queue All",
+	["QUEUE_ALL_RESERVED"] = "All available materials for this recipe are already reserved in the queue.",
 	["BTN_CRAFT_NOW"] = "Craft",
 	["BTN_OPEN_PROF"] = "Open Prof",
 	["AUTO_SUBCRAFTS"] = "Auto-queue craftable intermediate reagents",

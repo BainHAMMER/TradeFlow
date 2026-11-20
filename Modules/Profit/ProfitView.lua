@@ -700,8 +700,16 @@ function ProfitMod:CreateView(parent)
 				if button == "RightButton" then
 					qty = (IsShiftKeyDown and IsShiftKeyDown()) and 10 or 5
 				elseif IsShiftKeyDown and IsShiftKeyDown() then
-					qty = math.max(1, e.craftNow or 1)
 					isShiftAll = true
+					local rem = ns.GetRemainingCraftableCount and ns:GetRemainingCraftableCount(e.recipeID, true) or nil
+					if rem and rem > 0 then
+						qty = rem
+					elseif rem ~= nil and (e.craftNow or 0) > 0 then
+						ns:Print(L["QUEUE_ALL_RESERVED"])
+						return
+					else
+						qty = math.max(1, e.craftNow or 1)
+					end
 				end
 				local filters = ProfitMod:GetFilters()
 				local craftPlan = (filters.sortBy == "gph" and not filters.onlyOwned and not isShiftAll) and e.gphCraftPlan or nil
@@ -713,9 +721,10 @@ function ProfitMod:CreateView(parent)
 			if not e then
 				return
 			end
+			local avail = (ns.GetRemainingCraftableCount and ns:GetRemainingCraftableCount(e.recipeID, true)) or (e.craftNow or 0)
 			GameTooltip:SetOwner(self, "ANCHOR_TOP")
 			GameTooltip:AddLine(L["PLANNER_BTN_QUEUE_STEP"], 1, 0.82, 0)
-			GameTooltip:AddLine(string.format(L["PROFIT_QUEUE_TOOLTIP"], math.max(1, e.craftNow or 1)), 0.9, 0.9, 0.9, true)
+			GameTooltip:AddLine(string.format(L["PROFIT_QUEUE_TOOLTIP"], math.max(0, avail)), 0.9, 0.9, 0.9, true)
 			GameTooltip:Show()
 		end)
 		row.queueBtn:SetScript("OnLeave", GameTooltip_Hide)

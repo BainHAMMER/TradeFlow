@@ -1158,9 +1158,18 @@ function ns:CreateDetailsView(parent)
 	queueAllBtn:SetScript("OnClick", function()
 		local rID = d.currentRecipeID
 		if rID then
-			local direct, withCraft, withVendor = ns:GetRecipeCraftCounts(rID)
-			local best = math.max(1, direct, withCraft, withVendor)
-			ns:QueueAddRecipe(rID, best)
+			local rem = ns.GetRemainingCraftableCount and ns:GetRemainingCraftableCount(rID, false) or nil
+			if rem and rem > 0 then
+				ns:QueueAddRecipe(rID, rem)
+			else
+				local direct, withCraft, withVendor = ns:GetRecipeCraftCounts(rID)
+				local rawBest = math.max(direct or 0, withCraft or 0, withVendor or 0)
+				if rem ~= nil and rawBest > 0 then
+					ns:Print(L["QUEUE_ALL_RESERVED"])
+				else
+					ns:QueueAddRecipe(rID, math.max(1, rawBest))
+				end
+			end
 		end
 	end)
 
