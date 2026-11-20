@@ -696,13 +696,15 @@ function ProfitMod:CreateView(parent)
 			local e = row.entryData
 			if e and not e.isAlt and ns.QueueAddRecipe then
 				local qty = 1
+				local isShiftAll = false
 				if button == "RightButton" then
 					qty = (IsShiftKeyDown and IsShiftKeyDown()) and 10 or 5
 				elseif IsShiftKeyDown and IsShiftKeyDown() then
 					qty = math.max(1, e.craftNow or 1)
+					isShiftAll = true
 				end
 				local filters = ProfitMod:GetFilters()
-				local craftPlan = (filters.sortBy == "gph") and e.gphCraftPlan or nil
+				local craftPlan = (filters.sortBy == "gph" and not filters.onlyOwned and not isShiftAll) and e.gphCraftPlan or nil
 				ns:QueueAddRecipe(e.recipeID, qty, nil, nil, craftPlan)
 			end
 		end)
