@@ -198,10 +198,12 @@ ns.Locales.en = {
 	["WAYPOINT_SET"] = "Waypoint set: %s (%.1f, %.1f)",
 	["WAYPOINT_NO_ADDON"] = "TomTom is not installed and client map pins are unavailable.",
 	["GROUP_BY_CATEGORY"] = "Categories",
+	["CAT_FAVORITES"] = "Favorites",
 	["CAT_OTHER"] = "Other",
 	["ITEM_LOADING"] = "Loading item #%d...",
 	["SPELL_LOADING"] = "Loading recipe #%d...",
 	["SHIFT_CLICK_HINT"] = "Shift+Click: link in chat / search AH | Ctrl+Click: dress-up preview",
+	["FAVORITE_RCLICK_HINT"] = "Right-click: toggle favorite (Double-click: +1 to queue)",
 
 	-- Leveling Calculator
 	["PLANNER_TARGET"] = "Target:",

@@ -825,8 +825,8 @@ function ProfitMod:CreateView(parent)
 			local isOwnChar = (not e.isAlt) and (not e.charKey or e.charKey == ns:CharKey())
 			local canOpenDetails = isOwnChar and (ns:IsRecipeLearned(e.recipeID) or e.unlearnedSource ~= nil)
 			if button == "RightButton" then
-				if isOwnChar and ns.QueueAddRecipe then
-					ns:QueueAddRecipe(e.recipeID, 1)
+				if e.recipeID and ns.ToggleRecipeFavorite then
+					ns:ToggleRecipeFavorite(e.recipeID)
 				end
 				return
 			end
@@ -1055,7 +1055,9 @@ function ProfitMod:RenderRows()
 					end
 					srcBadge = string.format(" %s[%s]|r", colorHex, string.format(L[tagKey], e.reqSkill or 1))
 				end
-				row.title:SetText(string.format("%s%s|r %s%s%s%s", e.qualityHex or "|cffffffff", e.name, profTag, srcBadge, cntTag, altTag))
+				local favPrefix = (e.recipeID and ns.IsRecipeFavorite and ns:IsRecipeFavorite(e.recipeID) and ns.GetFavoriteIconMarkup)
+					and ns:GetFavoriteIconMarkup() or ""
+				row.title:SetText(string.format("%s%s%s|r %s%s%s%s", favPrefix, e.qualityHex or "|cffffffff", e.name, profTag, srcBadge, cntTag, altTag))
 
 				local filters = self:GetFilters()
 				local useGph = (filters.sortBy == "gph") and e.gph and e.gph > 0

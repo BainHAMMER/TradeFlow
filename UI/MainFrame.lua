@@ -118,6 +118,7 @@ function ns:BuildFilteredRecipeList()
 			if passFilter then
 				local name, icon, outItemID = self:GetRecipeDisplay(recipeID)
 				local live = self.liveRecipes and self.liveRecipes[recipeID]
+				local isFav = self.IsRecipeFavorite and self:IsRecipeFavorite(recipeID) or false
 				entries[#entries + 1] = {
 					recipeID = recipeID,
 					name = name,
@@ -125,6 +126,7 @@ function ns:BuildFilteredRecipeList()
 					outItemID = outItemID,
 					categoryName = (live and live.categoryName) or L["CAT_OTHER"],
 					learned = learned,
+					favorite = isFav,
 					direct = direct,
 					withCraft = withCraft,
 					withVendor = withVendor,
@@ -137,6 +139,9 @@ function ns:BuildFilteredRecipeList()
 	end
 
 	table.sort(entries, function(a, b)
+		if opts.groupByCategory ~= true and a.favorite ~= b.favorite then
+			return a.favorite
+		end
 		if sortMode == "name" then
 			return a.name < b.name
 		elseif sortMode == "chance" then
@@ -167,7 +172,7 @@ function ns:BuildFilteredRecipeList()
 		self.collapsedCategories = self.collapsedCategories or {}
 		local byCat, catOrder = {}, {}
 		for _, e in ipairs(entries) do
-			local c = e.categoryName or L["CAT_OTHER"]
+			local c = e.favorite and L["CAT_FAVORITES"] or (e.categoryName or L["CAT_OTHER"])
 			if not byCat[c] then
 				byCat[c] = {}
 				catOrder[#catOrder + 1] = c
@@ -175,6 +180,8 @@ function ns:BuildFilteredRecipeList()
 			byCat[c][#byCat[c] + 1] = e
 		end
 		table.sort(catOrder, function(a, b)
+			if a == L["CAT_FAVORITES"] then return true end
+			if b == L["CAT_FAVORITES"] then return false end
 			if a == L["CAT_OTHER"] then return false end
 			if b == L["CAT_OTHER"] then return true end
 			return a < b
@@ -666,7 +673,9 @@ function ns:CreateMainFrame()
 				return
 			end
 			if button == "RightButton" then
-				ns:QueueAddRecipe(e.recipeID, 1)
+				if ns.ToggleRecipeFavorite then
+					ns:ToggleRecipeFavorite(e.recipeID)
+				end
 				return
 			end
 			ns:SelectRecipeID(e.recipeID)
@@ -807,8 +816,14 @@ function ns:CreateDetailsView(parent)
 	outBtn.icon:SetPoint("TOPLEFT", 3, -3)
 	outBtn.icon:SetPoint("BOTTOMRIGHT", -3, 3)
 	outBtn.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-	outBtn:SetScript("OnClick", function(self)
-		ns:HandleItemClick(self.itemID, self.recipeID)
+	outBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	outBtn:SetScript("OnClick", function(self, button)
+		if ns:HandleItemClick(self.itemID, self.recipeID) then
+			return
+		end
+		if button == "RightButton" and self.recipeID and ns.ToggleRecipeFavorite then
+			ns:ToggleRecipeFavorite(self.recipeID)
+		end
 	end)
 	outBtn:SetScript("OnEnter", function(self)
 		if self.recipeID then
@@ -1263,8 +1278,10 @@ function ns:RefreshDetailsView()
 	d.outBtn.itemID = outItemID
 	d.outBtn.icon:SetTexture(icon)
 
+	local favPrefix = (self.IsRecipeFavorite and self:IsRecipeFavorite(recipeID) and self.GetFavoriteIconMarkup)
+		and self:GetFavoriteIconMarkup() or ""
 	local qtySuffix = (rec and (rec.numMade or 1) > 1) and (" |cffffd100x" .. rec.numMade .. "|r") or ""
-	d.recipeTitle:SetText((hex or "|cffffffff") .. name .. "|r" .. qtySuffix)
+	d.recipeTitle:SetText(favPrefix .. (hex or "|cffffffff") .. name .. "|r" .. qtySuffix)
 
 	local th = metrics.thresholds
 	local thParts = {}
@@ -1647,7 +1664,8 @@ function ns:RenderRecipeListRows()
 					local isKnownReq = (req > 1) or entry.metrics.isTrainer or entry.metrics.scrollItemID or (self.BasicRecipes and self.BasicRecipes[entry.recipeID])
 					trainerTag = isKnownReq and string.format(" |cff809ec7[%d]|r", req) or " |cff809ec7[?]|r"
 				end
-				row.nameText:SetText(dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
+				local favPrefix = (entry.favorite and self.GetFavoriteIconMarkup) and self:GetFavoriteIconMarkup() or ""
+				row.nameText:SetText(favPrefix .. dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
 
 				local pct = math.floor((entry.metrics.chance or 0) * 100 + 0.5)
 				local sortMode = (self.db and self.db.options and self.db.options.sortMode) or "difficulty"

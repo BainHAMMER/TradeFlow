@@ -429,6 +429,7 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 		end
 	end
 	GameTooltip:AddLine(L["SHIFT_CLICK_HINT"], 0.55, 0.75, 1.0, true)
+	GameTooltip:AddLine(L["FAVORITE_RCLICK_HINT"], 0.65, 0.90, 0.65, true)
 	GameTooltip:Show()
 end
 
@@ -665,6 +666,123 @@ function ns:IsRecipeLearned(recipeID)
 	return false
 end
 
+local favIconMarkup = nil
+function ns:GetFavoriteIconMarkup()
+	if favIconMarkup then
+		return favIconMarkup
+	end
+	if C_Texture and C_Texture.GetAtlasInfo then
+		if C_Texture.GetAtlasInfo("auctionhouse-icon-favorite") then
+			favIconMarkup = "|A:auctionhouse-icon-favorite:13:13:0:0|a "
+			return favIconMarkup
+		elseif C_Texture.GetAtlasInfo("tradeskills-star") then
+			favIconMarkup = "|A:tradeskills-star:13:13:0:0|a "
+			return favIconMarkup
+		end
+	end
+	favIconMarkup = "|TInterface\\Common\\FavoritesIcon:14:14:0:0:32:32:0:26:0:26|t "
+	return favIconMarkup
+end
+
+function ns:IsRecipeFavorite(recipeID)
+	if not recipeID or recipeID <= 0 then
+		return false
+	end
+	if self.pendingBlizzFavorites and self.pendingBlizzFavorites[recipeID] ~= nil then
+		return self.pendingBlizzFavorites[recipeID] == true
+	end
+	if self.charDB and self.charDB.favorites and self.charDB.favorites[recipeID] ~= nil then
+		return self.charDB.favorites[recipeID] == true
+	end
+	if self.liveRecipes and self.liveRecipes[recipeID] and self.liveRecipes[recipeID].favorite ~= nil then
+		return self.liveRecipes[recipeID].favorite == true
+	end
+	return false
+end
+
+function ns:SyncFavoritesFromBlizzard()
+	if not C_TradeSkillUI or not C_TradeSkillUI.GetAllRecipeIDs or not self:GetActiveClientSkillLine() then
+		return false
+	end
+	local favMap = (self.charDB and self.charDB.favorites) or {}
+	local pending = self.pendingBlizzFavorites
+	local recipeIDs = C_TradeSkillUI.GetAllRecipeIDs() or {}
+	for _, recipeID in ipairs(recipeIDs) do
+		if pending and pending[recipeID] ~= nil and C_TradeSkillUI.SetRecipeFavorite then
+			pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, pending[recipeID])
+			pending[recipeID] = nil
+		end
+		local info = C_TradeSkillUI.GetRecipeInfo and C_TradeSkillUI.GetRecipeInfo(recipeID)
+		local isFav = (info and info.favorite == true)
+			or (C_TradeSkillUI.IsRecipeFavorite and select(2, pcall(C_TradeSkillUI.IsRecipeFavorite, recipeID)) == true)
+			or false
+		favMap[recipeID] = isFav and true or nil
+		if self.liveRecipes and self.liveRecipes[recipeID] then
+			self.liveRecipes[recipeID].favorite = isFav
+		end
+	end
+	if self.charDB then
+		self.charDB.favorites = favMap
+	end
+	return true
+end
+
+function ns:ToggleRecipeFavorite(recipeID)
+	if not recipeID or recipeID <= 0 then
+		return false
+	end
+	local newFav = not self:IsRecipeFavorite(recipeID)
+	if self.charDB then
+		self.charDB.favorites = self.charDB.favorites or {}
+		self.charDB.favorites[recipeID] = newFav and true or nil
+	end
+	if self.liveRecipes and self.liveRecipes[recipeID] then
+		self.liveRecipes[recipeID].favorite = newFav
+	end
+
+	local synced = false
+	local rec = self:GetRecipeRecord(recipeID)
+	local activeSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
+	if C_TradeSkillUI and C_TradeSkillUI.SetRecipeFavorite and (not rec or not rec.skillLine or activeSL == rec.skillLine) then
+		local canFav = true
+		if C_TradeSkillUI.CanFavoriteRecipe then
+			local okC, resC = pcall(C_TradeSkillUI.CanFavoriteRecipe, recipeID)
+			if okC and resC == false then
+				canFav = false
+			end
+		end
+		if canFav then
+			local ok = pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, newFav)
+			if ok then
+				if C_TradeSkillUI.IsRecipeFavorite then
+					local okF, curF = pcall(C_TradeSkillUI.IsRecipeFavorite, recipeID)
+					synced = okF and (curF == newFav)
+				else
+					synced = true
+				end
+			end
+		end
+	end
+	self.pendingBlizzFavorites = self.pendingBlizzFavorites or {}
+	if synced then
+		self.pendingBlizzFavorites[recipeID] = nil
+	else
+		self.pendingBlizzFavorites[recipeID] = newFav
+	end
+
+	if self.RefreshRecipeList then
+		self:RefreshRecipeList()
+	end
+	if self.RefreshDetailsView then
+		self:RefreshDetailsView()
+	end
+	local mod = self.modules and self.modules.byId and self.modules.byId["profit"]
+	if mod and mod.view and mod.view:IsVisible() and mod.OnRefresh then
+		mod:OnRefresh()
+	end
+	return newFav
+end
+
 local function NonZero(v)
 	return (v and v ~= 0) and v or nil
 end
@@ -719,12 +837,22 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 
 	self.categoriesBySkill[skillLine] = self.categoriesBySkill[skillLine] or {}
 	local learnedMap = self.charDB and self.charDB.learned or {}
+	local favMap = (self.charDB and self.charDB.favorites) or {}
+	local pendingFav = self.pendingBlizzFavorites
 	local newlyLearned = false
 
 	local recipeIDs = C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetAllRecipeIDs() or {}
 	for _, recipeID in ipairs(recipeIDs) do
+		if pendingFav and pendingFav[recipeID] ~= nil and C_TradeSkillUI.SetRecipeFavorite then
+			pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, pendingFav[recipeID])
+			pendingFav[recipeID] = nil
+		end
 		local info = C_TradeSkillUI.GetRecipeInfo and C_TradeSkillUI.GetRecipeInfo(recipeID)
 		if info then
+			local isFav = (info.favorite == true)
+				or (C_TradeSkillUI.IsRecipeFavorite and select(2, pcall(C_TradeSkillUI.IsRecipeFavorite, recipeID)) == true)
+				or false
+			favMap[recipeID] = isFav and true or nil
 			local catID = info.categoryID or 0
 			if catID > 0 and C_TradeSkillUI.GetCategoryInfo and not self.categoriesBySkill[skillLine][catID] then
 				local catInfo = C_TradeSkillUI.GetCategoryInfo(catID)
@@ -785,6 +913,7 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 				categoryID = catID,
 				categoryName = self.categoriesBySkill[skillLine][catID],
 				learned = info.learned and true or false,
+				favorite = isFav,
 				difficulty = diffKey,
 				outputItemID = outItemID,
 				numMade = numMade,
@@ -800,6 +929,7 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 	end
 	if self.charDB then
 		self.charDB.learned = learnedMap
+		self.charDB.favorites = favMap
 		self.charDB.professions = self.playerProfessions
 	end
 	if self.InvalidateCraftCounts then
@@ -1484,6 +1614,7 @@ for _, ev in ipairs({
 	"TRADE_SKILL_DATA_SOURCE_CHANGED",
 	"TRADE_SKILL_LIST_UPDATE",
 	"TRADE_SKILL_DETAILS_UPDATE",
+	"TRADE_SKILL_FAVORITES_CHANGED",
 	"TRADE_SKILL_UPDATE",
 	"TRADE_SKILL_CLOSE",
 	"SKILL_LINES_CHANGED",
@@ -1543,12 +1674,14 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			bags = {},
 			bank = {},
 			learned = {},
+			favorites = {},
 			professions = {},
 			queue = {},
 			skippedRecipes = {},
 			targets = {},
 		}
 		ns.charDB = ns.realmDB.chars[cKey]
+		ns.charDB.favorites = ns.charDB.favorites or {}
 		if ns.charDB.professions then
 			for sl, p in pairs(ns.charDB.professions) do
 				ns.playerProfessions[sl] = p
@@ -1613,7 +1746,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			end
 			ScheduleTradeSkillRefresh()
 		end
-	elseif event == "TRADE_SKILL_LIST_UPDATE" or event == "TRADE_SKILL_DETAILS_UPDATE" then
+	elseif event == "TRADE_SKILL_LIST_UPDATE" or event == "TRADE_SKILL_DETAILS_UPDATE" or event == "TRADE_SKILL_FAVORITES_CHANGED" then
+		if event == "TRADE_SKILL_FAVORITES_CHANGED" and ns.SyncFavoritesFromBlizzard then
+			ns:SyncFavoritesFromBlizzard()
+		end
 		if not ns.bypassIntercept then
 			ns:SuppressBlizzardFrame()
 		end
