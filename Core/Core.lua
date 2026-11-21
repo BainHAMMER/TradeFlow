@@ -1659,6 +1659,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			snipeMaxSpend = 100000,
 			snipeMinReserve = 0,
 			snipeMaxQty = 200,
+			uiScale = 1.0,
+			leftCollapsed = false,
+			windowMinimized = false,
 		}
 		ns.db.vendorPrices = ns.db.vendorPrices or {}
 		ns.db.trainerFees = ns.db.trainerFees or {}

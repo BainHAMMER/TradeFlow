@@ -6,8 +6,105 @@ local L = ns.L
 -------------------------------------------------------------------------------
 local WIN_W, WIN_H = 980, 640
 local LEFT_W = 445
+local TOP_RIGHT_H = 342
 local RECIPE_ROW_H = 24
 local RECIPE_VISIBLE_ROWS = 20
+
+function ns:GetUIScale()
+	local s = self.db and self.db.options and tonumber(self.db.options.uiScale)
+	if not s or s < 0.6 or s > 1.4 then
+		return 1.0
+	end
+	return math.floor(s * 20 + 0.5) / 20
+end
+
+function ns:ApplyUIScale()
+	local scale = self:GetUIScale()
+	if self.mainFrame then
+		local right, top = self.mainFrame:GetRight(), self.mainFrame:GetTop()
+		local oldScale = self.mainFrame:GetScale() or 1.0
+		self.mainFrame:SetScale(scale)
+		if right and top and math.abs(scale - oldScale) > 0.001 then
+			local absRight = right * oldScale
+			local absTop = top * oldScale
+			self.mainFrame:ClearAllPoints()
+			self.mainFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
+		end
+	end
+end
+
+function ns:ApplyWindowLayout(keepTopRight)
+	local f = self.mainFrame
+	if not f then
+		return
+	end
+	local right, top
+	if keepTopRight then
+		right, top = f:GetRight(), f:GetTop()
+	end
+	local opts = (self.db and self.db.options) or {}
+	local isMin = (opts.windowMinimized == true)
+	local isCol = (opts.leftCollapsed == true)
+	local compact = isMin or isCol
+
+	if f.collapseLeftBtn then
+		f.collapseLeftBtn:SetShown(not isMin)
+		f.collapseLeftBtn:SetText(isCol and ">>" or "<<")
+	end
+	if f.minBtn then
+		f.minBtn:SetText(isMin and "+" or "-")
+	end
+	if f.rankBar then
+		f.rankBar:SetShown(not compact)
+	end
+	if f.cbVendor then
+		f.cbVendor:SetShown(not compact)
+	end
+	if f.blizzBtn then
+		f.blizzBtn:SetShown(not compact)
+	end
+
+	local compactW = WIN_W - LEFT_W - 8
+	local minH = WIN_H - TOP_RIGHT_H - 8
+	if isMin then
+		f:SetSize(compactW, minH)
+		f.leftPane:Hide()
+		f.topRight:Hide()
+		f.bottomRight:ClearAllPoints()
+		f.bottomRight:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -54)
+		f.bottomRight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+		f.bottomRight:Show()
+	elseif isCol then
+		f:SetSize(compactW, WIN_H)
+		f.leftPane:Hide()
+		f.topRight:ClearAllPoints()
+		f.topRight:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -54)
+		f.topRight:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -54)
+		f.topRight:SetHeight(TOP_RIGHT_H)
+		f.topRight:Show()
+		f.bottomRight:ClearAllPoints()
+		f.bottomRight:SetPoint("TOPLEFT", f.topRight, "BOTTOMLEFT", 0, -8)
+		f.bottomRight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+		f.bottomRight:Show()
+	else
+		f:SetSize(WIN_W, WIN_H)
+		f.leftPane:Show()
+		f.topRight:ClearAllPoints()
+		f.topRight:SetPoint("TOPLEFT", f.leftPane, "TOPRIGHT", 8, 0)
+		f.topRight:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -54)
+		f.topRight:SetHeight(TOP_RIGHT_H)
+		f.topRight:Show()
+		f.bottomRight:ClearAllPoints()
+		f.bottomRight:SetPoint("TOPLEFT", f.topRight, "BOTTOMLEFT", 0, -8)
+		f.bottomRight:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 12)
+		f.bottomRight:Show()
+	end
+
+	if keepTopRight and right and top then
+		f:ClearAllPoints()
+		f:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", right, top)
+	end
+end
 
 local SORT_MODES = {
 	{ key = "difficulty",   labelKey = "SORT_DIFFICULTY" },
@@ -320,29 +417,51 @@ function ns:CreateMainFrame()
 	header:SetHeight(38)
 	StylePanel(header, 0.13, 0.10, 0.06, 0.96)
 
+	local collapseLeftBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+	collapseLeftBtn:SetSize(24, 22)
+	collapseLeftBtn:SetPoint("LEFT", 6, 0)
+	collapseLeftBtn:SetText("<<")
+	collapseLeftBtn:SetScript("OnClick", function()
+		if not (ns.db and ns.db.options) then
+			return
+		end
+		ns.db.options.leftCollapsed = not (ns.db.options.leftCollapsed == true)
+		if f.sortMenu then
+			f.sortMenu:Hide()
+		end
+		ns:ApplyWindowLayout(true)
+		if not ns.db.options.leftCollapsed then
+			ns:RefreshRecipeList()
+		end
+	end)
+	collapseLeftBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		local isCol = ns.db and ns.db.options and ns.db.options.leftCollapsed == true
+		GameTooltip:SetText(isCol and L["BTN_EXPAND_RECIPES_TIP"] or L["BTN_COLLAPSE_RECIPES_TIP"], 1, 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	collapseLeftBtn:SetScript("OnLeave", GameTooltip_Hide)
+	f.collapseLeftBtn = collapseLeftBtn
+
 	local icon = header:CreateTexture(nil, "ARTWORK")
-	icon:SetSize(26, 26)
-	icon:SetPoint("LEFT", 8, 0)
+	icon:SetSize(24, 24)
+	icon:SetPoint("LEFT", collapseLeftBtn, "RIGHT", 4, 0)
 	icon:SetTexture(self.ICON)
 	icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 	f.headerIcon = icon
 
-	local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+	local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	title:SetPoint("LEFT", icon, "RIGHT", 6, 0)
 	title:SetText("|cffffd100" .. L["ADDON_TITLE"] .. "|r")
 	f.headerTitle = title
 
 	-- Кнопки переключения профессий персонажа (SecureActionButton нельзя якорить к FontString/Texture, только к Frame)
-	local titleW = (title.GetStringWidth and title:GetStringWidth()) or 0
-	if titleW < 60 then
-		titleW = 82
-	end
-	local profStartX = math.min(152, 42 + math.ceil(titleW) + 14)
+	local profStartX = 142
 	f.profButtons = {}
 	for i = 1, 6 do
 		local pb = CreateFrame("Button", nil, header, "SecureActionButtonTemplate,BackdropTemplate")
-		pb:SetSize(28, 28)
-		pb:SetPoint("LEFT", header, "LEFT", profStartX + (i - 1) * 32, 0)
+		pb:SetSize(26, 26)
+		pb:SetPoint("LEFT", header, "LEFT", profStartX + (i - 1) * 30, 0)
 		StylePanel(pb, 0.10, 0.10, 0.10, 0.95)
 		pb:RegisterForClicks("AnyUp")
 		if not (InCombatLockdown and InCombatLockdown()) then
@@ -379,8 +498,8 @@ function ns:CreateMainFrame()
 
 	-- Полоса прогресса навыка текущей профессии
 	local rankBar = CreateFrame("StatusBar", nil, header, "BackdropTemplate")
-	rankBar:SetSize(195, 18)
-	rankBar:SetPoint("CENTER", header, "CENTER", -28, 0)
+	rankBar:SetSize(180, 18)
+	rankBar:SetPoint("CENTER", header, "CENTER", -44, 0)
 	rankBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
 	rankBar:SetStatusBarColor(0.20, 0.55, 0.90, 0.9)
 	rankBar.bg = rankBar:CreateTexture(nil, "BACKGROUND")
@@ -393,7 +512,7 @@ function ns:CreateMainFrame()
 	-- Глобальная галка учёта продажи торговцу (для списка рецептов, деталей и калькулятора)
 	local cbVendor = CreateFrame("CheckButton", nil, header, "UICheckButtonTemplate")
 	cbVendor:SetSize(20, 20)
-	cbVendor:SetPoint("LEFT", rankBar, "RIGHT", 12, 0)
+	cbVendor:SetPoint("LEFT", rankBar, "RIGHT", 10, 0)
 	cbVendor.text = cbVendor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	cbVendor.text:SetPoint("LEFT", cbVendor, "RIGHT", 2, 0)
 	cbVendor.text:SetText(L["PLANNER_DEDUCT_VENDOR"])
@@ -414,9 +533,33 @@ function ns:CreateMainFrame()
 		ns:HideMainWindow()
 	end)
 
+	local minBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
+	minBtn:SetSize(22, 22)
+	minBtn:SetPoint("RIGHT", closeBtn, "LEFT", -2, 0)
+	minBtn:SetText("-")
+	minBtn:SetScript("OnClick", function()
+		if not (ns.db and ns.db.options) then
+			return
+		end
+		ns.db.options.windowMinimized = not (ns.db.options.windowMinimized == true)
+		if f.sortMenu then
+			f.sortMenu:Hide()
+		end
+		ns:ApplyWindowLayout(true)
+		ns:RefreshMainWindow()
+	end)
+	minBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		local isMin = ns.db and ns.db.options and ns.db.options.windowMinimized == true
+		GameTooltip:SetText(isMin and L["BTN_RESTORE_WINDOW_TIP"] or L["BTN_MINIMIZE_QUEUE_TIP"], 1, 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	minBtn:SetScript("OnLeave", GameTooltip_Hide)
+	f.minBtn = minBtn
+
 	local langBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-	langBtn:SetSize(38, 22)
-	langBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+	langBtn:SetSize(34, 22)
+	langBtn:SetPoint("RIGHT", minBtn, "LEFT", -4, 0)
 	langBtn:SetText(self.lang == "ru" and "RU" or "EN")
 	langBtn:SetScript("OnClick", function()
 		ns:ToggleLanguage()
@@ -430,7 +573,7 @@ function ns:CreateMainFrame()
 	f.langBtn = langBtn
 
 	local settingsBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-	settingsBtn:SetSize(82, 22)
+	settingsBtn:SetSize(80, 22)
 	settingsBtn:SetPoint("RIGHT", langBtn, "LEFT", -4, 0)
 	settingsBtn:SetText(L["SETTINGS_BTN"])
 	settingsBtn:SetScript("OnClick", function()
@@ -439,7 +582,7 @@ function ns:CreateMainFrame()
 	f.settingsBtn = settingsBtn
 
 	local blizzBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
-	blizzBtn:SetSize(104, 22)
+	blizzBtn:SetSize(100, 22)
 	blizzBtn:SetPoint("RIGHT", settingsBtn, "LEFT", -4, 0)
 	blizzBtn:SetText(L["BLIZZARD_UI"])
 	blizzBtn:SetScript("OnClick", function()
@@ -451,6 +594,7 @@ function ns:CreateMainFrame()
 		GameTooltip:Show()
 	end)
 	blizzBtn:SetScript("OnLeave", GameTooltip_Hide)
+	f.blizzBtn = blizzBtn
 
 	---------------------------------------------------------------------------
 	-- Левая панель: Поиск, Фильтры, Сортировка и Список рецептов
@@ -607,18 +751,63 @@ function ns:CreateMainFrame()
 	f.recipeOffset = 0
 	f.recipeRows = {}
 
-	recipeListBox:SetScript("OnMouseWheel", function(_, delta)
+	local function ScrollRecipesByDelta(delta)
 		local total = #(ns.filteredRecipes or {})
 		local maxOff = math.max(0, total - RECIPE_VISIBLE_ROWS)
 		f.recipeOffset = math.max(0, math.min(maxOff, f.recipeOffset - delta * 2))
 		ns:RenderRecipeListRows()
+	end
+
+	recipeListBox:SetScript("OnMouseWheel", function(_, delta)
+		ScrollRecipesByDelta(delta)
 	end)
+
+	local recipeScrollBar = CreateFrame("Slider", nil, recipeListBox, "BackdropTemplate")
+	recipeScrollBar:SetPoint("TOPRIGHT", recipeListBox, "TOPRIGHT", -4, -6)
+	recipeScrollBar:SetPoint("BOTTOMRIGHT", recipeListBox, "BOTTOMRIGHT", -4, 6)
+	recipeScrollBar:SetWidth(10)
+	recipeScrollBar:SetOrientation("VERTICAL")
+	recipeScrollBar:SetValueStep(1)
+	if recipeScrollBar.SetObeyStepOnDrag then
+		recipeScrollBar:SetObeyStepOnDrag(true)
+	end
+	recipeScrollBar:SetMinMaxValues(0, 0)
+	recipeScrollBar:SetValue(0)
+	recipeScrollBar:SetBackdrop({
+		bgFile = "Interface\\Buttons\\WHITE8X8",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true, tileSize = 8, edgeSize = 8,
+		insets = { left = 2, right = 2, top = 2, bottom = 2 },
+	})
+	recipeScrollBar:SetBackdropColor(0.02, 0.02, 0.02, 0.85)
+	recipeScrollBar:SetBackdropBorderColor(0.45, 0.36, 0.18, 0.8)
+	local thumb = recipeScrollBar:CreateTexture(nil, "ARTWORK")
+	thumb:SetColorTexture(0.85, 0.68, 0.22, 0.85)
+	thumb:SetSize(6, 28)
+	recipeScrollBar:SetThumbTexture(thumb)
+	recipeScrollBar:EnableMouseWheel(true)
+	recipeScrollBar:SetScript("OnMouseWheel", function(_, delta)
+		ScrollRecipesByDelta(delta)
+	end)
+	recipeScrollBar:SetScript("OnValueChanged", function(_, value)
+		if f._updatingRecipeScroll then
+			return
+		end
+		local total = #(ns.filteredRecipes or {})
+		local maxOff = math.max(0, total - RECIPE_VISIBLE_ROWS)
+		local newOff = math.max(0, math.min(maxOff, math.floor((value or 0) + 0.5)))
+		if newOff ~= f.recipeOffset then
+			f.recipeOffset = newOff
+			ns:RenderRecipeListRows()
+		end
+	end)
+	f.recipeScrollBar = recipeScrollBar
 
 	for i = 1, RECIPE_VISIBLE_ROWS do
 		local row = CreateFrame("Button", nil, recipeListBox)
 		row:SetHeight(RECIPE_ROW_H)
 		row:SetPoint("TOPLEFT", 4, -5 - (i - 1) * RECIPE_ROW_H)
-		row:SetPoint("TOPRIGHT", -6, -5 - (i - 1) * RECIPE_ROW_H)
+		row:SetPoint("TOPRIGHT", -16, -5 - (i - 1) * RECIPE_ROW_H)
 		row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
 		row.sel = row:CreateTexture(nil, "BACKGROUND")
@@ -798,6 +987,8 @@ function ns:CreateMainFrame()
 	self:CreateQueueAndShoppingView(bottomRight)
 
 	self.mainFrame = f
+	self:ApplyUIScale()
+	self:ApplyWindowLayout(false)
 	return f
 end
 
@@ -1631,6 +1822,15 @@ function ns:RenderRecipeListRows()
 	local sl = self.currentSkillLine
 	local selectedID = sl and self.selectedRecipeBySkill[sl]
 
+	if f.recipeScrollBar then
+		local maxOff = math.max(0, #list - RECIPE_VISIBLE_ROWS)
+		f._updatingRecipeScroll = true
+		f.recipeScrollBar:SetMinMaxValues(0, maxOff)
+		f.recipeScrollBar:SetValue(math.min(f.recipeOffset or 0, maxOff))
+		f.recipeScrollBar:SetShown(maxOff > 0)
+		f._updatingRecipeScroll = false
+	end
+
 	for i = 1, RECIPE_VISIBLE_ROWS do
 		local row = f.recipeRows[i]
 		local entry = list[i + f.recipeOffset]
@@ -1804,6 +2004,13 @@ function ns:RefreshMainWindow()
 	if f.cbVendor then
 		f.cbVendor:SetChecked(self.db.options.deductVendorInRoute ~= false)
 	end
+	self:ApplyUIScale()
+	self:ApplyWindowLayout(false)
+	local opts = (self.db and self.db.options) or {}
+	if opts.windowMinimized == true then
+		self:RefreshQueueAndShoppingView()
+		return
+	end
 	if f.RefreshTopTabs then
 		f.RefreshTopTabs(true)
 	end
@@ -1878,7 +2085,7 @@ function ns:ToggleSettingsFrame()
 		end
 
 		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(310, 108 + #opts * 28)
+		sf:SetSize(310, 158 + #opts * 28)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1922,6 +2129,59 @@ function ns:ToggleSettingsFrame()
 			end)
 			sf.checks[i] = { cb = cb, opt = o }
 		end
+
+		local scaleTopY = -36 - #opts * 28
+		local scaleLabel = sf:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		scaleLabel:SetPoint("TOPLEFT", 14, scaleTopY)
+		sf.scaleLabel = scaleLabel
+
+		local scaleResetBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+		scaleResetBtn:SetSize(46, 18)
+		scaleResetBtn:SetPoint("TOPRIGHT", -12, scaleTopY + 2)
+		scaleResetBtn:SetText(L["OPT_UI_SCALE_RESET"])
+
+		local scaleSlider = CreateFrame("Slider", nil, sf, "BackdropTemplate")
+		scaleSlider:SetPoint("TOPLEFT", 12, scaleTopY - 18)
+		scaleSlider:SetSize(286, 14)
+		scaleSlider:SetOrientation("HORIZONTAL")
+		scaleSlider:SetMinMaxValues(60, 140)
+		scaleSlider:SetValueStep(5)
+		if scaleSlider.SetObeyStepOnDrag then
+			scaleSlider:SetObeyStepOnDrag(true)
+		end
+		scaleSlider:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true, tileSize = 8, edgeSize = 8,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		})
+		scaleSlider:SetBackdropColor(0.03, 0.03, 0.03, 0.9)
+		scaleSlider:SetBackdropBorderColor(0.55, 0.44, 0.22, 0.9)
+		local sThumb = scaleSlider:CreateTexture(nil, "ARTWORK")
+		sThumb:SetColorTexture(0.90, 0.72, 0.22, 0.95)
+		sThumb:SetSize(14, 10)
+		scaleSlider:SetThumbTexture(sThumb)
+		scaleSlider:SetScript("OnValueChanged", function(_, value)
+			local pct = math.floor(((value or 100) + 2.5) / 5) * 5
+			pct = math.max(60, math.min(140, pct))
+			scaleLabel:SetText(string.format(L["OPT_UI_SCALE_FMT"], pct))
+			if sf._updatingScale then
+				return
+			end
+			local l, t = sf:GetLeft(), sf:GetTop()
+			if l and t then
+				sf:ClearAllPoints()
+				sf:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+			end
+			if ns.db and ns.db.options then
+				ns.db.options.uiScale = pct / 100
+			end
+			ns:ApplyUIScale()
+		end)
+		scaleResetBtn:SetScript("OnClick", function()
+			scaleSlider:SetValue(100)
+		end)
+		sf.scaleSlider = scaleSlider
 
 		local clearProfitBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
 		clearProfitBtn:SetSize(286, 22)
@@ -1975,6 +2235,15 @@ function ns:ToggleSettingsFrame()
 		else
 			entry.cb:SetChecked(val == true)
 		end
+	end
+	if sf.scaleSlider then
+		local pct = math.floor(self:GetUIScale() * 100 + 0.5)
+		sf._updatingScale = true
+		sf.scaleSlider:SetValue(pct)
+		if sf.scaleLabel then
+			sf.scaleLabel:SetText(string.format(L["OPT_UI_SCALE_FMT"], pct))
+		end
+		sf._updatingScale = false
 	end
 	sf:Show()
 end
