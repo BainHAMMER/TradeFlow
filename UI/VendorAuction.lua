@@ -357,7 +357,6 @@ function ns:BuyVendorShoppingList(onlyItemID)
 	if self.ScanBagsNow then
 		self:ScanBagsNow()
 	end
-	local beforeMoney = (GetMoney and GetMoney()) or 0
 	local attempted = {}
 	local attemptedByItem = {}
 	local maxStackFn = GetMerchantItemMaxStack
@@ -368,14 +367,12 @@ function ns:BuyVendorShoppingList(onlyItemID)
 				entry = {
 					itemID = m.itemID,
 					units = 0,
-					cost = 0,
 					beforeBag = self:GetBagCount(m.itemID),
 				}
 				attemptedByItem[m.itemID] = entry
 				attempted[#attempted + 1] = entry
 			end
 			entry.units = entry.units + m.batches * m.stackSize
-			entry.cost = entry.cost + (m.cost or 0)
 		end
 	end
 	if #attempted == 0 then
@@ -404,7 +401,26 @@ function ns:BuyVendorShoppingList(onlyItemID)
 			end
 		end
 	end
+	local tries = 0
 	local function Finish()
+		tries = tries + 1
+		if ns.ScanBagsNow then
+			ns:ScanBagsNow(true)
+		end
+		if tries < 5 and C_Timer and C_Timer.After then
+			local allArrived = true
+			for _, a in ipairs(attempted) do
+				local gained = math.max(0, ns:GetBagCount(a.itemID) - a.beforeBag)
+				if gained < a.units then
+					allArrived = false
+					break
+				end
+			end
+			if not allArrived then
+				C_Timer.After(0.25, Finish)
+				return
+			end
+		end
 		vendorBuyInFlight = false
 		if vendorBar and vendorBar.btn then
 			vendorBar.btn:SetEnabled(true)
@@ -412,24 +428,15 @@ function ns:BuyVendorShoppingList(onlyItemID)
 		if ns.ScanBagsNow then
 			ns:ScanBagsNow()
 		end
-		local gainedList = {}
+		if ns.FlushPendingMerchantBuys then
+			ns:FlushPendingMerchantBuys()
+		end
 		for _, a in ipairs(attempted) do
 			local gained = math.max(0, ns:GetBagCount(a.itemID) - a.beforeBag)
 			if gained > 0 then
 				local name = ns:GetItemDisplay(a.itemID)
 				ns:Print(string.format(L["VENDOR_BOUGHT_MSG"], name, gained))
-				local estCost = (a.units > 0) and math.floor((a.cost or 0) * gained / a.units + 0.5) or 0
-				if estCost > 0 then
-					gainedList[#gainedList + 1] = { itemID = a.itemID, gained = gained, estCost = estCost }
-				end
 			end
-		end
-		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
-		local totalSpent = math.max(0, beforeMoney - afterMoney)
-		if ns.RecordTradeFlowPurchase then
-			DistributeProRataSpend(totalSpent, gainedList, function(g) return g.estCost end, function(g, share)
-				ns:RecordTradeFlowPurchase("vendor_buy", g.itemID, g.gained, share)
-			end)
 		end
 		ns:RefreshVendorBar()
 		if ns.RefreshQueueAndShoppingView then
@@ -437,7 +444,7 @@ function ns:BuyVendorShoppingList(onlyItemID)
 		end
 	end
 	if C_Timer and C_Timer.After then
-		C_Timer.After(0.3, Finish)
+		C_Timer.After(0.25, Finish)
 	else
 		Finish()
 	end

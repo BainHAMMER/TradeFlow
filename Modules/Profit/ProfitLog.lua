@@ -10,18 +10,24 @@ local LOT_MAX_AGE = 7 * 86400
 local COALESCE_SECONDS = 30
 local MAIL_PAIR_WINDOW = 5
 local MERCHANT_PAIR_WINDOW = 2.0
+local MERCHANT_BUY_WINDOW = 10.0
 
 local consumedReagentSet = nil
+local vendorScrollSet = nil
 local disenchantNameMap = nil
 local disenchantMapComplete = false
 local soldSubjectPattern = nil
 local ahHooksInstalled = false
+local merchantHooksInstalled = false
 local lastDisenchantAt = 0
 local pendingAhComm = nil
 local pendingAhBid = nil
 local lastViewedAhItemKey = nil
 local merchantMoney = 0
 local merchantBagSnap = nil
+local merchantCatalog = nil
+local merchantBuySnap = nil
+local merchantLastBuyAt = 0
 local pendingMerchantMoney = { amount = 0, ts = 0 }
 local pendingMerchantDrops = {}
 local mailMoney = 0
@@ -179,20 +185,44 @@ local function GetLoadedItemName(itemID)
 end
 
 local function GetConsumedReagentSet()
-	if consumedReagentSet then
-		return consumedReagentSet
+	if not consumedReagentSet then
+		consumedReagentSet = {}
+		for _, rec in pairs(ns.RecipeData or {}) do
+			if type(rec) == "table" and rec.reagents then
+				for _, rg in ipairs(rec.reagents) do
+					if rg.itemID and rg.itemID > 0 then
+						consumedReagentSet[rg.itemID] = true
+					end
+				end
+			end
+		end
 	end
-	consumedReagentSet = {}
-	for _, rec in pairs(ns.RecipeData or {}) do
-		if type(rec) == "table" and rec.reagents then
-			for _, rg in ipairs(rec.reagents) do
-				if rg.itemID and rg.itemID > 0 then
-					consumedReagentSet[rg.itemID] = true
+	if ns.liveRecipes then
+		for _, rec in pairs(ns.liveRecipes) do
+			if type(rec) == "table" and rec.reagents then
+				for _, rg in ipairs(rec.reagents) do
+					if rg.itemID and rg.itemID > 0 then
+						consumedReagentSet[rg.itemID] = true
+					end
 				end
 			end
 		end
 	end
 	return consumedReagentSet
+end
+
+local function GetVendorScrollSet()
+	if vendorScrollSet then
+		return vendorScrollSet
+	end
+	vendorScrollSet = {}
+	for _, row in pairs(ns.VendorRecipeScrolls or {}) do
+		local scrollID = type(row) == "table" and row[1]
+		if scrollID and scrollID > 0 then
+			vendorScrollSet[scrollID] = true
+		end
+	end
+	return vendorScrollSet
 end
 
 local function GetTodayStartTimestamp()
@@ -709,7 +739,203 @@ local function InstallAhHooks()
 	end
 end
 
-local function SnapshotMerchantBags()
+local function IsInTradeFlowVendorScope(itemID)
+	if not itemID or itemID <= 0 then
+		return false
+	end
+	if GetConsumedReagentSet()[itemID] then
+		return true
+	end
+	if ns.VendorPrices and ns.VendorPrices[itemID] then
+		return true
+	end
+	if GetVendorScrollSet()[itemID] then
+		return true
+	end
+	return IsInTradeFlowAhScope(itemID)
+end
+
+local function GetMerchantSlotItemID(slot)
+	if not slot then
+		return nil
+	end
+	if GetMerchantItemID then
+		local id = GetMerchantItemID(slot)
+		if id and id > 0 then
+			return id
+		end
+	end
+	if GetMerchantItemLink then
+		local link = GetMerchantItemLink(slot)
+		local id = link and tonumber(link:match("item:(%d+)"))
+		if id and id > 0 then
+			return id
+		end
+	end
+	if C_MerchantFrame and C_MerchantFrame.GetItemLink then
+		local link = C_MerchantFrame.GetItemLink(slot)
+		local id = link and tonumber(link:match("item:(%d+)"))
+		if id and id > 0 then
+			return id
+		end
+	end
+	return nil
+end
+
+local function GetMerchantSlotInfo(slot)
+	if not slot then
+		return nil
+	end
+	if C_MerchantFrame and C_MerchantFrame.GetItemInfo then
+		local info = C_MerchantFrame.GetItemInfo(slot)
+		if info then
+			local canBuy = (info.isPurchasable ~= false) and not info.hasExtendedCost
+			return info.price or 0, math.max(1, info.stackCount or 1), info.numAvailable or -1, canBuy
+		end
+	end
+	if GetMerchantItemInfo then
+		local _, _, price, stackSize, numAvailable, isPurchasable, _, extendedCost = GetMerchantItemInfo(slot)
+		local canBuy = (isPurchasable ~= false) and not extendedCost
+		return price or 0, math.max(1, stackSize or 1), numAvailable or -1, canBuy
+	end
+	return nil
+end
+
+local function ScanMerchantCatalog(initSnap)
+	merchantCatalog = merchantCatalog or {}
+	merchantBuySnap = merchantBuySnap or {}
+	if initSnap and ns.GetBagCount then
+		for itemID in pairs(ns.VendorPrices or {}) do
+			if merchantBuySnap[itemID] == nil then
+				merchantBuySnap[itemID] = ns:GetBagCount(itemID) or 0
+			end
+		end
+		if ns.GetShoppingList then
+			for _, item in ipairs(ns:GetShoppingList() or {}) do
+				if item.itemID and merchantBuySnap[item.itemID] == nil then
+					merchantBuySnap[item.itemID] = ns:GetBagCount(item.itemID) or 0
+				end
+			end
+		end
+	end
+	if not GetMerchantNumItems then
+		return
+	end
+	local numMerchant = GetMerchantNumItems() or 0
+	for slot = 1, numMerchant do
+		local itemID = GetMerchantSlotItemID(slot)
+		if itemID and IsInTradeFlowVendorScope(itemID) then
+			local price, stackSize, _, canBuy = GetMerchantSlotInfo(slot)
+			if canBuy and price and price > 0 then
+				merchantCatalog[itemID] = {
+					batchPrice = price,
+					stackSize = math.max(1, stackSize or 1),
+				}
+				if merchantBuySnap[itemID] == nil then
+					merchantBuySnap[itemID] = ns.GetBagCount and ns:GetBagCount(itemID) or 0
+				end
+			end
+		end
+	end
+end
+
+local function ScanMerchantPurchases(now)
+	if not merchantCatalog or not merchantBuySnap then
+		return
+	end
+	if MerchantFrame and MerchantFrame:IsShown() then
+		ScanMerchantCatalog(false)
+	end
+	local isOpen = (MerchantFrame and MerchantFrame:IsShown()) == true
+	local recentBuy = (merchantLastBuyAt > 0) and ((now - merchantLastBuyAt) <= MERCHANT_BUY_WINDOW)
+	local active = isOpen or recentBuy
+	for itemID, cat in pairs(merchantCatalog) do
+		local prevCnt = merchantBuySnap[itemID]
+		local curCnt = ns.GetBagCount and ns:GetBagCount(itemID) or 0
+		if prevCnt == nil then
+			merchantBuySnap[itemID] = curCnt
+		elseif curCnt > prevCnt then
+			local gained = curCnt - prevCnt
+			merchantBuySnap[itemID] = curCnt
+			if active and cat.batchPrice and cat.batchPrice > 0 then
+				local cost = math.floor((cat.batchPrice * gained / math.max(1, cat.stackSize or 1)) + 0.5)
+				if cost > 0 then
+					ns:RecordTradeFlowPurchase("vendor_buy", itemID, gained, cost)
+				end
+			end
+		elseif curCnt < prevCnt then
+			merchantBuySnap[itemID] = curCnt
+		end
+	end
+	if not active then
+		merchantCatalog = nil
+		merchantBuySnap = nil
+		merchantLastBuyAt = 0
+	end
+end
+
+function ns:FlushPendingMerchantBuys()
+	if not IsProfitEnabled() then
+		return
+	end
+	ScanMerchantPurchases(GetTime and GetTime() or 0)
+end
+
+local function InstallMerchantHooks()
+	if merchantHooksInstalled then
+		return
+	end
+	if not _G.BuyMerchantItem and not _G.PickupMerchantItem then
+		return
+	end
+	merchantHooksInstalled = true
+	local function OnMerchantBuySlot(slot)
+		if not IsProfitEnabled() or not slot then
+			return
+		end
+		local now = GetTime and GetTime() or 0
+		merchantLastBuyAt = now
+		merchantCatalog = merchantCatalog or {}
+		merchantBuySnap = merchantBuySnap or {}
+		local itemID = GetMerchantSlotItemID(slot)
+		if itemID and IsInTradeFlowVendorScope(itemID) then
+			local price, stackSize, _, canBuy = GetMerchantSlotInfo(slot)
+			if canBuy and price and price > 0 then
+				merchantCatalog[itemID] = {
+					batchPrice = price,
+					stackSize = math.max(1, stackSize or 1),
+				}
+				if merchantBuySnap[itemID] == nil then
+					merchantBuySnap[itemID] = ns.GetBagCount and ns:GetBagCount(itemID) or 0
+				end
+			end
+		end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.35, function()
+				if IsProfitEnabled() then
+					ScanMerchantPurchases(GetTime and GetTime() or 0)
+				end
+			end)
+			C_Timer.After(0.9, function()
+				if IsProfitEnabled() then
+					ScanMerchantPurchases(GetTime and GetTime() or 0)
+				end
+			end)
+		end
+	end
+	if _G.BuyMerchantItem then
+		hooksecurefunc("BuyMerchantItem", function(slot)
+			OnMerchantBuySlot(slot)
+		end)
+	end
+	if _G.PickupMerchantItem then
+		hooksecurefunc("PickupMerchantItem", function(slot)
+			OnMerchantBuySlot(slot)
+		end)
+	end
+end
+
+local function SnapshotMerchantBags(now)
 	local craftedItems = EnsureCraftedItemsDB()
 	local snap = {}
 	for itemID, qty in pairs(craftedItems) do
@@ -724,6 +950,11 @@ local function SnapshotMerchantBags()
 	merchantMoney = GetMoney and GetMoney() or 0
 	pendingMerchantMoney = { amount = 0, ts = 0 }
 	pendingMerchantDrops = {}
+	if not (merchantLastBuyAt > 0 and now and (now - merchantLastBuyAt) <= 1.0) then
+		merchantCatalog = {}
+		merchantBuySnap = {}
+	end
+	ScanMerchantCatalog(true)
 end
 
 local function ScanMerchantBagDelta(now, force)
@@ -1037,6 +1268,7 @@ for _, ev in ipairs({
 	"COMMODITY_PURCHASE_SUCCEEDED",
 	"COMMODITY_PURCHASE_FAILED",
 	"MERCHANT_SHOW",
+	"MERCHANT_UPDATE",
 	"MERCHANT_CLOSED",
 	"BAG_UPDATE_DELAYED",
 	"MAIL_SHOW",
@@ -1055,11 +1287,17 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	if event == "PLAYER_LOGIN" or event == "AUCTION_HOUSE_SHOW" then
 		InstallAhHooks()
 	end
+	if event == "PLAYER_LOGIN" or event == "MERCHANT_SHOW" then
+		InstallMerchantHooks()
+	end
 	if not IsProfitEnabled() then
 		pendingAhComm = nil
 		pendingAhBid = nil
 		lastViewedAhItemKey = nil
 		merchantBagSnap = nil
+		merchantCatalog = nil
+		merchantBuySnap = nil
+		merchantLastBuyAt = 0
 		pendingMerchantMoney.amount = 0
 		pendingMerchantDrops = {}
 		mailSellerSnap = nil
@@ -1124,14 +1362,27 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			end
 		end
 	elseif event == "MERCHANT_SHOW" then
-		SnapshotMerchantBags()
+		SnapshotMerchantBags(now)
+	elseif event == "MERCHANT_UPDATE" then
+		if MerchantFrame and MerchantFrame:IsShown() then
+			ScanMerchantCatalog(false)
+		end
 	elseif event == "MERCHANT_CLOSED" then
+		ScanMerchantPurchases(now)
 		ScanMerchantBagDelta(now, true)
 		FlushPendingMerchantSales(now)
 		merchantBagSnap = nil
 		pendingMerchantMoney = { amount = 0, ts = 0 }
 		pendingMerchantDrops = {}
+		if not (merchantLastBuyAt > 0 and (now - merchantLastBuyAt) <= MERCHANT_BUY_WINDOW) then
+			merchantCatalog = nil
+			merchantBuySnap = nil
+			merchantLastBuyAt = 0
+		end
 	elseif event == "BAG_UPDATE_DELAYED" then
+		if (MerchantFrame and MerchantFrame:IsShown()) or (merchantLastBuyAt > 0 and (now - merchantLastBuyAt) <= MERCHANT_BUY_WINDOW) then
+			ScanMerchantPurchases(now)
+		end
 		if MerchantFrame and MerchantFrame:IsShown() and merchantBagSnap then
 			ScanMerchantBagDelta(now, false)
 			FlushPendingMerchantSales(now)
@@ -1165,9 +1416,12 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			if curM > merchantMoney then
 				pendingMerchantMoney.amount = (pendingMerchantMoney.amount or 0) + (curM - merchantMoney)
 				pendingMerchantMoney.ts = now
+			elseif curM < merchantMoney then
+				merchantLastBuyAt = now
 			end
 			merchantMoney = curM
 			FlushPendingMerchantSales(now)
+			ScanMerchantPurchases(now)
 		end
 		if MailFrame and MailFrame:IsShown() then
 			local curM = GetMoney and GetMoney() or 0
