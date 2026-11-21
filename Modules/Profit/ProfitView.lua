@@ -562,18 +562,8 @@ function ProfitMod:CreateView(parent)
 	end)
 	f.periodBtn = periodBtn
 
-	local clearLogBtn = CreateFrame("Button", nil, logTop, "UIPanelButtonTemplate")
-	clearLogBtn:SetSize(72, 20)
-	clearLogBtn:SetPoint("LEFT", periodBtn, "RIGHT", 4, 0)
-	clearLogBtn:SetText(L["QUEUE_CLEAR"])
-	clearLogBtn:SetScript("OnClick", function()
-		if ns.ClearProfitLog then
-			ns:ClearProfitLog(ns.GetProfitLogMode and ns:GetProfitLogMode() or "craft")
-		end
-	end)
-
 	local logSummaryText = logTop:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	logSummaryText:SetPoint("LEFT", clearLogBtn, "RIGHT", 6, 0)
+	logSummaryText:SetPoint("LEFT", periodBtn, "RIGHT", 6, 0)
 	logSummaryText:SetPoint("RIGHT", -2, 0)
 	logSummaryText:SetJustifyH("RIGHT")
 	logSummaryText:SetWordWrap(false)

@@ -293,6 +293,8 @@ ns.Locales.ru = {
 	["PROF_197"] = "Портняжное дело",
 
 	-- Диагностический лог
+	["OPT_CLEAR_PROFIT_LOG_BTN"] = "Очистить лог заработка",
+	["OPT_CLEAR_PROFIT_LOG_DONE"] = "Журнал заработка (Крафт и Касса) очищен.",
 	["OPT_DEBUG_LOG_BTN"] = "Лог ошибок (/tf log)",
 	["DEBUG_LOG_TITLE"] = "TradeFlow: диагностический лог (/tf log)",
 	["DEBUG_LOG_EMPTY"] = "Ошибок и блокировок интерфейса не зафиксировано.",

@@ -1878,7 +1878,7 @@ function ns:ToggleSettingsFrame()
 		end
 
 		local sf = CreateFrame("Frame", "TradeFlowSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(310, 80 + #opts * 28)
+		sf:SetSize(310, 108 + #opts * 28)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1922,6 +1922,17 @@ function ns:ToggleSettingsFrame()
 			end)
 			sf.checks[i] = { cb = cb, opt = o }
 		end
+
+		local clearProfitBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
+		clearProfitBtn:SetSize(286, 22)
+		clearProfitBtn:SetPoint("BOTTOMLEFT", 12, 36)
+		clearProfitBtn:SetText(L["OPT_CLEAR_PROFIT_LOG_BTN"])
+		clearProfitBtn:SetScript("OnClick", function()
+			sf:Hide()
+			if ns.ClearProfitLog then
+				ns:ClearProfitLog("all")
+			end
+		end)
 
 		local logBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
 		logBtn:SetSize(286, 22)

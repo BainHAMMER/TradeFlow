@@ -293,6 +293,8 @@ ns.Locales.en = {
 	["PROF_197"] = "Tailoring",
 
 	-- Debug Log
+	["OPT_CLEAR_PROFIT_LOG_BTN"] = "Clear Profit Log",
+	["OPT_CLEAR_PROFIT_LOG_DONE"] = "Profit log (Craft and Cash) cleared.",
 	["OPT_DEBUG_LOG_BTN"] = "Error Log (/tf log)",
 	["DEBUG_LOG_TITLE"] = "TradeFlow: Diagnostic Log (/tf log)",
 	["DEBUG_LOG_EMPTY"] = "No Lua errors or blocked interface actions recorded.",

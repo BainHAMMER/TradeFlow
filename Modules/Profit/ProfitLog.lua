@@ -614,13 +614,19 @@ end
 function ns:ClearProfitLog(mode)
 	mode = mode or self:GetProfitLogMode()
 	if self.realmDB then
-		if mode == "cashflow" then
+		if mode == "all" then
+			self.realmDB.cashflowLog = {}
+			self.realmDB.profitLog = {}
+		elseif mode == "cashflow" then
 			self.realmDB.cashflowLog = {}
 		else
 			self.realmDB.profitLog = {}
 		end
 	end
 	RefreshProfitLogUI()
+	if self.Print and L["OPT_CLEAR_PROFIT_LOG_DONE"] then
+		self:Print(L["OPT_CLEAR_PROFIT_LOG_DONE"])
+	end
 end
 
 -------------------------------------------------------------------------------
