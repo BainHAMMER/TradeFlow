@@ -3,7 +3,7 @@
 ## Notes: Fast crafting queue (DAG) & profession leveling calculator with real in-game item display and Auctionator integration.
 ## Notes-ruRU: Быстрая умная очередь крафта (DAG) и калькулятор прокачки профессий с отображением реальных предметов по ID и интеграцией с Auctionator.
 ## Author: BainHAMMER
-## Version: 1.0.8
+## Version: 1.0.9
 ## Category: Professions
 ## Category-ruRU: Профессии
 ## X-License: GPL-3.0-or-later

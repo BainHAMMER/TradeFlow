@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.9
+- **Profit Scanner (`Gold/hr` Sort, Source Filters & Queue Integration) (`Modules\Profit\ProfitEngine.lua`, `Modules\Profit\ProfitView.lua`, `Core\Queue.lua`):**
+  - Added **Sort: Gold/hr** (`Доход/ч`) ranking recipes by hourly profit across full crafting + subcraft cast duration, automatically comparing intermediate subcraft vs direct AH purchase (`gphCraftPlan`) when sorting by `Gold/hr` (while expanding subcrafts from owned bags when `Only from bags` or `Shift+Click` is used).
+  - Added unlearned recipe source filters (**Trainer**, **Vendor (in stock)**, **Other**) to the Profit scanner.
+  - Updated **Queue All** (`В очередь все`) in Details and `Shift+Click` (`+Queue`) in Profit to subtract materials already reserved by existing queue steps (`GetRemainingCraftableCount`).
+- **AH Sniper Fast Buyout, Manual Targets & Budget Limits (`Modules\Profit\Sniper.lua`, `Modules\Profit\ProfitView.lua`, `UI\MainFrame.lua`):**
+  - Added 2-step `#hwevent`-compliant **Fast Buyout** button on the floating AH Sniper bar with live price/availability verification and automatic cancellation if a deal vanishes or exceeds the target price.
+  - Added **Sniper Settings** popup (`Settings` in Sniper tab / `Limits` on AH bar) with configurable buyout limits: **Max budget per buyout** (default `10g`), **Min gold reserve in bags** (default `0`), and **Max quantity per buyout** (default `200`).
+  - Added manual Sniper target input (item name, item ID, bag drag-and-drop, or `Shift+Click` link), exact price editing, `/tf snipe` command, and recursive subcraft expansion to AH reagents when clicking `Snipe` on a recipe.
+- **Toggleable Craft & Cashflow Profit Log (`Modules\Profit\ProfitLog.lua`, `Modules\Profit\ProfitView.lua`, `UI\VendorAuction.lua`):**
+  - Added **Mode: Craft** (`Крафт`) and **Mode: Cash** (`Касса`) toggle in the Profit Log subtab, tracking real AH purchases (shopping list & sniper), event-driven vendor reagent/scroll purchases (`BuyMerchantItem` & merchant catalog bag delta), trainer recipe learning expenses, vendor sales of crafted items, and AH mail payouts (including disenchant materials from crafted items).
+  - Tracks real purchase lots (`purchaseLots`) to compute actual craft costs (`(факт)`) in Craft mode and moved **Clear Profit Log** into the **Settings** window to prevent accidental resets.
+- **Enchanting Target Slot & Spacebar Confirm (`Core\Core.lua`, `UI\QueueView.lua`):**
+  - Added automatic target item/slot selection for Enchanting (`CraftEnchant`) with a drag-and-drop manual target slot in the Queue panel and temporary `Spacebar` confirmation for `ReplaceEnchant` prompts.
+- **Recipe Favorites Synced with Blizzard UI (`Core\Core.lua`, `UI\MainFrame.lua`, `Modules\Profit\ProfitView.lua`):**
+  - Added right-click favorite toggling on recipes in the left list, Details icon, and Profit scanner with bidirectional `C_TradeSkillUI.SetRecipeFavorite` / `TRADE_SKILL_FAVORITES_CHANGED` synchronization, star badges, top pinning, and a dedicated **Favorites** category.
+- **Leveling Planner, Queue & Performance Improvements (`Core\Planner.lua`, `Core\Queue.lua`, `Core\Prices.lua`, `UI\VendorAuction.lua`):**
+  - Split planner recipe source checkboxes into **Trainer**, **Vendor (in stock)** (`Data\Vendor.lua` `VendorRecipeScrolls`), and **Other** (scrolls/drops/quests with AH price), ordered intermediate subcrafts before consumer steps, and expanded unlearned subcrafts in routes and shopping lists.
+  - Filtered non-disenchantable items (wands, shirts, tabards, bags, fishing poles) and integrated `DisenchantBuddy.API.v1` when available.
+  - Debounced Auctionator shopping list syncs (`ScheduleAuctionatorSync`), deferred background syncs while the Auction House is open, converted header profession icons and Details **Craft** button to `SecureActionButtonTemplate`, and eliminated CPU/GC spikes during route calculation and UI refreshes.
+
 ## v1.0.8
 - **Blizzard Professions Frame Integration & Mining Icon (via PR #5 by `frostmx`):**
   - **First-Open Session Fix (`UI\MainFrame.lua`):** Hid newly created `TradeFlowMainFrame` before attaching `OnHide` so first open after `/reload` or `/tf lang` no longer triggers `CloseTradeSkill()`.
