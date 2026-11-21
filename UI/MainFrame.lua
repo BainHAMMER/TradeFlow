@@ -49,7 +49,7 @@ function ns:ApplyWindowLayout(keepTopRight)
 
 	if f.collapseLeftBtn then
 		f.collapseLeftBtn:SetShown(not isMin)
-		f.collapseLeftBtn:SetText(isCol and ">>" or "<<")
+		f.collapseLeftBtn:SetText(isCol and "<<" or ">>")
 	end
 	if f.minBtn then
 		f.minBtn:SetText(isMin and "+" or "-")
@@ -420,7 +420,7 @@ function ns:CreateMainFrame()
 	local collapseLeftBtn = CreateFrame("Button", nil, header, "UIPanelButtonTemplate")
 	collapseLeftBtn:SetSize(24, 22)
 	collapseLeftBtn:SetPoint("LEFT", 6, 0)
-	collapseLeftBtn:SetText("<<")
+	collapseLeftBtn:SetText(">>")
 	collapseLeftBtn:SetScript("OnClick", function()
 		if not (ns.db and ns.db.options) then
 			return

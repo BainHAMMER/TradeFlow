@@ -688,8 +688,9 @@ function ns:IsRecipeFavorite(recipeID)
 	if not recipeID or recipeID <= 0 then
 		return false
 	end
-	if self.pendingBlizzFavorites and self.pendingBlizzFavorites[recipeID] ~= nil then
-		return self.pendingBlizzFavorites[recipeID] == true
+	local p = self.pendingBlizzFavorites and self.pendingBlizzFavorites[recipeID]
+	if type(p) == "table" and p.target ~= nil then
+		return p.target == true
 	end
 	if self.charDB and self.charDB.favorites and self.charDB.favorites[recipeID] ~= nil then
 		return self.charDB.favorites[recipeID] == true
@@ -700,22 +701,42 @@ function ns:IsRecipeFavorite(recipeID)
 	return false
 end
 
+local function ResolveBlizzFavoriteState(recipeID, blizzFav, pending, now)
+	local p = pending and pending[recipeID]
+	if type(p) ~= "table" or p.target == nil then
+		return blizzFav
+	end
+	if blizzFav == p.target then
+		pending[recipeID] = nil
+		return blizzFav
+	end
+	if not p.sent and C_TradeSkillUI and C_TradeSkillUI.SetRecipeFavorite then
+		pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, p.target)
+		p.sent = true
+		p.ts = now
+		return p.target
+	end
+	if (now - (p.ts or 0)) <= 3.0 then
+		return p.target
+	end
+	pending[recipeID] = nil
+	return blizzFav
+end
+
 function ns:SyncFavoritesFromBlizzard()
 	if not C_TradeSkillUI or not C_TradeSkillUI.GetAllRecipeIDs or not self:GetActiveClientSkillLine() then
 		return false
 	end
 	local favMap = (self.charDB and self.charDB.favorites) or {}
 	local pending = self.pendingBlizzFavorites
+	local now = GetTime and GetTime() or 0
 	local recipeIDs = C_TradeSkillUI.GetAllRecipeIDs() or {}
 	for _, recipeID in ipairs(recipeIDs) do
-		if pending and pending[recipeID] ~= nil and C_TradeSkillUI.SetRecipeFavorite then
-			pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, pending[recipeID])
-			pending[recipeID] = nil
-		end
 		local info = C_TradeSkillUI.GetRecipeInfo and C_TradeSkillUI.GetRecipeInfo(recipeID)
-		local isFav = (info and info.favorite == true)
+		local blizzFav = (info and info.favorite == true)
 			or (C_TradeSkillUI.IsRecipeFavorite and select(2, pcall(C_TradeSkillUI.IsRecipeFavorite, recipeID)) == true)
 			or false
+		local isFav = ResolveBlizzFavoriteState(recipeID, blizzFav, pending, now)
 		favMap[recipeID] = isFav and true or nil
 		if self.liveRecipes and self.liveRecipes[recipeID] then
 			self.liveRecipes[recipeID].favorite = isFav
@@ -740,7 +761,7 @@ function ns:ToggleRecipeFavorite(recipeID)
 		self.liveRecipes[recipeID].favorite = newFav
 	end
 
-	local synced = false
+	local sent = false
 	local rec = self:GetRecipeRecord(recipeID)
 	local activeSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
 	if C_TradeSkillUI and C_TradeSkillUI.SetRecipeFavorite and (not rec or not rec.skillLine or activeSL == rec.skillLine) then
@@ -754,21 +775,16 @@ function ns:ToggleRecipeFavorite(recipeID)
 		if canFav then
 			local ok = pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, newFav)
 			if ok then
-				if C_TradeSkillUI.IsRecipeFavorite then
-					local okF, curF = pcall(C_TradeSkillUI.IsRecipeFavorite, recipeID)
-					synced = okF and (curF == newFav)
-				else
-					synced = true
-				end
+				sent = true
 			end
 		end
 	end
 	self.pendingBlizzFavorites = self.pendingBlizzFavorites or {}
-	if synced then
-		self.pendingBlizzFavorites[recipeID] = nil
-	else
-		self.pendingBlizzFavorites[recipeID] = newFav
-	end
+	self.pendingBlizzFavorites[recipeID] = {
+		target = newFav,
+		sent = sent,
+		ts = GetTime and GetTime() or 0,
+	}
 
 	if self.RefreshRecipeList then
 		self:RefreshRecipeList()
@@ -839,19 +855,17 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 	local learnedMap = self.charDB and self.charDB.learned or {}
 	local favMap = (self.charDB and self.charDB.favorites) or {}
 	local pendingFav = self.pendingBlizzFavorites
+	local now = GetTime and GetTime() or 0
 	local newlyLearned = false
 
 	local recipeIDs = C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetAllRecipeIDs() or {}
 	for _, recipeID in ipairs(recipeIDs) do
-		if pendingFav and pendingFav[recipeID] ~= nil and C_TradeSkillUI.SetRecipeFavorite then
-			pcall(C_TradeSkillUI.SetRecipeFavorite, recipeID, pendingFav[recipeID])
-			pendingFav[recipeID] = nil
-		end
 		local info = C_TradeSkillUI.GetRecipeInfo and C_TradeSkillUI.GetRecipeInfo(recipeID)
 		if info then
-			local isFav = (info.favorite == true)
+			local blizzFav = (info.favorite == true)
 				or (C_TradeSkillUI.IsRecipeFavorite and select(2, pcall(C_TradeSkillUI.IsRecipeFavorite, recipeID)) == true)
 				or false
+			local isFav = ResolveBlizzFavoriteState(recipeID, blizzFav, pendingFav, now)
 			favMap[recipeID] = isFav and true or nil
 			local catID = info.categoryID or 0
 			if catID > 0 and C_TradeSkillUI.GetCategoryInfo and not self.categoriesBySkill[skillLine][catID] then
