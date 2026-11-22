@@ -16,6 +16,40 @@ function ns:IsSecureProfProxyOwner(btn)
 	return secureProfProxy ~= nil and secureProfProxy:IsShown() and secureProfProxy.targetBtn == btn
 end
 
+function ns:SyncHoveredProfProxy()
+	if not self.mainFrame or not self.mainFrame:IsShown() or (InCombatLockdown and InCombatLockdown()) then
+		return
+	end
+	if self.queueView and self.queueView.processBtn and self.queueView.processBtn:IsVisible() and self.queueView.processBtn:IsMouseOver() then
+		local pBtn = self.queueView.processBtn
+		if pBtn.pendingSkillLine then
+			self:AttachSecureProfProxy(pBtn, pBtn.pendingSkillLine)
+		elseif self:IsSecureProfProxyOwner(pBtn) then
+			self:DetachSecureProfProxy()
+		end
+		return
+	end
+	if self.detailsView and self.detailsView.craftNowBtn and self.detailsView.craftNowBtn:IsVisible() and self.detailsView.craftNowBtn:IsMouseOver() then
+		local cBtn = self.detailsView.craftNowBtn
+		if cBtn.pendingSkillLine then
+			self:AttachSecureProfProxy(cBtn, cBtn.pendingSkillLine)
+		elseif self:IsSecureProfProxyOwner(cBtn) then
+			self:DetachSecureProfProxy()
+		end
+		return
+	end
+	if self.mainFrame.profButtons then
+		for _, pb in ipairs(self.mainFrame.profButtons) do
+			if pb:IsVisible() and pb.skillLine and pb:IsMouseOver() then
+				if not self:AttachSecureProfProxy(pb, pb.skillLine) and self:IsSecureProfProxyOwner(pb) then
+					self:DetachSecureProfProxy()
+				end
+				return
+			end
+		end
+	end
+end
+
 function ns:DetachSecureProfProxy()
 	if not secureProfProxy then
 		return
@@ -572,6 +606,9 @@ function ns:CreateMainFrame()
 		pb:SetScript("OnClick", function(self)
 			if self.skillLine then
 				ns:SwitchToProfession(self.skillLine)
+				if ns.GetActiveClientSkillLine and ns:GetActiveClientSkillLine() ~= self.skillLine then
+					ns:AttachSecureProfProxy(self, self.skillLine)
+				end
 			end
 		end)
 		pb:SetScript("OnEnter", function(self)
@@ -1488,8 +1525,17 @@ function ns:CreateDetailsView(parent)
 		end
 	end)
 	craftNowBtn:SetScript("OnClick", function(self)
+		if not self.pendingSkillLine and self.skillLine and ns.GetActiveClientSkillLine and ns:GetActiveClientSkillLine() ~= self.skillLine then
+			self.pendingSkillLine = self.skillLine
+		end
 		if self.pendingSkillLine then
 			ns:SwitchToProfession(self.pendingSkillLine)
+			if ns.AttachSecureProfProxy then
+				ns:AttachSecureProfProxy(self, self.pendingSkillLine)
+			end
+			if ns.Print then
+				ns:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], ns:GetProfessionName(self.pendingSkillLine)))
+			end
 			return
 		end
 		local rID = d.currentRecipeID
@@ -1749,6 +1795,9 @@ function ns:RefreshDetailsView()
 		d.craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
 		d.craftNowBtn.pendingSkillLine = nil
 		d.craftNowBtn:SetEnabled(canCraft)
+	end
+	if self.SyncHoveredProfProxy then
+		self:SyncHoveredProfProxy()
 	end
 end
 
@@ -2066,6 +2115,9 @@ function ns:RefreshMainWindow()
 	local opts = (self.db and self.db.options) or {}
 	if opts.windowMinimized == true then
 		self:RefreshQueueAndShoppingView()
+		if self.SyncHoveredProfProxy then
+			self:SyncHoveredProfProxy()
+		end
 		return
 	end
 	if f.RefreshTopTabs then
@@ -2074,6 +2126,9 @@ function ns:RefreshMainWindow()
 
 	self:RefreshRecipeList()
 	self:RefreshQueueAndShoppingView()
+	if self.SyncHoveredProfProxy then
+		self:SyncHoveredProfProxy()
+	end
 end
 
 function ns:RefreshRankBarOnly()

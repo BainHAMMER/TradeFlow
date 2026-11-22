@@ -228,6 +228,12 @@ function ns:CreateQueueAndShoppingView(parent)
 	processBtn:SetScript("OnClick", function(self)
 		if self.pendingSkillLine then
 			ns:SwitchToProfession(self.pendingSkillLine)
+			if ns.AttachSecureProfProxy then
+				ns:AttachSecureProfProxy(self, self.pendingSkillLine)
+			end
+			if ns.Print then
+				ns:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], ns:GetProfessionName(self.pendingSkillLine)))
+			end
 		else
 			ns:ProcessQueue()
 		end
@@ -593,5 +599,8 @@ function ns:RefreshQueueAndShoppingView()
 	end
 
 	self:RenderQueueOrShoppingRows()
+	if self.SyncHoveredProfProxy then
+		self:SyncHoveredProfProxy()
+	end
 end
 
