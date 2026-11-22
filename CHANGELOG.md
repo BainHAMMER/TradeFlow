@@ -1,5 +1,20 @@
 # Changelog / Список изменений
 
+## v1.0.11
+### RU
+- **Свободное закрытие и управление окном в бою:**
+  - Защищённый каст смены профессии вынесен во внешний прокси на `UIParent`, благодаря чему главное окно `TradeFlow` больше не блокируется движком WoW в бою и мгновенно закрывается (по `X`, клавише `Esc` или `/tf`), открывается, сворачивается и меняет масштаб прямо во время боя.
+- **Оформление списка изменений:**
+  - Настроена публикация форматированного списка изменений на CurseForge и GitHub Releases вместо сырого лога коммитов.
+
+### EN
+- **Combat-Safe Window Closing & Controls:**
+  - Moved secure profession switching to an external `UIParent` proxy button so the main `TradeFlow` window is never locked down during combat and can be closed (`X`, `Esc`, `/tf`), opened, minimized, and scaled freely while in combat.
+- **Release Notes Formatting:**
+  - Configured formatted Markdown changelog publishing for CurseForge and GitHub Releases instead of raw git commit logs.
+
+---
+
 ## v1.0.10
 ### RU
 - **Управление окном и список рецептов:**
