@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.10
+- **Window Controls, Recipe List Scrollbar & Independent UI Scale (`UI\MainFrame.lua`, `Core\Core.lua`, `Locales\*.lua`):**
+  - Added a vertical **Scrollbar** (`recipeScrollBar`) inside the left recipe list, synced with mouse-wheel scrolling, thumb dragging, and auto-scroll to the selected recipe.
+  - Added a **Collapse / Expand Recipe List** button (`>>` / `<<`) in the top-left of the header that folds the left recipe pane and narrows the window (`980px -> 527px`) while keeping the top-right corner anchored in place.
+  - Added a **Minimize to Queue & Shopping List** button (`-` / `+`) next to the close button (`X`) that compacts the window (`527x290`) down to the header and Queue / Shopping List panel.
+  - Added an independent **Window Scale** slider (`60%–140%`, step `5%`, with a `100%` reset button) in the **Settings** popup.
+- **Favorites Sync, Combat Lockdown & Bank Withdrawal Fixes (`Core\Core.lua`, `UI\MainFrame.lua`, `UI\VendorAuction.lua`):**
+  - Fixed right-click recipe favorite toggling so in-flight `C_TradeSkillUI.SetRecipeFavorite` requests (`ResolveBlizzFavoriteState`) are not overwritten by stale `GetRecipeInfo().favorite` reads on immediate `TRADE_SKILL_LIST_UPDATE` events.
+  - Deferred `TradeFlowMainFrame` `:Show()`, `:Hide()`, `:SetSize()`, `:SetPoint()`, and `:SetScale()` calls during `InCombatLockdown()` (executing them on `PLAYER_REGEN_ENABLED`) and temporarily removed `TradeFlowMainFrame` from `UISpecialFrames` during combat to prevent `ADDON_ACTION_BLOCKED`.
+  - Fixed `"Couldn't split those items"` (`ERR_ITEM_CANT_BE_SPLIT`) errors during bank withdrawal by queuing target bank slots once (`job.slotQueue`, smallest stacks first) and withdrawing via atomic `UseContainerItem` calls without `SplitContainerItem` retries on in-flight slots.
+
 ## v1.0.9
 - **Profit Scanner (`Gold/hr` Sort, Source Filters & Queue Integration) (`Modules\Profit\ProfitEngine.lua`, `Modules\Profit\ProfitView.lua`, `Core\Queue.lua`):**
   - Added **Sort: Gold/hr** (`Доход/ч`) ranking recipes by hourly profit across full crafting + subcraft cast duration, automatically comparing intermediate subcraft vs direct AH purchase (`gphCraftPlan`) when sorting by `Gold/hr` (while expanding subcrafts from owned bags when `Only from bags` or `Shift+Click` is used).
