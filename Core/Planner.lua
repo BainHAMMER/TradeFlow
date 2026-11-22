@@ -227,13 +227,13 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				or (includeOther and isOtherScroll and scrollPrice and scrollPrice > 0)
 			local isFallbackScroll = (not hasKnownAcquisition) and includeOther and isOtherScroll
 			if hasKnownAcquisition or isFallbackScroll then
-				local craftCost, _, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
+				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
 				if breakdown and #breakdown > 0 then
 					local rec = self:GetRecipeRecord(recipeID)
-					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше;
-					-- перепродажа на аукционе (alts.ah) в прокачку никогда не входит
+					local vendorSell = (alts and alts.vendor) or 0
+					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), иначе лучшая выручка (включая АХ -5%)
 					local effectiveDeduct = ns.GetSkillUpReturn(alts, deductVendor)
-					local unitReturn = effectiveDeduct
+					local unitReturn = deductVendor and effectiveDeduct or math.max(outVal or 0, vendorSell)
 					local acquireFee = 0
 					if not learned and not isBasic then
 						if isTrainer or isVendorScroll then
@@ -373,27 +373,31 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 		local cost = 0
 		local ahPenalty = 0
 		for _, b in ipairs(cand.reagents) do
-			local baseAvail = math.max(0, GetBaseHave(b.itemID) - (state.used[b.itemID] or 0))
 			local prodAvail = (state.produced and state.produced[b.itemID]) or 0
 			local need = b.quantity * n
-			local fromBase = math.min(baseAvail, need)
-			local rem = need - fromBase
-			local fromProd = math.min(prodAvail, rem)
+			local fromProd = math.min(prodAvail, need)
 			if fromProd > 0 then
-				-- Потреблённый полуфабрикат не уйдёт вендору: снимаем его авансовую выручку
+				-- Потреблённый полуфабрикат из предыдущего шага маршрута не уйдёт на продажу: снимаем его авансовую выручку
 				cost = cost + fromProd * ((state.prodReturn and state.prodReturn[b.itemID]) or 0)
 			end
-			local toBuy = rem - fromProd
-			if toBuy > 0 then
+			local rem = need - fromProd
+			if rem > 0 then
 				local unitPrice = b.unitPrice or 0
-				if checkAhStock and b.source == "ah" and self.EvalAuctionBuyCost then
-					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, state.ahBought[b.itemID] or 0, toBuy, unitPrice)
-					cost = cost + lineCost
-					if shortage > 0 then
-						ahPenalty = ahPenalty + shortage * math.max(500, unitPrice * 0.5)
+				local baseAvail = math.max(0, GetBaseHave(b.itemID) - (state.used[b.itemID] or 0))
+				local fromBase = math.min(baseAvail, rem)
+				-- Реагенты из сумок/банка оцениваем по их рыночной цене (упущенная выгода / opportunity cost)
+				cost = cost + fromBase * unitPrice
+				local toBuy = rem - fromBase
+				if toBuy > 0 then
+					if checkAhStock and b.source == "ah" and self.EvalAuctionBuyCost then
+						local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, state.ahBought[b.itemID] or 0, toBuy, unitPrice)
+						cost = cost + lineCost
+						if shortage > 0 then
+							ahPenalty = ahPenalty + shortage * math.max(500, unitPrice * 0.5)
+						end
+					else
+						cost = cost + toBuy * unitPrice
 					end
-				else
-					cost = cost + toBuy * unitPrice
 				end
 			end
 		end
@@ -603,19 +607,9 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			local newAhBought = prevState.ahBought
 			local ahCopied = false
 			for _, b in ipairs(cand.reagents) do
-				local baseAvail = math.max(0, GetBaseHave(b.itemID) - (newUsed[b.itemID] or 0))
 				local prodAvail = (newProduced and newProduced[b.itemID]) or 0
 				local need = b.quantity * tr.craftsPerPoint
-				local fromBase = math.min(baseAvail, need)
-				if fromBase > 0 then
-					if not usedCopied then
-						newUsed = CopyMap(prevState.used)
-						usedCopied = true
-					end
-					newUsed[b.itemID] = (newUsed[b.itemID] or 0) + fromBase
-				end
-				local rem = need - fromBase
-				local fromProd = math.min(prodAvail, rem)
+				local fromProd = math.min(prodAvail, need)
 				if fromProd > 0 then
 					if not prodCopied then
 						newProduced = CopyMap(prevState.produced or {})
@@ -623,7 +617,17 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 					end
 					newProduced[b.itemID] = prodAvail - fromProd
 				end
-				local toBuy = rem - fromProd
+				local rem = need - fromProd
+				local baseAvail = math.max(0, GetBaseHave(b.itemID) - (newUsed[b.itemID] or 0))
+				local fromBase = math.min(baseAvail, rem)
+				if fromBase > 0 then
+					if not usedCopied then
+						newUsed = CopyMap(prevState.used)
+						usedCopied = true
+					end
+					newUsed[b.itemID] = (newUsed[b.itemID] or 0) + fromBase
+				end
+				local toBuy = rem - fromBase
 				if checkAhStock and b.source == "ah" and toBuy > 0 then
 					if not ahCopied then
 						newAhBought = CopyMap(prevState.ahBought)
@@ -828,14 +832,8 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 			st.avgChance = math.floor((st.chanceSum / st.points) * 100 + 0.5)
 			local stepBuyCost = 0
 			for _, b in ipairs(st.reagents or {}) do
-				if finalPool[b.itemID] == nil then
-					finalPool[b.itemID] = self:GetBagCount(b.itemID) + self:GetBankCount(b.itemID)
-				end
-				local haveBase = finalPool[b.itemID]
 				local need = b.quantity * st.crafts
-				local takeBase = math.min(haveBase, need)
-				finalPool[b.itemID] = haveBase - takeBase
-				local rem = need - takeBase
+				local rem = need
 				if rem > 0 and producedLots[b.itemID] then
 					for _, lot in ipairs(producedLots[b.itemID]) do
 						if rem <= 0 then
@@ -849,7 +847,14 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 						end
 					end
 				end
-				local toBuy = rem
+				if finalPool[b.itemID] == nil then
+					finalPool[b.itemID] = self:GetBagCount(b.itemID) + self:GetBankCount(b.itemID)
+				end
+				local haveBase = finalPool[b.itemID]
+				local takeBase = math.min(haveBase, rem)
+				finalPool[b.itemID] = haveBase - takeBase
+				stepBuyCost = stepBuyCost + takeBase * (b.unitPrice or 0)
+				local toBuy = rem - takeBase
 				if checkAhStock and b.source == "ah" and toBuy > 0 and self.EvalAuctionBuyCost then
 					local lineCost, shortage = self:EvalAuctionBuyCost(b.itemID, finalAhBought[b.itemID] or 0, toBuy, b.unitPrice)
 					stepBuyCost = stepBuyCost + lineCost
