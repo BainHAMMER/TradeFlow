@@ -19,23 +19,32 @@ function ns:GetUIScale()
 end
 
 function ns:ApplyUIScale()
+	if not self.mainFrame then
+		return
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		self.pendingLayoutAfterCombat = true
+		return
+	end
 	local scale = self:GetUIScale()
-	if self.mainFrame then
-		local right, top = self.mainFrame:GetRight(), self.mainFrame:GetTop()
-		local oldScale = self.mainFrame:GetScale() or 1.0
-		self.mainFrame:SetScale(scale)
-		if right and top and math.abs(scale - oldScale) > 0.001 then
-			local absRight = right * oldScale
-			local absTop = top * oldScale
-			self.mainFrame:ClearAllPoints()
-			self.mainFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
-		end
+	local right, top = self.mainFrame:GetRight(), self.mainFrame:GetTop()
+	local oldScale = self.mainFrame:GetScale() or 1.0
+	self.mainFrame:SetScale(scale)
+	if right and top and math.abs(scale - oldScale) > 0.001 then
+		local absRight = right * oldScale
+		local absTop = top * oldScale
+		self.mainFrame:ClearAllPoints()
+		self.mainFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
 	end
 end
 
 function ns:ApplyWindowLayout(keepTopRight)
 	local f = self.mainFrame
 	if not f then
+		return
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		self.pendingLayoutAfterCombat = true
 		return
 	end
 	local right, top
@@ -2054,13 +2063,59 @@ function ns:RefreshVisibleUI()
 	end
 end
 
+function ns:SetMainSpecialFrameEnabled(enabled)
+	if not UISpecialFrames then
+		return
+	end
+	for i = #UISpecialFrames, 1, -1 do
+		if UISpecialFrames[i] == "TradeFlowMainFrame" then
+			if enabled then
+				return
+			end
+			table.remove(UISpecialFrames, i)
+		end
+	end
+	if enabled then
+		tinsert(UISpecialFrames, "TradeFlowMainFrame")
+	end
+end
+
+function ns:OnCombatEnded()
+	if self.pendingLayoutAfterCombat and self.mainFrame then
+		self.pendingLayoutAfterCombat = false
+		self:ApplyUIScale()
+		self:ApplyWindowLayout(true)
+	end
+	if self.pendingHideAfterCombat then
+		self.pendingHideAfterCombat = false
+		self.pendingShowAfterCombat = false
+		self:HideMainWindow()
+	elseif self.pendingShowAfterCombat then
+		self.pendingShowAfterCombat = false
+		self:ShowMainWindow()
+	elseif self.mainFrame and self.mainFrame:IsShown() then
+		self:RefreshMainWindow()
+	end
+end
+
 function ns:ShowMainWindow()
+	self.pendingHideAfterCombat = false
+	if InCombatLockdown and InCombatLockdown() then
+		if self.mainFrame and self.mainFrame:IsShown() then
+			self:RefreshMainWindow()
+		else
+			self.pendingShowAfterCombat = true
+		end
+		return
+	end
+	self.pendingShowAfterCombat = false
 	local f = self:CreateMainFrame()
 	f:Show()
 	self:RefreshMainWindow()
 end
 
 function ns:HideMainWindow()
+	self.pendingShowAfterCombat = false
 	if self.HideSniperSettingsFrame then
 		self:HideSniperSettingsFrame("tab")
 	end
@@ -2068,6 +2123,11 @@ function ns:HideMainWindow()
 		self.settingsFrame:Hide()
 	end
 	if self.mainFrame and self.mainFrame:IsShown() then
+		if InCombatLockdown and InCombatLockdown() then
+			self.pendingHideAfterCombat = true
+			return
+		end
+		self.pendingHideAfterCombat = false
 		self.mainFrame:Hide()
 	end
 end

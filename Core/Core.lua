@@ -1639,6 +1639,7 @@ for _, ev in ipairs({
 	"SPELL_DATA_LOAD_RESULT",
 	"REPLACE_ENCHANT",
 	"PLAYER_REGEN_DISABLED",
+	"PLAYER_REGEN_ENABLED",
 	"PLAYER_EQUIPMENT_CHANGED",
 }) do
 	pcall(eventFrame.RegisterEvent, eventFrame, ev)
@@ -1830,6 +1831,16 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		end
 	elseif event == "PLAYER_REGEN_DISABLED" then
 		ClearReplaceEnchantSpace()
+		if ns.SetMainSpecialFrameEnabled then
+			ns:SetMainSpecialFrameEnabled(false)
+		end
+	elseif event == "PLAYER_REGEN_ENABLED" then
+		if ns.SetMainSpecialFrameEnabled then
+			ns:SetMainSpecialFrameEnabled(true)
+		end
+		if ns.OnCombatEnded then
+			ns:OnCombatEnded()
+		end
 	elseif event == "PLAYER_EQUIPMENT_CHANGED" then
 		if ns.detailsView and ns.detailsView:IsVisible() and ns.detailsView.currentRecipeID
 			and ns.IsEnchantRecipe and ns:IsEnchantRecipe(ns.detailsView.currentRecipeID)
