@@ -10,6 +10,88 @@ local TOP_RIGHT_H = 342
 local RECIPE_ROW_H = 24
 local RECIPE_VISIBLE_ROWS = 20
 
+local secureProfProxy = nil
+
+function ns:IsSecureProfProxyOwner(btn)
+	return secureProfProxy ~= nil and secureProfProxy:IsShown() and secureProfProxy.targetBtn == btn
+end
+
+function ns:DetachSecureProfProxy()
+	if not secureProfProxy then
+		return
+	end
+	local prev = secureProfProxy.targetBtn
+	secureProfProxy.targetBtn = nil
+	secureProfProxy.skillLine = nil
+	if prev and prev.UnlockHighlight then
+		prev:UnlockHighlight()
+	end
+	GameTooltip_Hide()
+	if not (InCombatLockdown and InCombatLockdown()) then
+		secureProfProxy:SetAttribute("type", nil)
+		secureProfProxy:SetAttribute("spell", nil)
+		secureProfProxy:ClearAllPoints()
+		secureProfProxy:Hide()
+	end
+end
+
+function ns:AttachSecureProfProxy(btn, skillLine)
+	if not (btn and skillLine) or (InCombatLockdown and InCombatLockdown()) then
+		return false
+	end
+	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
+	if activeClientSL == skillLine then
+		return false
+	end
+	local spellAttr = self.GetProfessionSpellAttr and self:GetProfessionSpellAttr(skillLine) or nil
+	if not spellAttr then
+		return false
+	end
+	local l, b, w, h = btn:GetLeft(), btn:GetBottom(), btn:GetWidth(), btn:GetHeight()
+	if not (l and b and w and h and w > 0 and h > 0) then
+		return false
+	end
+	if not secureProfProxy then
+		secureProfProxy = CreateFrame("Button", "TradeFlowSecureProfProxy", UIParent, "SecureActionButtonTemplate")
+		secureProfProxy:RegisterForClicks("AnyUp")
+		secureProfProxy:SetAttribute("useOnKeyDown", false)
+		secureProfProxy:SetScript("PreClick", function(self)
+			if self.skillLine and ns.PrepareSecureProfSwitch then
+				ns:PrepareSecureProfSwitch()
+			end
+		end)
+		secureProfProxy:SetScript("PostClick", function(self)
+			local sl = self.skillLine
+			ns:DetachSecureProfProxy()
+			if sl then
+				ns:SwitchToProfession(sl)
+			end
+		end)
+		secureProfProxy:SetScript("OnLeave", function()
+			ns:DetachSecureProfProxy()
+		end)
+	end
+	local prev = secureProfProxy.targetBtn
+	if prev and prev ~= btn and prev.UnlockHighlight then
+		prev:UnlockHighlight()
+	end
+	local ratio = (btn:GetEffectiveScale() or 1) / ((UIParent and UIParent:GetEffectiveScale()) or 1)
+	secureProfProxy.targetBtn = btn
+	secureProfProxy.skillLine = skillLine
+	secureProfProxy:SetFrameStrata(btn:GetFrameStrata() or "MEDIUM")
+	secureProfProxy:SetFrameLevel((btn:GetFrameLevel() or 1) + 15)
+	secureProfProxy:ClearAllPoints()
+	secureProfProxy:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l * ratio, b * ratio)
+	secureProfProxy:SetSize(w * ratio, h * ratio)
+	secureProfProxy:SetAttribute("type", "spell")
+	secureProfProxy:SetAttribute("spell", spellAttr)
+	secureProfProxy:Show()
+	if btn.LockHighlight then
+		btn:LockHighlight()
+	end
+	return true
+end
+
 function ns:GetUIScale()
 	local s = self.db and self.db.options and tonumber(self.db.options.uiScale)
 	if not s or s < 0.6 or s > 1.4 then
@@ -22,10 +104,7 @@ function ns:ApplyUIScale()
 	if not self.mainFrame then
 		return
 	end
-	if InCombatLockdown and InCombatLockdown() then
-		self.pendingLayoutAfterCombat = true
-		return
-	end
+	self:DetachSecureProfProxy()
 	local scale = self:GetUIScale()
 	local right, top = self.mainFrame:GetRight(), self.mainFrame:GetTop()
 	local oldScale = self.mainFrame:GetScale() or 1.0
@@ -43,10 +122,7 @@ function ns:ApplyWindowLayout(keepTopRight)
 	if not f then
 		return
 	end
-	if InCombatLockdown and InCombatLockdown() then
-		self.pendingLayoutAfterCombat = true
-		return
-	end
+	self:DetachSecureProfProxy()
 	local right, top
 	if keepTopRight then
 		right, top = f:GetRight(), f:GetTop()
@@ -394,6 +470,9 @@ function ns:CreateMainFrame()
 	f:SetBackdropColor(0.05, 0.045, 0.04, 0.98)
 	f:SetScript("OnHide", function()
 		ns._lastEnchantCraftAt = nil
+		if ns.DetachSecureProfProxy then
+			ns:DetachSecureProfProxy()
+		end
 		if ns.HideSniperSettingsFrame then
 			ns:HideSniperSettingsFrame("tab")
 		end
@@ -464,28 +543,20 @@ function ns:CreateMainFrame()
 	title:SetText("|cffffd100" .. L["ADDON_TITLE"] .. "|r")
 	f.headerTitle = title
 
-	-- Кнопки переключения профессий персонажа (SecureActionButton нельзя якорить к FontString/Texture, только к Frame)
+	-- Кнопки переключения профессий персонажа (обычные Button; безопасный каст профессии вешается через TradeFlowSecureProfProxy на UIParent)
 	local profStartX = 142
 	f.profButtons = {}
 	for i = 1, 6 do
-		local pb = CreateFrame("Button", nil, header, "SecureActionButtonTemplate,BackdropTemplate")
+		local pb = CreateFrame("Button", nil, header, "BackdropTemplate")
 		pb:SetSize(26, 26)
 		pb:SetPoint("LEFT", header, "LEFT", profStartX + (i - 1) * 30, 0)
 		StylePanel(pb, 0.10, 0.10, 0.10, 0.95)
 		pb:RegisterForClicks("AnyUp")
-		if not (InCombatLockdown and InCombatLockdown()) then
-			pb:SetAttribute("useOnKeyDown", false)
-		end
 		pb.tex = pb:CreateTexture(nil, "ARTWORK")
 		pb.tex:SetPoint("TOPLEFT", 3, -3)
 		pb.tex:SetPoint("BOTTOMRIGHT", -3, 3)
 		pb.tex:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-		pb:SetScript("PreClick", function(self)
-			if self.skillLine and self:GetAttribute("type") == "spell" and ns.PrepareSecureProfSwitch then
-				ns:PrepareSecureProfSwitch()
-			end
-		end)
-		pb:SetScript("PostClick", function(self)
+		pb:SetScript("OnClick", function(self)
 			if self.skillLine then
 				ns:SwitchToProfession(self.skillLine)
 			end
@@ -499,9 +570,14 @@ function ns:CreateMainFrame()
 					GameTooltip:AddLine(string.format("%d / %d", p.rank or 1, p.maxRank or 75), 1, 1, 1)
 				end
 				GameTooltip:Show()
+				ns:AttachSecureProfProxy(self, self.skillLine)
 			end
 		end)
-		pb:SetScript("OnLeave", GameTooltip_Hide)
+		pb:SetScript("OnLeave", function(self)
+			if not ns:IsSecureProfProxyOwner(self) then
+				GameTooltip_Hide()
+			end
+		end)
 		f.profButtons[i] = pb
 	end
 
@@ -1388,25 +1464,19 @@ function ns:CreateDetailsView(parent)
 		end
 	end)
 
-	local craftNowBtn = CreateFrame("Button", nil, d, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+	local craftNowBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
 	craftNowBtn:SetSize(115, 24)
 	craftNowBtn:SetPoint("BOTTOMRIGHT", -8, 5)
 	craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
 	craftNowBtn:RegisterForClicks("AnyUp")
-	if not (InCombatLockdown and InCombatLockdown()) then
-		craftNowBtn:SetAttribute("useOnKeyDown", false)
-	end
-	craftNowBtn:SetScript("PreClick", function(self)
-		self._wasSwitchSkill = self.pendingSkillLine
-		if self._wasSwitchSkill and ns.PrepareSecureProfSwitch then
-			ns:PrepareSecureProfSwitch()
+	craftNowBtn:SetScript("OnEnter", function(self)
+		if self.pendingSkillLine then
+			ns:AttachSecureProfProxy(self, self.pendingSkillLine)
 		end
 	end)
-	craftNowBtn:SetScript("PostClick", function(self)
-		local sw = self._wasSwitchSkill
-		self._wasSwitchSkill = nil
-		if sw then
-			ns:SwitchToProfession(sw)
+	craftNowBtn:SetScript("OnClick", function(self)
+		if self.pendingSkillLine then
+			ns:SwitchToProfession(self.pendingSkillLine)
 			return
 		end
 		local rID = d.currentRecipeID
@@ -1459,11 +1529,7 @@ function ns:RefreshDetailsView()
 		self:UpdateEconBox(d, nil)
 		d.craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
 		d.craftNowBtn.pendingSkillLine = nil
-		if not (InCombatLockdown and InCombatLockdown()) then
-			d.craftNowBtn:SetAttribute("type", nil)
-			d.craftNowBtn:SetAttribute("spell", nil)
-			d.craftNowBtn:SetEnabled(false)
-		end
+		d.craftNowBtn:SetEnabled(false)
 		return
 	end
 
@@ -1662,29 +1728,14 @@ function ns:RefreshDetailsView()
 	local recipeSL = (rec and rec.skillLine) or self.currentSkillLine
 	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
 	local needSwitch = canCraft and recipeSL and (activeClientSL ~= recipeSL)
-	local inCombat = InCombatLockdown and InCombatLockdown()
 	if needSwitch then
-		local spellAttr = self.GetProfessionSpellAttr and self:GetProfessionSpellAttr(recipeSL) or nil
 		d.craftNowBtn:SetText(L["BTN_OPEN_PROF"])
 		d.craftNowBtn.pendingSkillLine = recipeSL
-		if not inCombat then
-			d.craftNowBtn:SetEnabled(true)
-			if spellAttr then
-				d.craftNowBtn:SetAttribute("type", "spell")
-				d.craftNowBtn:SetAttribute("spell", spellAttr)
-			else
-				d.craftNowBtn:SetAttribute("type", nil)
-				d.craftNowBtn:SetAttribute("spell", nil)
-			end
-		end
+		d.craftNowBtn:SetEnabled(true)
 	else
 		d.craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
 		d.craftNowBtn.pendingSkillLine = nil
-		if not inCombat then
-			d.craftNowBtn:SetEnabled(canCraft)
-			d.craftNowBtn:SetAttribute("type", nil)
-			d.craftNowBtn:SetAttribute("spell", nil)
-		end
+		d.craftNowBtn:SetEnabled(canCraft)
 	end
 end
 
@@ -1967,8 +2018,6 @@ function ns:RefreshMainWindow()
 		self.currentSkillLine = profList[1].skillLine
 	end
 
-	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
-	local inCombat = InCombatLockdown and InCombatLockdown()
 	for i = 1, #f.profButtons do
 		local btn = f.profButtons[i]
 		local p = profList[i]
@@ -1980,23 +2029,9 @@ function ns:RefreshMainWindow()
 			else
 				btn:SetBackdropBorderColor(0.45, 0.38, 0.22, 0.8)
 			end
-			if not inCombat then
-				local spellAttr = (p.skillLine ~= activeClientSL and self.GetProfessionSpellAttr) and self:GetProfessionSpellAttr(p.skillLine) or nil
-				if spellAttr then
-					btn:SetAttribute("type", "spell")
-					btn:SetAttribute("spell", spellAttr)
-				else
-					btn:SetAttribute("type", nil)
-					btn:SetAttribute("spell", nil)
-				end
-			end
 			btn:Show()
 		else
 			btn.skillLine = nil
-			if not inCombat then
-				btn:SetAttribute("type", nil)
-				btn:SetAttribute("spell", nil)
-			end
 			btn:Hide()
 		end
 	end
@@ -2063,59 +2098,22 @@ function ns:RefreshVisibleUI()
 	end
 end
 
-function ns:SetMainSpecialFrameEnabled(enabled)
-	if not UISpecialFrames then
-		return
-	end
-	for i = #UISpecialFrames, 1, -1 do
-		if UISpecialFrames[i] == "TradeFlowMainFrame" then
-			if enabled then
-				return
-			end
-			table.remove(UISpecialFrames, i)
-		end
-	end
-	if enabled then
-		tinsert(UISpecialFrames, "TradeFlowMainFrame")
-	end
-end
-
 function ns:OnCombatEnded()
-	if self.pendingLayoutAfterCombat and self.mainFrame then
-		self.pendingLayoutAfterCombat = false
-		self:ApplyUIScale()
-		self:ApplyWindowLayout(true)
-	end
-	if self.pendingHideAfterCombat then
-		self.pendingHideAfterCombat = false
-		self.pendingShowAfterCombat = false
-		self:HideMainWindow()
-	elseif self.pendingShowAfterCombat then
-		self.pendingShowAfterCombat = false
-		self:ShowMainWindow()
-	elseif self.mainFrame and self.mainFrame:IsShown() then
+	if self.mainFrame and self.mainFrame:IsShown() then
 		self:RefreshMainWindow()
 	end
 end
 
 function ns:ShowMainWindow()
-	self.pendingHideAfterCombat = false
-	if InCombatLockdown and InCombatLockdown() then
-		if self.mainFrame and self.mainFrame:IsShown() then
-			self:RefreshMainWindow()
-		else
-			self.pendingShowAfterCombat = true
-		end
-		return
-	end
-	self.pendingShowAfterCombat = false
 	local f = self:CreateMainFrame()
 	f:Show()
 	self:RefreshMainWindow()
 end
 
 function ns:HideMainWindow()
-	self.pendingShowAfterCombat = false
+	if self.DetachSecureProfProxy then
+		self:DetachSecureProfProxy()
+	end
 	if self.HideSniperSettingsFrame then
 		self:HideSniperSettingsFrame("tab")
 	end
@@ -2123,11 +2121,6 @@ function ns:HideMainWindow()
 		self.settingsFrame:Hide()
 	end
 	if self.mainFrame and self.mainFrame:IsShown() then
-		if InCombatLockdown and InCombatLockdown() then
-			self.pendingHideAfterCombat = true
-			return
-		end
-		self.pendingHideAfterCombat = false
 		self.mainFrame:Hide()
 	end
 end

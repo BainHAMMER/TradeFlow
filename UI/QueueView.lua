@@ -215,25 +215,19 @@ function ns:CreateQueueAndShoppingView(parent)
 		f.rows[i] = row
 	end
 
-	-- Нижняя панель кнопок режима «Очередь» (SecureActionButton для легального переключения профессии без taint)
-	local processBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+	-- Нижняя панель кнопок режима «Очередь» (безопасное переключение профессии через TradeFlowSecureProfProxy на UIParent)
+	local processBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 	processBtn:SetSize(168, 24)
 	processBtn:SetPoint("BOTTOMLEFT", 8, 5)
 	processBtn:RegisterForClicks("AnyUp")
-	if not (InCombatLockdown and InCombatLockdown()) then
-		processBtn:SetAttribute("useOnKeyDown", false)
-	end
-	processBtn:SetScript("PreClick", function(self)
-		self._wasSwitchSkill = self.pendingSkillLine
-		if self._wasSwitchSkill and ns.PrepareSecureProfSwitch then
-			ns:PrepareSecureProfSwitch()
+	processBtn:SetScript("OnEnter", function(self)
+		if self.pendingSkillLine and ns.AttachSecureProfProxy then
+			ns:AttachSecureProfProxy(self, self.pendingSkillLine)
 		end
 	end)
-	processBtn:SetScript("PostClick", function(self)
-		local sw = self._wasSwitchSkill
-		self._wasSwitchSkill = nil
-		if sw then
-			ns:SwitchToProfession(sw)
+	processBtn:SetScript("OnClick", function(self)
+		if self.pendingSkillLine then
+			ns:SwitchToProfession(self.pendingSkillLine)
 		else
 			ns:ProcessQueue()
 		end
@@ -495,10 +489,7 @@ function ns:RefreshQueueAndShoppingView()
 	local trainerMatches = (self.GetTrainerQueueMatches and self:GetTrainerQueueMatches()) or {}
 	local hasTrainerMatches = (#trainerMatches > 0)
 
-	local inCombat = InCombatLockdown and InCombatLockdown()
-	if not inCombat then
-		f.processBtn:SetShown(isQueue)
-	end
+	f.processBtn:SetShown(isQueue)
 	f.clearBtn:SetShown(isQueue)
 	f.shopTotal:SetShown(not isQueue)
 	f.syncAtrBtn:SetShown(not isQueue)
@@ -550,29 +541,14 @@ function ns:RefreshQueueAndShoppingView()
 				break
 			end
 		end
-		local inCombat = InCombatLockdown and InCombatLockdown()
 		if switchProf then
 			f.processBtn:SetText(string.format(L["QUEUE_SWITCH_PROF"], self:GetProfessionName(switchProf)))
 			f.processBtn.pendingSkillLine = switchProf
-			if not inCombat then
-				f.processBtn:SetEnabled(true)
-				local spellAttr = self.GetProfessionSpellAttr and self:GetProfessionSpellAttr(switchProf) or nil
-				if spellAttr then
-					f.processBtn:SetAttribute("type", "spell")
-					f.processBtn:SetAttribute("spell", spellAttr)
-				else
-					f.processBtn:SetAttribute("type", nil)
-					f.processBtn:SetAttribute("spell", nil)
-				end
-			end
+			f.processBtn:SetEnabled(true)
 		else
 			f.processBtn:SetText(L["QUEUE_PROCESS"])
 			f.processBtn.pendingSkillLine = nil
-			if not inCombat then
-				f.processBtn:SetEnabled(canCraftAny)
-				f.processBtn:SetAttribute("type", nil)
-				f.processBtn:SetAttribute("spell", nil)
-			end
+			f.processBtn:SetEnabled(canCraftAny)
 		end
 		f.clearBtn:SetEnabled(#queue > 0)
 		if f.queueTotal then

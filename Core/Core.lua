@@ -1831,13 +1831,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		end
 	elseif event == "PLAYER_REGEN_DISABLED" then
 		ClearReplaceEnchantSpace()
-		if ns.SetMainSpecialFrameEnabled then
-			ns:SetMainSpecialFrameEnabled(false)
+		if ns.DetachSecureProfProxy then
+			ns:DetachSecureProfProxy()
 		end
 	elseif event == "PLAYER_REGEN_ENABLED" then
-		if ns.SetMainSpecialFrameEnabled then
-			ns:SetMainSpecialFrameEnabled(true)
-		end
 		if ns.OnCombatEnded then
 			ns:OnCombatEnded()
 		end
