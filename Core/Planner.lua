@@ -227,13 +227,13 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				or (includeOther and isOtherScroll and scrollPrice and scrollPrice > 0)
 			local isFallbackScroll = (not hasKnownAcquisition) and includeOther and isOtherScroll
 			if hasKnownAcquisition or isFallbackScroll then
-				local craftCost, outVal, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
+				local craftCost, _, _, breakdown, _, alts = self:GetRecipeEconomy(recipeID)
 				if breakdown and #breakdown > 0 then
 					local rec = self:GetRecipeRecord(recipeID)
-					local vendorSell = (alts and alts.vendor) or 0
-					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше
+					-- вычет в маршруте: торговец (если отмечен) или распыление (если включено), что больше;
+					-- перепродажа на аукционе (alts.ah) в прокачку никогда не входит
 					local effectiveDeduct = ns.GetSkillUpReturn(alts, deductVendor)
-					local unitReturn = deductVendor and effectiveDeduct or math.max(outVal or 0, vendorSell)
+					local unitReturn = effectiveDeduct
 					local acquireFee = 0
 					if not learned and not isBasic then
 						if isTrainer or isVendorScroll then
@@ -528,8 +528,12 @@ function ns:BuildLevelingRoute(skillLine, currentSkill, targetSkill)
 				}
 				transitions[#transitions + 1] = tr
 				if learnFee > 0 then
-					local horizon = math.max(1, math.min(10, c.th[4] - s, goalSkill - s))
-					tr.starterScore = totalScore - learnFee + (learnFee / horizon)
+					local capEnd = (priority ~= "profit" and c.th[2] and s < c.th[2]) and c.th[2] or c.th[4]
+					local horizon = math.max(1, math.min(10, capEnd - s, goalSkill - s))
+					local hBuy, hPen = EvalStateBuyCost(state, c, craftsPerPoint * horizon)
+					local avgNet = (hBuy / horizon) - returnForPoint
+					local avgStepScore = ((avgNet <= 0) and (avgNet / craftsPerPoint) or avgNet) + rngPenalty + ((hPen or 0) / horizon)
+					tr.starterScore = state.score + avgStepScore + (learnFee / horizon)
 					starters[#starters + 1] = tr
 				end
 			end
