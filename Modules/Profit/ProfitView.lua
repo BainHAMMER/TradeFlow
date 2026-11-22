@@ -1030,6 +1030,13 @@ function ProfitMod:RenderRows()
 				local profTag = string.format("|cff66ccff[%s]|r", GetShortProfName(e.skillLine))
 				local altTag = (e.isAlt and e.ownerName) and string.format(" |cffffa040[%s]|r", e.ownerName) or ""
 				local cntTag = (e.craftNow and e.craftNow > 0) and string.format(" |cff40ff40[%d]|r", e.craftNow) or ""
+				if not e.isAlt and e.craftNow and e.craftNow > 0 and ns.GetQueue and #ns:GetQueue() > 0 and ns.GetRemainingCraftableCount then
+					local remNow = ns:GetRemainingCraftableCount(e.recipeID, true)
+					if remNow < e.craftNow then
+						local remColor = (remNow > 0) and "|cff00ff99" or "|cffff6666"
+						cntTag = cntTag .. string.format(" |cff888888(|r%s%d|r|cff888888)|r", remColor, remNow)
+					end
+				end
 				local srcBadge = ""
 				if e.unlearnedSource then
 					local tagKey, colorHex

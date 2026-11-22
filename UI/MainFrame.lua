@@ -210,8 +210,8 @@ local function StylePanel(frame, bgR, bgG, bgB, bgA)
 	frame:SetBackdropBorderColor(0.55, 0.44, 0.22, 0.95)
 end
 
--- Форматирование счётчика крафтов рецепта: [в сумках / +крафт / +вендор / Б:банк]
-local function FormatCraftCounts(direct, withCraft, withVendor, withBank)
+-- Форматирование счётчика крафтов рецепта: [в сумках / +крафт / +вендор / Б:банк] (остаток с учётом очереди)
+local function FormatCraftCounts(direct, withCraft, withVendor, withBank, remaining)
 	local parts = {}
 	if direct > 0 then
 		parts[#parts + 1] = "|cff40ff40" .. direct .. "|r"
@@ -228,7 +228,13 @@ local function FormatCraftCounts(direct, withCraft, withVendor, withBank)
 	if #parts == 0 then
 		return ""
 	end
-	return " |cff888888[" .. table.concat(parts, "/") .. "]|r"
+	local baseStr = " |cff888888[" .. table.concat(parts, "/") .. "]|r"
+	local rawMax = math.max(direct or 0, withCraft or 0, withVendor or 0, withBank or 0)
+	if remaining ~= nil and remaining < rawMax then
+		local remColor = (remaining > 0) and "|cff00ff99" or "|cffff6666"
+		return baseStr .. " |cff888888(|r" .. remColor .. remaining .. "|r|cff888888)|r"
+	end
+	return baseStr
 end
 
 -- Сбор и сортировка списка рецептов выбранной профессии
@@ -301,6 +307,12 @@ function ns:BuildFilteredRecipeList()
 				local name, icon, outItemID = self:GetRecipeDisplay(recipeID)
 				local live = self.liveRecipes and self.liveRecipes[recipeID]
 				local isFav = self.IsRecipeFavorite and self:IsRecipeFavorite(recipeID) or false
+				local remCount = nil
+				if canCraft and self.GetQueue and #self:GetQueue() > 0 and self.GetRemainingCraftableCount then
+					local rawBagBest = math.max(direct or 0, withCraft or 0, withVendor or 0)
+					local useBank = (withBank or 0) > rawBagBest
+					remCount = self:GetRemainingCraftableCount(recipeID, useBank)
+				end
 				entries[#entries + 1] = {
 					recipeID = recipeID,
 					name = name,
@@ -313,6 +325,7 @@ function ns:BuildFilteredRecipeList()
 					withCraft = withCraft,
 					withVendor = withVendor,
 					withBank = withBank,
+					remaining = remCount,
 					metrics = metrics,
 					profit = metrics.profit,
 				}
@@ -1917,7 +1930,7 @@ function ns:RenderRecipeListRows()
 				row.nameText:SetPoint("RIGHT", row.rightText, "LEFT", -8, 0)
 
 				local dc = self.DIFFICULTY_COLORS[entry.metrics.colorKey] or self.DIFFICULTY_COLORS.grey
-				local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor, entry.withBank)
+				local countsStr = FormatCraftCounts(entry.direct, entry.withCraft, entry.withVendor, entry.withBank, entry.remaining)
 				local trainerTag = ""
 				if not entry.learned then
 					local req = entry.metrics.reqSkill or 1

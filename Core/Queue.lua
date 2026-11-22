@@ -5,6 +5,17 @@ local L = ns.L
 -- Умная DAG-очередь крафта (без багов Skillet) + расчёт Shopping List + ProcessQueue
 -------------------------------------------------------------------------------
 ns.activeCastRecipeID = nil
+ns.queueRev = 1
+
+local remPoolCache = {
+	invRev = -1,
+	queueRev = -1,
+	allowSub = nil,
+	bagPool = nil,
+	bankPool = nil,
+	bagCounts = {},
+	bankCounts = {},
+}
 
 function ns:GetQueue()
 	if not self.charDB then
@@ -220,6 +231,76 @@ local function GetCraftableReagentFromPool(itemID, pool, visiting)
 	return bestDirect, bestVendor
 end
 
+local function BuildRemainingPool(self, includeBank, allowSub)
+	local queue = self:GetQueue()
+	local queueSet = {}
+	for _, cmd in ipairs(queue) do
+		if cmd.recipeID then
+			queueSet[cmd.recipeID] = true
+		end
+	end
+	local pool = {}
+	setmetatable(pool, {
+		__index = function(t, itemID)
+			local v = self:GetBagCount(itemID) + (includeBank and self.GetBankCount and self:GetBankCount(itemID) or 0)
+			rawset(t, itemID, v)
+			return v
+		end,
+	})
+	local queuedProduced = {}
+	for _, cmd in ipairs(queue) do
+		local qRec = self:GetRecipeRecord(cmd.recipeID)
+		if qRec then
+			for _, r in ipairs(qRec.reagents) do
+				local need = r.quantity * cmd.count
+				local fromQueued = math.min(queuedProduced[r.itemID] or 0, need)
+				if fromQueued > 0 then
+					queuedProduced[r.itemID] = (queuedProduced[r.itemID] or 0) - fromQueued
+					need = need - fromQueued
+				end
+				if need > 0 then
+					local have = math.max(0, pool[r.itemID] or 0)
+					local take = math.min(have, need)
+					pool[r.itemID] = have - take
+					local short = need - take
+					if short > 0 and allowSub and not self:IsVendorItem(r.itemID) then
+						DrainDeficitFromPool(r.itemID, short, pool, queueSet, qRec.skillLine or self.currentSkillLine)
+					end
+				end
+			end
+			if qRec.outputItemID and qRec.outputItemID > 0 then
+				queuedProduced[qRec.outputItemID] = (queuedProduced[qRec.outputItemID] or 0) + ((qRec.numMade or 1) * cmd.count)
+			end
+		end
+	end
+	return pool
+end
+
+local function GetRemainingPool(self, includeBank, allowSub)
+	local curInv = self.invRev or 0
+	local curQ = self.queueRev or 0
+	if remPoolCache.invRev ~= curInv or remPoolCache.queueRev ~= curQ or remPoolCache.allowSub ~= allowSub then
+		remPoolCache.invRev = curInv
+		remPoolCache.queueRev = curQ
+		remPoolCache.allowSub = allowSub
+		remPoolCache.bagPool = nil
+		remPoolCache.bankPool = nil
+		remPoolCache.bagCounts = {}
+		remPoolCache.bankCounts = {}
+	end
+	if includeBank then
+		if not remPoolCache.bankPool then
+			remPoolCache.bankPool = BuildRemainingPool(self, true, allowSub)
+		end
+		return remPoolCache.bankPool, remPoolCache.bankCounts
+	else
+		if not remPoolCache.bagPool then
+			remPoolCache.bagPool = BuildRemainingPool(self, false, allowSub)
+		end
+		return remPoolCache.bagPool, remPoolCache.bagCounts
+	end
+end
+
 -- Сколько единиц рецепта ещё можно поставить в очередь из не занятых текущей очередью материалов
 function ns:GetRemainingCraftableCount(recipeID, includeBank)
 	if not recipeID then
@@ -230,38 +311,16 @@ function ns:GetRemainingCraftableCount(recipeID, includeBank)
 		return 0, 0, 0, 0
 	end
 	local queue = self:GetQueue()
-	local queueSet = {}
-	for _, cmd in ipairs(queue) do
-		if cmd.recipeID then
-			queueSet[cmd.recipeID] = true
-		end
+	if #queue == 0 then
+		local d, wc, wv, _, wb = self:GetRecipeCraftCounts(recipeID)
+		local best = includeBank and math.max(d or 0, wc or 0, wv or 0, wb or 0) or math.max(d or 0, wc or 0, wv or 0)
+		return best, d or 0, wc or 0, wv or 0
 	end
 	local allowSub = not (self.db and self.db.options and self.db.options.autoSubcrafts == false)
-	local pool = {}
-	setmetatable(pool, {
-		__index = function(t, itemID)
-			local v = self:GetBagCount(itemID) + (includeBank and self.GetBankCount and self:GetBankCount(itemID) or 0)
-			rawset(t, itemID, v)
-			return v
-		end,
-	})
-	for _, cmd in ipairs(queue) do
-		local qRec = self:GetRecipeRecord(cmd.recipeID)
-		if qRec then
-			for _, r in ipairs(qRec.reagents) do
-				local need = r.quantity * cmd.count
-				local have = math.max(0, pool[r.itemID] or 0)
-				local take = math.min(have, need)
-				pool[r.itemID] = have - take
-				local short = need - take
-				if short > 0 and allowSub and not self:IsVendorItem(r.itemID) then
-					DrainDeficitFromPool(r.itemID, short, pool, queueSet, qRec.skillLine or self.currentSkillLine)
-				end
-			end
-			if qRec.outputItemID and qRec.outputItemID > 0 then
-				pool[qRec.outputItemID] = (pool[qRec.outputItemID] or 0) + ((qRec.numMade or 1) * cmd.count)
-			end
-		end
+	local pool, countCache = GetRemainingPool(self, includeBank == true, allowSub)
+	local cached = countCache[recipeID]
+	if cached then
+		return cached[1], cached[2], cached[3], cached[4]
 	end
 
 	local direct = 99999
@@ -287,7 +346,9 @@ function ns:GetRemainingCraftableCount(recipeID, includeBank)
 	if direct >= 99999 then direct = 0 end
 	if withCraft >= 99999 then withCraft = 0 end
 	if withVendor >= 99999 then withVendor = 0 end
-	return math.max(direct, withCraft, withVendor), direct, withCraft, withVendor
+	local best = math.max(direct, withCraft, withVendor)
+	countCache[recipeID] = { best, direct, withCraft, withVendor }
+	return best, direct, withCraft, withVendor
 end
 
 -- Добавление или слияние команды в очередь со строгим сохранением топологического порядка (DAG)
@@ -642,6 +703,7 @@ function ns:ProcessQueue()
 end
 
 function ns:OnQueueUpdated(fromCraft)
+	self.queueRev = (self.queueRev or 1) + 1
 	if self.ScheduleAuctionatorSync then
 		self:ScheduleAuctionatorSync(fromCraft == true)
 	elseif self.SyncAuctionatorShoppingList then
