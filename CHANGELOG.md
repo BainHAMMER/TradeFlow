@@ -1,5 +1,20 @@
 # Changelog / Список изменений
 
+## v1.0.12
+### RU
+- **Счётчик доступных крафтов за вычетом очереди:**
+  - В списке рецептов слева и во вкладке «Заработок» рядом с общим доступным количеством `[N]` добавлен второй счётчик в круглых скобках `(M)` (или `(0)` серым цветом), показывающий сколько ещё штук можно поставить в очередь после вычета материалов, уже зарезервированных в текущей очереди крафта.
+- **Калькулятор прокачки (упущенная выгода реагентов в наличии):**
+  - Реагенты, которые уже лежат в сумках или банке персонажа, при построении маршрута прокачки теперь оцениваются по их рыночной стоимости на аукционе / себестоимости крафта (упущенная выгода), а не как бесплатные (`0c`). Это устраняет выбор невыгодных рецептов только из-за наличия дорогих реагентов в сумке. Бесплатными для последующих шагов считаются только полуфабрикаты, созданные предыдущим шагом самого маршрута.
+
+### EN
+- **Remaining Craftable Count Badge (Minus Queue):**
+  - Added a secondary `(M)` badge next to `[N]` in the recipe list and Profit Scanner showing how many additional crafts can be queued after subtracting materials already reserved by the active crafting queue (displayed as grey `(0)` when all available materials are reserved).
+- **Leveling Calculator (Opportunity Cost for Owned Reagents):**
+  - Reagents already in the player's bags or bank are now valued at their market / crafting price (opportunity cost) during route planning rather than `0c`, preventing the calculator from picking inefficient recipes simply because expensive materials happen to be in the inventory. Only intermediate items produced by an earlier step of the route itself carry `0c` purchase cost.
+
+---
+
 ## v1.0.11
 ### RU
 - **Свободное закрытие и управление окном в бою:**
