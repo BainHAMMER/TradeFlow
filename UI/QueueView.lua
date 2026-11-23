@@ -231,7 +231,7 @@ function ns:CreateQueueAndShoppingView(parent)
 			if ns.AttachSecureProfProxy then
 				ns:AttachSecureProfProxy(self, self.pendingSkillLine)
 			end
-			if ns.Print then
+			if InCombatLockdown and InCombatLockdown() and ns.Print then
 				ns:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], ns:GetProfessionName(self.pendingSkillLine)))
 			end
 		else

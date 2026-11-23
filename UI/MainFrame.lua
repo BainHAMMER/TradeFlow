@@ -84,13 +84,16 @@ function ns:AttachSecureProfProxy(btn, skillLine)
 	if not spellAttr then
 		return false
 	end
-	local l, b, w, h = btn:GetLeft(), btn:GetBottom(), btn:GetWidth(), btn:GetHeight()
-	if not (l and b and w and h and w > 0 and h > 0) then
-		return false
+	if secureProfProxy and secureProfProxy:IsShown()
+		and secureProfProxy.targetBtn == btn
+		and secureProfProxy.skillLine == skillLine
+		and secureProfProxy:GetAttribute("spell") == spellAttr
+	then
+		return true
 	end
 	if not secureProfProxy then
 		secureProfProxy = CreateFrame("Button", "TradeFlowSecureProfProxy", UIParent, "SecureActionButtonTemplate")
-		secureProfProxy:RegisterForClicks("AnyUp")
+		secureProfProxy:RegisterForClicks("AnyUp", "AnyDown")
 		secureProfProxy:SetAttribute("useOnKeyDown", false)
 		secureProfProxy:SetScript("PreClick", function(self)
 			if self.skillLine and ns.PrepareSecureProfSwitch then
@@ -112,14 +115,12 @@ function ns:AttachSecureProfProxy(btn, skillLine)
 	if prev and prev ~= btn and prev.UnlockHighlight then
 		prev:UnlockHighlight()
 	end
-	local ratio = (btn:GetEffectiveScale() or 1) / ((UIParent and UIParent:GetEffectiveScale()) or 1)
 	secureProfProxy.targetBtn = btn
 	secureProfProxy.skillLine = skillLine
-	secureProfProxy:SetFrameStrata(btn:GetFrameStrata() or "MEDIUM")
-	secureProfProxy:SetFrameLevel((btn:GetFrameLevel() or 1) + 15)
+	secureProfProxy:SetFrameStrata("HIGH")
+	secureProfProxy:SetFrameLevel(50)
 	secureProfProxy:ClearAllPoints()
-	secureProfProxy:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l * ratio, b * ratio)
-	secureProfProxy:SetSize(w * ratio, h * ratio)
+	secureProfProxy:SetAllPoints(btn)
 	secureProfProxy:SetAttribute("type", "spell")
 	secureProfProxy:SetAttribute("spell", spellAttr)
 	secureProfProxy:Show()
@@ -141,12 +142,15 @@ function ns:ApplyUIScale()
 	if not self.mainFrame then
 		return
 	end
-	self:DetachSecureProfProxy()
 	local scale = self:GetUIScale()
-	local right, top = self.mainFrame:GetRight(), self.mainFrame:GetTop()
 	local oldScale = self.mainFrame:GetScale() or 1.0
+	if math.abs(scale - oldScale) <= 0.001 then
+		return
+	end
+	self:DetachSecureProfProxy()
+	local right, top = self.mainFrame:GetRight(), self.mainFrame:GetTop()
 	self.mainFrame:SetScale(scale)
-	if right and top and math.abs(scale - oldScale) > 0.001 then
+	if right and top then
 		local absRight = right * oldScale
 		local absTop = top * oldScale
 		self.mainFrame:ClearAllPoints()
@@ -159,14 +163,18 @@ function ns:ApplyWindowLayout(keepTopRight)
 	if not f then
 		return
 	end
-	self:DetachSecureProfProxy()
+	local opts = (self.db and self.db.options) or {}
+	local isMin = (opts.windowMinimized == true)
+	local isCol = (opts.leftCollapsed == true)
+	local layoutMode = isMin and "min" or (isCol and "col" or "full")
+	if f._lastLayoutMode ~= layoutMode then
+		self:DetachSecureProfProxy()
+		f._lastLayoutMode = layoutMode
+	end
 	local right, top
 	if keepTopRight then
 		right, top = f:GetRight(), f:GetTop()
 	end
-	local opts = (self.db and self.db.options) or {}
-	local isMin = (opts.windowMinimized == true)
-	local isCol = (opts.leftCollapsed == true)
 	local compact = isMin or isCol
 
 	if f.collapseLeftBtn then
@@ -1536,7 +1544,7 @@ function ns:CreateDetailsView(parent)
 			if ns.AttachSecureProfProxy then
 				ns:AttachSecureProfProxy(self, self.pendingSkillLine)
 			end
-			if ns.Print then
+			if InCombatLockdown and InCombatLockdown() and ns.Print then
 				ns:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], ns:GetProfessionName(self.pendingSkillLine)))
 			end
 			return
