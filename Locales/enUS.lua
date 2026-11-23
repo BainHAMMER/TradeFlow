@@ -264,6 +264,7 @@ ns.Locales.en = {
 	["RECIPE_COOLDOWN_LABEL"] = "CD: %s",
 	["RECIPE_COOLDOWN_BADGE"] = "[CD: %s]",
 	["RECIPE_COOLDOWN_TIP"] = "Cooldown remaining: %s",
+	["RECIPE_BASE_COOLDOWN_TIP"] = "Cooldown: %s",
 	["QUEUE_TOTAL_TIME"] = "Time: |cffffd100%s|r",
 
 	-- Shopping List & Integrations

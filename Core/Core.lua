@@ -165,6 +165,29 @@ function ns.FormatCooldown(seconds)
 	return string.format("%d%s", s, L["TIME_SEC"])
 end
 
+-- Базовый кулдаун рецепта в секундах (0 если нет КД), по данным клиента
+function ns:GetRecipeBaseCooldown(recipeID)
+	if not recipeID or recipeID <= 0 then
+		return 0
+	end
+	local cdMs
+	if C_Spell and C_Spell.GetSpellBaseCooldown then
+		local ok, val = pcall(C_Spell.GetSpellBaseCooldown, recipeID)
+		if ok then
+			cdMs = val
+		end
+	elseif GetSpellBaseCooldown then
+		local ok, val = pcall(GetSpellBaseCooldown, recipeID)
+		if ok then
+			cdMs = val
+		end
+	end
+	if type(cdMs) == "number" and cdMs >= 5000 then
+		return cdMs / 1000
+	end
+	return 0
+end
+
 -- Оставшееся время кулдауна рецепта в секундах (0 если готов), с кэшированием в charDB.cooldowns
 function ns:GetRecipeCooldownRemaining(recipeID)
 	if not recipeID or recipeID <= 0 then
@@ -179,7 +202,7 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 	if C_TradeSkillUI and C_TradeSkillUI.GetRecipeCooldown then
 		local ok, cd = pcall(C_TradeSkillUI.GetRecipeCooldown, recipeID)
 		if ok and type(cd) == "number" then
-			if cd > 1 then
+			if cd > 0 then
 				if cdMap and nowWall > 0 then
 					cdMap[recipeID] = nowWall + cd
 				end
@@ -206,7 +229,7 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 	end
 	if type(start) == "number" and type(duration) == "number" and start > 0 and duration > 2 then
 		local rem = (start + duration) - (GetTime and GetTime() or 0)
-		if rem > 1 then
+		if rem > 0 then
 			if cdMap and nowWall > 0 then
 				cdMap[recipeID] = nowWall + rem
 			end
@@ -216,7 +239,7 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 
 	if cdMap and cdMap[recipeID] and nowWall > 0 then
 		local rem = cdMap[recipeID] - nowWall
-		if rem > 1 then
+		if rem > 0 then
 			return rem
 		end
 		cdMap[recipeID] = nil
@@ -521,6 +544,11 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 	local cdRem = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID) or 0
 	if cdRem > 0 then
 		GameTooltip:AddLine(string.format(L["RECIPE_COOLDOWN_TIP"], ns.FormatCooldown(cdRem)), 1.0, 0.35, 0.35, true)
+	else
+		local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(recipeID) or 0
+		if baseCd > 0 then
+			GameTooltip:AddLine(string.format(L["RECIPE_BASE_COOLDOWN_TIP"], ns.FormatCooldown(baseCd)), 1.0, 0.78, 0.30, true)
+		end
 	end
 	GameTooltip:AddLine(L["SHIFT_CLICK_HINT"], 0.55, 0.75, 1.0, true)
 	GameTooltip:AddLine(L["FAVORITE_RCLICK_HINT"], 0.65, 0.90, 0.65, true)

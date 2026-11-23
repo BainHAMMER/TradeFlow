@@ -561,7 +561,15 @@ function ns:CreateMainFrame()
 		insets = { left = 6, right = 6, top = 6, bottom = 6 },
 	})
 	f:SetBackdropColor(0.05, 0.045, 0.04, 0.98)
+	f:SetScript("OnShow", function()
+		if ns.StartCooldownTicker then
+			ns:StartCooldownTicker()
+		end
+	end)
 	f:SetScript("OnHide", function()
+		if ns.StopCooldownTicker then
+			ns:StopCooldownTicker()
+		end
 		ns._lastEnchantCraftAt = nil
 		if ns.DetachSecureProfProxy then
 			ns:DetachSecureProfProxy()
@@ -1757,7 +1765,13 @@ function ns:RefreshDetailsView()
 	local cdRem = (metrics.learned and self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID)) or 0
 	if cdRem > 0 then
 		thParts[#thParts + 1] = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(cdRem)) .. "|r"
+	else
+		local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(recipeID) or 0
+		if baseCd > 0 then
+			thParts[#thParts + 1] = "|cffffb84d" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(baseCd)) .. "|r"
+		end
 	end
+	d._hasActiveCooldown = (cdRem > 0)
 	d.thresholdLine:SetText(table.concat(thParts, "   |   "))
 
 	for i = 1, 6 do
@@ -2040,10 +2054,15 @@ function ns:RenderRecipeListRows()
 				end
 				local favPrefix = (entry.favorite and self.GetFavoriteIconMarkup) and self:GetFavoriteIconMarkup() or ""
 				local cdTag = ""
-				if entry.learned and self.GetRecipeCooldownRemaining then
-					local cdRem = self:GetRecipeCooldownRemaining(entry.recipeID)
-					if cdRem and cdRem > 0 then
-						cdTag = " |cffff6666" .. string.format(L["RECIPE_COOLDOWN_BADGE"], ns.FormatCooldown(cdRem)) .. "|r"
+				local cdRem = (entry.learned and self.GetRecipeCooldownRemaining) and self:GetRecipeCooldownRemaining(entry.recipeID) or 0
+				if cdRem > 0 then
+					cdTag = " |cffff6666" .. string.format(L["RECIPE_COOLDOWN_BADGE"], ns.FormatCooldown(cdRem)) .. "|r"
+					row._hasActiveCooldown = true
+				else
+					row._hasActiveCooldown = false
+					local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(entry.recipeID) or 0
+					if baseCd > 0 then
+						cdTag = " |cffffb84d" .. string.format(L["RECIPE_COOLDOWN_BADGE"], ns.FormatCooldown(baseCd)) .. "|r"
 					end
 				end
 				row.nameText:SetText(favPrefix .. dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr .. cdTag)
@@ -2229,6 +2248,67 @@ function ns:OnCombatEnded()
 	if self.mainFrame and self.mainFrame:IsShown() then
 		self:RefreshMainWindow()
 	end
+end
+
+local cooldownTicker = nil
+function ns:StopCooldownTicker()
+	if cooldownTicker then
+		cooldownTicker:Cancel()
+		cooldownTicker = nil
+	end
+end
+
+function ns:TickCooldownDisplays()
+	local f = self.mainFrame
+	if not (f and f:IsShown()) then
+		self:StopCooldownTicker()
+		return
+	end
+	if f.leftPane and f.leftPane:IsVisible() and f.recipeRows then
+		local needList = false
+		for _, row in ipairs(f.recipeRows) do
+			if row:IsShown() and row.entryData and not row.entryData.isHeader and row.entryData.learned then
+				local cd = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(row.entryData.recipeID) or 0
+				if cd > 0 or row._hasActiveCooldown then
+					needList = true
+					break
+				end
+			end
+		end
+		if needList then
+			self:RenderRecipeListRows()
+		end
+	end
+	local d = self.detailsView
+	if d and d:IsVisible() and d.currentRecipeID then
+		local cd = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(d.currentRecipeID) or 0
+		if cd > 0 or d._hasActiveCooldown then
+			self:RefreshDetailsView()
+		end
+	end
+	local qv = self.queueView
+	if qv and qv:IsVisible() and qv.activeMode == "queue" and self.GetQueue then
+		local needQueue = false
+		for _, step in ipairs(self:GetQueue()) do
+			local cd = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(step.recipeID) or 0
+			if cd > 0 or step._wasOnCooldown then
+				step._wasOnCooldown = (cd > 0)
+				needQueue = true
+			end
+		end
+		if needQueue then
+			self:RefreshQueueAndShoppingView()
+		end
+	end
+end
+
+function ns:StartCooldownTicker()
+	if cooldownTicker or not (C_Timer and C_Timer.NewTicker) then
+		return
+	end
+	cooldownTicker = C_Timer.NewTicker(1, function()
+		ns:TickCooldownDisplays()
+	end)
 end
 
 function ns:ShowMainWindow()

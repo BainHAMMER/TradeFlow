@@ -264,6 +264,7 @@ ns.Locales.ru = {
 	["RECIPE_COOLDOWN_LABEL"] = "КД: %s",
 	["RECIPE_COOLDOWN_BADGE"] = "[КД: %s]",
 	["RECIPE_COOLDOWN_TIP"] = "Восстановление: %s",
+	["RECIPE_BASE_COOLDOWN_TIP"] = "Перезарядка: %s",
 	["QUEUE_TOTAL_TIME"] = "Время: |cffffd100%s|r",
 
 	-- Список покупок и интеграции
