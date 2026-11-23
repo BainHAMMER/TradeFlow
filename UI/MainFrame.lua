@@ -93,21 +93,40 @@ function ns:AttachSecureProfProxy(btn, skillLine)
 	end
 	if not secureProfProxy then
 		secureProfProxy = CreateFrame("Button", "TradeFlowSecureProfProxy", UIParent, "SecureActionButtonTemplate")
-		secureProfProxy:RegisterForClicks("AnyUp", "AnyDown")
+		secureProfProxy:RegisterForClicks("AnyUp")
 		secureProfProxy:SetAttribute("useOnKeyDown", false)
-		secureProfProxy:SetScript("PreClick", function(self)
+		secureProfProxy:SetScript("OnMouseDown", function(self)
+			if self.targetBtn and self.targetBtn.SetButtonState then
+				self.targetBtn:SetButtonState("PUSHED")
+			end
+		end)
+		secureProfProxy:SetScript("OnMouseUp", function(self)
+			if self.targetBtn and self.targetBtn.SetButtonState then
+				self.targetBtn:SetButtonState("NORMAL")
+			end
+		end)
+		secureProfProxy:SetScript("PreClick", function(self, _, down)
+			if down then
+				return
+			end
 			if self.skillLine and ns.PrepareSecureProfSwitch then
 				ns:PrepareSecureProfSwitch()
 			end
 		end)
-		secureProfProxy:SetScript("PostClick", function(self)
+		secureProfProxy:SetScript("PostClick", function(self, _, down)
+			if down then
+				return
+			end
 			local sl = self.skillLine
 			ns:DetachSecureProfProxy()
 			if sl then
 				ns:SwitchToProfession(sl)
 			end
 		end)
-		secureProfProxy:SetScript("OnLeave", function()
+		secureProfProxy:SetScript("OnLeave", function(self)
+			if self.targetBtn and self.targetBtn.SetButtonState then
+				self.targetBtn:SetButtonState("NORMAL")
+			end
 			ns:DetachSecureProfProxy()
 		end)
 	end
