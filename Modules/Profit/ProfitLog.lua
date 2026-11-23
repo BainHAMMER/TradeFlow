@@ -22,6 +22,8 @@ local merchantHooksInstalled = false
 local lastDisenchantAt = 0
 local pendingAhComm = nil
 local pendingAhBid = nil
+local ahMoney = 0
+local pendingAhPosts = {}
 local lastViewedAhItemKey = nil
 local merchantMoney = 0
 local merchantBagSnap = nil
@@ -411,6 +413,21 @@ function ns:RecordCashflowIncome(kind, itemID, qty, totalEarned)
 	RefreshProfitLogUI()
 end
 
+function ns:RecordCashflowExpense(kind, itemID, qty, totalSpent)
+	if not IsProfitEnabled() then
+		return
+	end
+	if not (qty and qty > 0 and totalSpent and totalSpent > 0) then
+		return
+	end
+	local now = time and time() or 0
+	local dayKey = (date and now > 0) and date("%Y-%m-%d", now) or nil
+	local charKey = self.CharKey and self:CharKey() or ""
+
+	AppendCashflowEntry(kind or "ah_deposit", itemID, nil, nil, qty, -totalSpent, charKey, dayKey, now)
+	RefreshProfitLogUI()
+end
+
 -- Списывает из сегодняшнего лога того же персонажа скрафченные ранее полуфабрикаты,
 -- когда они фактически уходят в крафт финального предмета (без двойного учёта).
 local function ConsumeIntermediateFromLog(log, rec, charKey, dayKey)
@@ -663,11 +680,77 @@ end
 -- Лёгкий taint-free трекинг транзакций АХ (Auctionator + списки TradeFlow),
 -- продажи вендору скрафченных вещей и писем с выручкой от АХ
 -------------------------------------------------------------------------------
+local function IsInTradeFlowSellScope(itemID)
+	if not itemID or itemID <= 0 then
+		return false
+	end
+	local craftedItems = EnsureCraftedItemsDB()
+	if (craftedItems[itemID] or 0) > 0 then
+		return true
+	end
+	return (ns.DisenchantMatIDs and ns.DisenchantMatIDs[itemID]) == true
+end
+
+local function QueuePendingAhPost(itemID, qty, deposit)
+	if not (itemID and itemID > 0 and deposit and deposit > 0) then
+		return
+	end
+	local now = GetTime and GetTime() or 0
+	pendingAhPosts[#pendingAhPosts + 1] = {
+		itemID = itemID,
+		qty = math.max(1, tonumber(qty) or 1),
+		deposit = deposit,
+		ts = now,
+	}
+	if #pendingAhPosts > 40 then
+		table.remove(pendingAhPosts, 1)
+	end
+end
+
+local function FlushPendingAhDeposits(spent, now)
+	local kept = {}
+	for _, entry in ipairs(pendingAhPosts) do
+		if (now - (entry.ts or 0)) <= 3.5 then
+			kept[#kept + 1] = entry
+		end
+	end
+	pendingAhPosts = kept
+	if not spent or spent <= 0 or #pendingAhPosts == 0 then
+		return
+	end
+	local rem = spent
+	while rem > 0 and #pendingAhPosts > 0 do
+		local matchIdx = nil
+		for idx, entry in ipairs(pendingAhPosts) do
+			if entry.deposit == rem then
+				matchIdx = idx
+				break
+			end
+		end
+		if not matchIdx then
+			for idx, entry in ipairs(pendingAhPosts) do
+				if entry.deposit <= rem then
+					matchIdx = idx
+					break
+				end
+			end
+		end
+		if not matchIdx then
+			break
+		end
+		local entry = table.remove(pendingAhPosts, matchIdx)
+		ns:RecordCashflowExpense("ah_deposit", entry.itemID, entry.qty, entry.deposit)
+		rem = rem - entry.deposit
+	end
+end
+
 local function InstallAhHooks()
 	if ahHooksInstalled or not C_AuctionHouse then
 		return
 	end
-	if C_AuctionHouse.StartCommoditiesPurchase or C_AuctionHouse.CancelCommoditiesPurchase or C_AuctionHouse.PlaceBid then
+	if C_AuctionHouse.StartCommoditiesPurchase or C_AuctionHouse.CancelCommoditiesPurchase
+		or C_AuctionHouse.PlaceBid or C_AuctionHouse.PostItem or C_AuctionHouse.PostCommodity
+	then
 		ahHooksInstalled = true
 	end
 	if C_AuctionHouse.StartCommoditiesPurchase then
@@ -735,6 +818,42 @@ local function InstallAhHooks()
 				moneyBefore = GetMoney and GetMoney() or 0,
 				ts = GetTime and GetTime() or 0,
 			}
+		end)
+	end
+	if C_AuctionHouse.PostItem then
+		hooksecurefunc(C_AuctionHouse, "PostItem", function(itemLocation, duration, quantity)
+			if not IsProfitEnabled() or not HasAuctionator() or not itemLocation then
+				return
+			end
+			if not (C_Item and C_Item.GetItemID and C_AuctionHouse.CalculateItemDeposit) then
+				return
+			end
+			local okId, itemID = pcall(C_Item.GetItemID, itemLocation)
+			if not (okId and IsInTradeFlowSellScope(itemID)) then
+				return
+			end
+			local okDep, dep = pcall(C_AuctionHouse.CalculateItemDeposit, itemLocation, duration, quantity)
+			if okDep and type(dep) == "number" and dep > 0 then
+				QueuePendingAhPost(itemID, quantity, dep)
+			end
+		end)
+	end
+	if C_AuctionHouse.PostCommodity then
+		hooksecurefunc(C_AuctionHouse, "PostCommodity", function(itemLocation, duration, quantity)
+			if not IsProfitEnabled() or not HasAuctionator() or not itemLocation then
+				return
+			end
+			if not (C_Item and C_Item.GetItemID and C_AuctionHouse.CalculateCommodityDeposit) then
+				return
+			end
+			local okId, itemID = pcall(C_Item.GetItemID, itemLocation)
+			if not (okId and IsInTradeFlowSellScope(itemID)) then
+				return
+			end
+			local okDep, dep = pcall(C_AuctionHouse.CalculateCommodityDeposit, itemID, duration, quantity)
+			if okDep and type(dep) == "number" and dep > 0 then
+				QueuePendingAhPost(itemID, quantity, dep)
+			end
 		end)
 	end
 end
@@ -1293,6 +1412,8 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	if not IsProfitEnabled() then
 		pendingAhComm = nil
 		pendingAhBid = nil
+		ahMoney = 0
+		pendingAhPosts = {}
 		lastViewedAhItemKey = nil
 		merchantBagSnap = nil
 		merchantCatalog = nil
@@ -1305,11 +1426,17 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 		pendingMailItems = {}
 		return
 	end
-	if event == "PLAYER_LOGIN" or event == "AUCTION_HOUSE_SHOW" then
+	if event == "PLAYER_LOGIN" then
+		return
+	elseif event == "AUCTION_HOUSE_SHOW" then
+		ahMoney = GetMoney and GetMoney() or 0
+		pendingAhPosts = {}
 		return
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		pendingAhComm = nil
 		pendingAhBid = nil
+		ahMoney = 0
+		pendingAhPosts = {}
 		lastViewedAhItemKey = nil
 	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
 		lastViewedAhItemKey = nil
@@ -1403,16 +1530,24 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			CheckMailSellerUpdate(now)
 		end
 	elseif event == "PLAYER_MONEY" then
+		local curM = GetMoney and GetMoney() or 0
+		local bidMatchedAmt = 0
 		if pendingAhBid then
 			local b = pendingAhBid
 			pendingAhBid = nil
-			local curM = GetMoney and GetMoney() or 0
 			if (now - (b.ts or 0)) <= 2.5 and (b.moneyBefore - curM) == b.amount then
+				bidMatchedAmt = b.amount
 				ns:RecordTradeFlowPurchase("ah_buy", b.itemID, 1, b.amount)
 			end
 		end
+		if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
+			local ahSpent = (ahMoney > curM) and (ahMoney - curM - bidMatchedAmt) or 0
+			ahMoney = curM
+			if ahSpent > 0 and #pendingAhPosts > 0 then
+				FlushPendingAhDeposits(ahSpent, now)
+			end
+		end
 		if MerchantFrame and MerchantFrame:IsShown() and merchantBagSnap then
-			local curM = GetMoney and GetMoney() or 0
 			if curM > merchantMoney then
 				pendingMerchantMoney.amount = (pendingMerchantMoney.amount or 0) + (curM - merchantMoney)
 				pendingMerchantMoney.ts = now
@@ -1424,7 +1559,6 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			ScanMerchantPurchases(now)
 		end
 		if MailFrame and MailFrame:IsShown() then
-			local curM = GetMoney and GetMoney() or 0
 			if curM > mailMoney then
 				pendingMailMoney.amount = (pendingMailMoney.amount or 0) + (curM - mailMoney)
 				pendingMailMoney.ts = now
