@@ -55,13 +55,16 @@ function ns:DetachSecureProfProxy()
 		return
 	end
 	local prev = secureProfProxy.targetBtn
+	local wasShown = secureProfProxy:IsShown()
 	secureProfProxy.targetBtn = nil
 	secureProfProxy.skillLine = nil
 	if prev and prev.UnlockHighlight then
 		prev:UnlockHighlight()
 	end
-	GameTooltip_Hide()
-	if not (InCombatLockdown and InCombatLockdown()) then
+	if prev and GameTooltip and GameTooltip.IsOwned and GameTooltip:IsOwned(prev) then
+		GameTooltip_Hide()
+	end
+	if wasShown and not (InCombatLockdown and InCombatLockdown()) then
 		secureProfProxy:SetAttribute("type", nil)
 		secureProfProxy:SetAttribute("spell", nil)
 		secureProfProxy:ClearAllPoints()
