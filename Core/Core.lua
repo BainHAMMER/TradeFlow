@@ -1,7 +1,7 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
-ns.VERSION = "1.0.13"
+ns.VERSION = "1.0.14"
 ns.ICON = "Interface\\AddOns\\TradeFlow\\Media\\Icon"
 
 -- Сопоставление skillLine <-> базовое заклинание профессии для открытия окна
@@ -132,6 +132,96 @@ function ns.FormatDuration(seconds)
 		return string.format("%d%s", m, L["TIME_MIN"])
 	end
 	return string.format("%d%s", s, L["TIME_SEC"])
+end
+
+-- Компактное форматирование кулдауна (с днями)
+function ns.FormatCooldown(seconds)
+	if type(seconds) ~= "number" or seconds <= 0 then
+		return ""
+	end
+	local total = math.ceil(seconds)
+	local d = math.floor(total / 86400)
+	local h = math.floor((total % 86400) / 3600)
+	local m = math.floor((total % 3600) / 60)
+	local s = total % 60
+	if d > 0 then
+		if h > 0 then
+			return string.format("%d%s %d%s", d, L["TIME_DAY"], h, L["TIME_HOUR"])
+		end
+		return string.format("%d%s", d, L["TIME_DAY"])
+	end
+	if h > 0 then
+		if m > 0 then
+			return string.format("%d%s %d%s", h, L["TIME_HOUR"], m, L["TIME_MIN"])
+		end
+		return string.format("%d%s", h, L["TIME_HOUR"])
+	end
+	if m > 0 then
+		if s > 0 then
+			return string.format("%d%s %d%s", m, L["TIME_MIN"], s, L["TIME_SEC"])
+		end
+		return string.format("%d%s", m, L["TIME_MIN"])
+	end
+	return string.format("%d%s", s, L["TIME_SEC"])
+end
+
+-- Оставшееся время кулдауна рецепта в секундах (0 если готов), с кэшированием в charDB.cooldowns
+function ns:GetRecipeCooldownRemaining(recipeID)
+	if not recipeID or recipeID <= 0 then
+		return 0
+	end
+	local nowWall = time and time() or 0
+	local cdMap = self.charDB and self.charDB.cooldowns
+	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
+	local rec = self.GetRecipeRecord and self:GetRecipeRecord(recipeID) or nil
+	local isClientActive = (activeClientSL ~= nil and rec and rec.skillLine == activeClientSL)
+
+	if C_TradeSkillUI and C_TradeSkillUI.GetRecipeCooldown then
+		local ok, cd = pcall(C_TradeSkillUI.GetRecipeCooldown, recipeID)
+		if ok and type(cd) == "number" then
+			if cd > 1 then
+				if cdMap and nowWall > 0 then
+					cdMap[recipeID] = nowWall + cd
+				end
+				return cd
+			elseif cd <= 0 and isClientActive and cdMap then
+				cdMap[recipeID] = nil
+				return 0
+			end
+		end
+	end
+
+	local start, duration
+	if C_Spell and C_Spell.GetSpellCooldown then
+		local ok, info = pcall(C_Spell.GetSpellCooldown, recipeID)
+		if ok and type(info) == "table" then
+			start = info.startTime
+			duration = info.duration
+		end
+	elseif GetSpellCooldown then
+		local ok, st, dur = pcall(GetSpellCooldown, recipeID)
+		if ok then
+			start, duration = st, dur
+		end
+	end
+	if type(start) == "number" and type(duration) == "number" and start > 0 and duration > 2 then
+		local rem = (start + duration) - (GetTime and GetTime() or 0)
+		if rem > 1 then
+			if cdMap and nowWall > 0 then
+				cdMap[recipeID] = nowWall + rem
+			end
+			return rem
+		end
+	end
+
+	if cdMap and cdMap[recipeID] and nowWall > 0 then
+		local rem = cdMap[recipeID] - nowWall
+		if rem > 1 then
+			return rem
+		end
+		cdMap[recipeID] = nil
+	end
+	return 0
 end
 
 local requestedSpellLoads = {}
@@ -427,6 +517,10 @@ function ns:ShowRecipeTooltip(owner, recipeID)
 				self:AddDisenchantTooltipLines(GameTooltip, deNet, yields, reqEnch)
 			end
 		end
+	end
+	local cdRem = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID) or 0
+	if cdRem > 0 then
+		GameTooltip:AddLine(string.format(L["RECIPE_COOLDOWN_TIP"], ns.FormatCooldown(cdRem)), 1.0, 0.35, 0.35, true)
 	end
 	GameTooltip:AddLine(L["SHIFT_CLICK_HINT"], 0.55, 0.75, 1.0, true)
 	GameTooltip:AddLine(L["FAVORITE_RCLICK_HINT"], 0.65, 0.90, 0.65, true)
@@ -907,6 +1001,9 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 					newlyLearned = true
 				end
 				learnedMap[recipeID] = true
+				if self.GetRecipeCooldownRemaining then
+					self:GetRecipeCooldownRemaining(recipeID)
+				end
 			end
 
 			local diffKey = "optimal"
@@ -1700,6 +1797,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		}
 		ns.charDB = ns.realmDB.chars[cKey]
 		ns.charDB.favorites = ns.charDB.favorites or {}
+		ns.charDB.cooldowns = ns.charDB.cooldowns or {}
 		if ns.charDB.professions then
 			for sl, p in pairs(ns.charDB.professions) do
 				ns.playerProfessions[sl] = p

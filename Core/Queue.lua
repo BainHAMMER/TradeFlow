@@ -548,13 +548,17 @@ function ns:QueueClear()
 	self:OnQueueUpdated()
 end
 
--- Статус конкретного шага очереди: readyCrafts, state ("ready" | "partial" | "other_prof" | "unlearned" | "wait")
+-- Статус конкретного шага очереди: readyCrafts, state ("ready" | "partial" | "other_prof" | "unlearned" | "cooldown" | "wait"), extra
 function ns:GetQueueStepStatus(step)
 	if not step then
 		return 0, "wait"
 	end
 	if not self:IsRecipeLearned(step.recipeID) then
 		return 0, "unlearned"
+	end
+	local cdRem = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(step.recipeID) or 0
+	if cdRem > 0 then
+		return 0, "cooldown", cdRem
 	end
 	local rec = self:GetRecipeRecord(step.recipeID)
 	if not rec then
@@ -770,6 +774,14 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 				PromoteOrphanSubcrafts(queue)
 			end
 			ns:OnQueueUpdated(true)
+		end
+		if C_Timer and C_Timer.After and ns.GetRecipeCooldownRemaining and ns.RecipeData and ns.RecipeData[spellID] then
+			C_Timer.After(0.25, function()
+				local cd = ns:GetRecipeCooldownRemaining(spellID)
+				if cd and cd > 0 and ns.RefreshVisibleUI then
+					ns:RefreshVisibleUI()
+				end
+			end)
 		end
 	elseif event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" then
 		if spellID == ns.activeCastRecipeID then

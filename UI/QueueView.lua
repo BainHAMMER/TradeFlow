@@ -373,7 +373,7 @@ function ns:RenderQueueOrShoppingRows()
 				if stepSL then
 					step.skillLine = stepSL
 				end
-				local readyCrafts, state = self:GetQueueStepStatus(step)
+				local readyCrafts, state, extra = self:GetQueueStepStatus(step)
 				local statusStr
 				if state == "ready" then
 					statusStr = string.format(L["QUEUE_STATUS_READY"], readyCrafts)
@@ -383,6 +383,8 @@ function ns:RenderQueueOrShoppingRows()
 					statusStr = string.format(L["QUEUE_STATUS_OTHER_PROF"], self:GetProfessionName(stepSL))
 				elseif state == "unlearned" then
 					statusStr = L["QUEUE_STATUS_UNLEARNED"]
+				elseif state == "cooldown" then
+					statusStr = string.format(L["QUEUE_STATUS_COOLDOWN"], ns.FormatCooldown(extra or 0))
 				else
 					statusStr = L["QUEUE_STATUS_WAIT"]
 				end

@@ -254,11 +254,16 @@ ns.Locales.ru = {
 	["QUEUE_STATUS_PARTIAL"] = "|cffffd100Доступно %d из %d|r",
 	["QUEUE_STATUS_WAIT"] = "|cffff8040Не хватает реагентов|r",
 	["QUEUE_STATUS_UNLEARNED"] = "|cffff5555Не изучено|r",
+	["QUEUE_STATUS_COOLDOWN"] = "|cffff6666На КД (%s)|r",
 	["QUEUE_STATUS_OTHER_PROF"] = "|cff66ccffПрофессия: %s|r",
 	["QUEUE_SUBCRAFT_BADGE"] = "|cffaaaaaa[этап]|r ",
+	["TIME_DAY"] = "д",
 	["TIME_HOUR"] = "ч",
 	["TIME_MIN"] = "м",
 	["TIME_SEC"] = "с",
+	["RECIPE_COOLDOWN_LABEL"] = "КД: %s",
+	["RECIPE_COOLDOWN_BADGE"] = "[КД: %s]",
+	["RECIPE_COOLDOWN_TIP"] = "Восстановление: %s",
 	["QUEUE_TOTAL_TIME"] = "Время: |cffffd100%s|r",
 
 	-- Список покупок и интеграции

@@ -254,11 +254,16 @@ ns.Locales.en = {
 	["QUEUE_STATUS_PARTIAL"] = "|cffffd100Craftable %d of %d|r",
 	["QUEUE_STATUS_WAIT"] = "|cffff8040Waiting for mats|r",
 	["QUEUE_STATUS_UNLEARNED"] = "|cffff5555Unlearned|r",
+	["QUEUE_STATUS_COOLDOWN"] = "|cffff6666On CD (%s)|r",
 	["QUEUE_STATUS_OTHER_PROF"] = "|cff66ccffProf: %s|r",
 	["QUEUE_SUBCRAFT_BADGE"] = "|cffaaaaaa[sub]|r ",
+	["TIME_DAY"] = "d",
 	["TIME_HOUR"] = "h",
 	["TIME_MIN"] = "m",
 	["TIME_SEC"] = "s",
+	["RECIPE_COOLDOWN_LABEL"] = "CD: %s",
+	["RECIPE_COOLDOWN_BADGE"] = "[CD: %s]",
+	["RECIPE_COOLDOWN_TIP"] = "Cooldown remaining: %s",
 	["QUEUE_TOTAL_TIME"] = "Time: |cffffd100%s|r",
 
 	-- Shopping List & Integrations

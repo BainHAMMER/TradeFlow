@@ -1754,6 +1754,10 @@ function ns:RefreshDetailsView()
 			end
 		end
 	end
+	local cdRem = (metrics.learned and self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID)) or 0
+	if cdRem > 0 then
+		thParts[#thParts + 1] = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(cdRem)) .. "|r"
+	end
 	d.thresholdLine:SetText(table.concat(thParts, "   |   "))
 
 	for i = 1, 6 do
@@ -1827,7 +1831,7 @@ function ns:RefreshDetailsView()
 		profit = profit,
 		costPerSkillUp = metrics.costPerSkillUp,
 	})
-	local canCraft = metrics.learned and (self:GetRecipeCraftCounts(recipeID) > 0)
+	local canCraft = metrics.learned and (self:GetRecipeCraftCounts(recipeID) > 0) and (cdRem <= 0)
 	local recipeSL = (rec and rec.skillLine) or self.currentSkillLine
 	local activeClientSL = self.GetActiveClientSkillLine and self:GetActiveClientSkillLine() or nil
 	local needSwitch = canCraft and recipeSL and (activeClientSL ~= recipeSL)
@@ -1835,6 +1839,10 @@ function ns:RefreshDetailsView()
 		d.craftNowBtn:SetText(L["BTN_OPEN_PROF"])
 		d.craftNowBtn.pendingSkillLine = recipeSL
 		d.craftNowBtn:SetEnabled(true)
+	elseif cdRem > 0 then
+		d.craftNowBtn:SetText(string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(cdRem)))
+		d.craftNowBtn.pendingSkillLine = nil
+		d.craftNowBtn:SetEnabled(false)
 	else
 		d.craftNowBtn:SetText(L["BTN_CRAFT_NOW"])
 		d.craftNowBtn.pendingSkillLine = nil
@@ -2031,7 +2039,14 @@ function ns:RenderRecipeListRows()
 					trainerTag = isKnownReq and string.format(" |cff809ec7[%d]|r", req) or " |cff809ec7[?]|r"
 				end
 				local favPrefix = (entry.favorite and self.GetFavoriteIconMarkup) and self:GetFavoriteIconMarkup() or ""
-				row.nameText:SetText(favPrefix .. dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr)
+				local cdTag = ""
+				if entry.learned and self.GetRecipeCooldownRemaining then
+					local cdRem = self:GetRecipeCooldownRemaining(entry.recipeID)
+					if cdRem and cdRem > 0 then
+						cdTag = " |cffff6666" .. string.format(L["RECIPE_COOLDOWN_BADGE"], ns.FormatCooldown(cdRem)) .. "|r"
+					end
+				end
+				row.nameText:SetText(favPrefix .. dc.hex .. entry.name .. "|r" .. trainerTag .. countsStr .. cdTag)
 
 				local pct = math.floor((entry.metrics.chance or 0) * 100 + 0.5)
 				local sortMode = (self.db and self.db.options and self.db.options.sortMode) or "difficulty"
