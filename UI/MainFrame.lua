@@ -48,6 +48,9 @@ function ns:SyncHoveredProfProxy()
 			end
 		end
 	end
+	if secureProfProxy and secureProfProxy:IsShown() then
+		self:DetachSecureProfProxy()
+	end
 end
 
 function ns:DetachSecureProfProxy()
@@ -58,8 +61,13 @@ function ns:DetachSecureProfProxy()
 	local wasShown = secureProfProxy:IsShown()
 	secureProfProxy.targetBtn = nil
 	secureProfProxy.skillLine = nil
-	if prev and prev.UnlockHighlight then
-		prev:UnlockHighlight()
+	if prev then
+		if prev.SetButtonState then
+			prev:SetButtonState("NORMAL")
+		end
+		if prev.UnlockHighlight then
+			prev:UnlockHighlight()
+		end
 	end
 	if prev and GameTooltip and GameTooltip.IsOwned and GameTooltip:IsOwned(prev) then
 		GameTooltip_Hide()
@@ -131,8 +139,16 @@ function ns:AttachSecureProfProxy(btn, skillLine)
 		end)
 	end
 	local prev = secureProfProxy.targetBtn
-	if prev and prev ~= btn and prev.UnlockHighlight then
-		prev:UnlockHighlight()
+	if prev and prev ~= btn then
+		if prev.SetButtonState then
+			prev:SetButtonState("NORMAL")
+		end
+		if prev.UnlockHighlight then
+			prev:UnlockHighlight()
+		end
+		if GameTooltip and GameTooltip.IsOwned and GameTooltip:IsOwned(prev) then
+			GameTooltip_Hide()
+		end
 	end
 	secureProfProxy.targetBtn = btn
 	secureProfProxy.skillLine = skillLine
@@ -1560,10 +1576,8 @@ function ns:CreateDetailsView(parent)
 		end
 		if self.pendingSkillLine then
 			ns:SwitchToProfession(self.pendingSkillLine)
-			if ns.AttachSecureProfProxy then
-				ns:AttachSecureProfProxy(self, self.pendingSkillLine)
-			end
-			if InCombatLockdown and InCombatLockdown() and ns.Print then
+			local attached = ns.AttachSecureProfProxy and ns:AttachSecureProfProxy(self, self.pendingSkillLine)
+			if ((InCombatLockdown and InCombatLockdown()) or not attached) and ns.Print then
 				ns:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], ns:GetProfessionName(self.pendingSkillLine)))
 			end
 			return

@@ -22,7 +22,7 @@ local merchantHooksInstalled = false
 local lastDisenchantAt = 0
 local pendingAhComm = nil
 local pendingAhBid = nil
-local ahMoney = 0
+local ahMoney = nil
 local pendingAhPosts = {}
 local lastViewedAhItemKey = nil
 local merchantMoney = 0
@@ -691,20 +691,71 @@ local function IsInTradeFlowSellScope(itemID)
 	return (ns.DisenchantMatIDs and ns.DisenchantMatIDs[itemID]) == true
 end
 
-local function QueuePendingAhPost(itemID, qty, deposit)
+local function QueuePendingAhPost(itemID, qty, deposit, tracked)
 	if not (itemID and itemID > 0 and deposit and deposit > 0) then
 		return
+	end
+	if ahMoney == nil then
+		ahMoney = GetMoney and GetMoney() or 0
 	end
 	local now = GetTime and GetTime() or 0
 	pendingAhPosts[#pendingAhPosts + 1] = {
 		itemID = itemID,
 		qty = math.max(1, tonumber(qty) or 1),
 		deposit = deposit,
+		tracked = tracked == true,
 		ts = now,
 	}
 	if #pendingAhPosts > 40 then
 		table.remove(pendingAhPosts, 1)
 	end
+end
+
+local function FindExactDepositIndices(list, target)
+	-- 1. Одиночное точное совпадение (самый частый случай)
+	for i = 1, #list do
+		if list[i].deposit == target then
+			return { i }
+		end
+	end
+	-- 2. Префиксная сумма (пачка последовательных выставлений в одном PLAYER_MONEY)
+	local prefix = 0
+	for i = 1, #list do
+		prefix = prefix + list[i].deposit
+		if prefix == target then
+			local idxs = {}
+			for j = 1, i do
+				idxs[j] = j
+			end
+			return idxs
+		elseif prefix > target then
+			break
+		end
+	end
+	-- 3. Точный поиск подмножества по последним элементам (ограничен 12, чтобы исключить ложные срабатывания)
+	local limit = math.min(#list, 12)
+	local chosen = {}
+	local function Search(pos, rem)
+		if rem == 0 then
+			return true
+		end
+		if pos > limit or rem < 0 then
+			return false
+		end
+		local dep = list[pos].deposit
+		if dep <= rem then
+			chosen[#chosen + 1] = pos
+			if Search(pos + 1, rem - dep) then
+				return true
+			end
+			chosen[#chosen] = nil
+		end
+		return Search(pos + 1, rem)
+	end
+	if Search(1, target) and #chosen > 0 then
+		return chosen
+	end
+	return nil
 end
 
 local function FlushPendingAhDeposits(spent, now)
@@ -718,30 +769,25 @@ local function FlushPendingAhDeposits(spent, now)
 	if not spent or spent <= 0 or #pendingAhPosts == 0 then
 		return
 	end
-	local rem = spent
-	while rem > 0 and #pendingAhPosts > 0 do
-		local matchIdx = nil
-		for idx, entry in ipairs(pendingAhPosts) do
-			if entry.deposit == rem then
-				matchIdx = idx
-				break
-			end
-		end
-		if not matchIdx then
-			for idx, entry in ipairs(pendingAhPosts) do
-				if entry.deposit <= rem then
-					matchIdx = idx
-					break
-				end
-			end
-		end
-		if not matchIdx then
-			break
-		end
-		local entry = table.remove(pendingAhPosts, matchIdx)
-		ns:RecordCashflowExpense("ah_deposit", entry.itemID, entry.qty, entry.deposit)
-		rem = rem - entry.deposit
+	local matched = FindExactDepositIndices(pendingAhPosts, spent)
+	if not matched then
+		return
 	end
+	local matchedSet = {}
+	for _, idx in ipairs(matched) do
+		matchedSet[idx] = true
+		local entry = pendingAhPosts[idx]
+		if entry and entry.tracked then
+			ns:RecordCashflowExpense("ah_deposit", entry.itemID, entry.qty, entry.deposit)
+		end
+	end
+	local remaining = {}
+	for i, entry in ipairs(pendingAhPosts) do
+		if not matchedSet[i] then
+			remaining[#remaining + 1] = entry
+		end
+	end
+	pendingAhPosts = remaining
 end
 
 local function InstallAhHooks()
@@ -829,12 +875,12 @@ local function InstallAhHooks()
 				return
 			end
 			local okId, itemID = pcall(C_Item.GetItemID, itemLocation)
-			if not (okId and IsInTradeFlowSellScope(itemID)) then
+			if not (okId and itemID and itemID > 0) then
 				return
 			end
 			local okDep, dep = pcall(C_AuctionHouse.CalculateItemDeposit, itemLocation, duration, quantity)
 			if okDep and type(dep) == "number" and dep > 0 then
-				QueuePendingAhPost(itemID, quantity, dep)
+				QueuePendingAhPost(itemID, quantity, dep, IsInTradeFlowSellScope(itemID))
 			end
 		end)
 	end
@@ -847,12 +893,12 @@ local function InstallAhHooks()
 				return
 			end
 			local okId, itemID = pcall(C_Item.GetItemID, itemLocation)
-			if not (okId and IsInTradeFlowSellScope(itemID)) then
+			if not (okId and itemID and itemID > 0) then
 				return
 			end
 			local okDep, dep = pcall(C_AuctionHouse.CalculateCommodityDeposit, itemID, duration, quantity)
 			if okDep and type(dep) == "number" and dep > 0 then
-				QueuePendingAhPost(itemID, quantity, dep)
+				QueuePendingAhPost(itemID, quantity, dep, IsInTradeFlowSellScope(itemID))
 			end
 		end)
 	end
@@ -1412,7 +1458,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	if not IsProfitEnabled() then
 		pendingAhComm = nil
 		pendingAhBid = nil
-		ahMoney = 0
+		ahMoney = nil
 		pendingAhPosts = {}
 		lastViewedAhItemKey = nil
 		merchantBagSnap = nil
@@ -1435,7 +1481,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		pendingAhComm = nil
 		pendingAhBid = nil
-		ahMoney = 0
+		ahMoney = nil
 		pendingAhPosts = {}
 		lastViewedAhItemKey = nil
 	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
@@ -1534,14 +1580,16 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 		local bidMatchedAmt = 0
 		if pendingAhBid then
 			local b = pendingAhBid
-			pendingAhBid = nil
-			if (now - (b.ts or 0)) <= 2.5 and (b.moneyBefore - curM) == b.amount then
+			if (now - (b.ts or 0)) > 2.5 then
+				pendingAhBid = nil
+			elseif (b.moneyBefore - curM) == b.amount then
+				pendingAhBid = nil
 				bidMatchedAmt = b.amount
 				ns:RecordTradeFlowPurchase("ah_buy", b.itemID, 1, b.amount)
 			end
 		end
 		if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
-			local ahSpent = (ahMoney > curM) and (ahMoney - curM - bidMatchedAmt) or 0
+			local ahSpent = (ahMoney ~= nil and ahMoney > curM) and (ahMoney - curM - bidMatchedAmt) or 0
 			ahMoney = curM
 			if ahSpent > 0 and #pendingAhPosts > 0 then
 				FlushPendingAhDeposits(ahSpent, now)

@@ -228,10 +228,8 @@ function ns:CreateQueueAndShoppingView(parent)
 	processBtn:SetScript("OnClick", function(self)
 		if self.pendingSkillLine then
 			ns:SwitchToProfession(self.pendingSkillLine)
-			if ns.AttachSecureProfProxy then
-				ns:AttachSecureProfProxy(self, self.pendingSkillLine)
-			end
-			if InCombatLockdown and InCombatLockdown() and ns.Print then
+			local attached = ns.AttachSecureProfProxy and ns:AttachSecureProfProxy(self, self.pendingSkillLine)
+			if ((InCombatLockdown and InCombatLockdown()) or not attached) and ns.Print then
 				ns:Print(string.format(L["CRAFT_OPEN_PROF_MSG"], ns:GetProfessionName(self.pendingSkillLine)))
 			end
 		else
