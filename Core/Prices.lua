@@ -156,6 +156,24 @@ local NON_DISENCHANTABLE_EQUIP = {
 	INVTYPE_PROFESSION_GEAR = true,
 }
 
+local function IsCraftedByEnchanting(itemID)
+	local producers = ns.ItemProducedBy and ns.ItemProducedBy[itemID]
+	if not producers then
+		return false
+	end
+	for _, recipeID in ipairs(producers) do
+		local rData = ns.RecipeData and ns.RecipeData[recipeID]
+		if rData and rData.skillLine == 333 then
+			return true
+		end
+		local live = ns.liveRecipes and ns.liveRecipes[recipeID]
+		if live and live.skillLine == 333 then
+			return true
+		end
+	end
+	return false
+end
+
 local function IsDisenchantableItem(itemID, quality, iLevel, equipLoc, classID, subclassID, bindType)
 	if NON_DISENCHANTABLE_ITEMS[itemID] then
 		return false
@@ -170,6 +188,12 @@ local function IsDisenchantableItem(itemID, quality, iLevel, equipLoc, classID, 
 		return false
 	end
 	if classID == 2 and subclassID == 20 then -- Удочки
+		return false
+	end
+	if classID == 2 and subclassID == 19 and ns.ItemProducedBy and ns.ItemProducedBy[itemID] then -- Все крафтовые жезлы
+		return false
+	end
+	if IsCraftedByEnchanting(itemID) then -- Экипировка/жезлы, созданные Наложением чар, в игре не распыляются
 		return false
 	end
 	if classID == 4 and subclassID == 5 then -- Декоративные
