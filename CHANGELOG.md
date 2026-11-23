@@ -1,5 +1,20 @@
 # Changelog / Список изменений
 
+## v1.0.13
+### RU
+- **Исправление переключения профессии из очереди и шапки:**
+  - Исправлена ситуация, когда при наведённом курсоре на кнопку «Выбрать: ...» в очереди, «Открыть проф.» в деталях или иконку профессии в шапке после обновления окна клик не переключал активную профессию в клиенте игры — защищённый прокси теперь автоматически перепривязывается без необходимости уводить курсор.
+- **Исправление расчёта распыления для Наложения чар:**
+  - Все крафтовые жезлы (включая кастомные жезлы WoW Forever, такие как «Жезл из ветви грез») и экипировка, создаваемая Наложением чар, автоматически исключаются из расчёта выручки и прибыли от распыления (работает как с `DisenchantBuddy`, так и без него).
+
+### EN
+- **Profession Switching Button Fix:**
+  - Fixed an issue where clicking `Switch to: ...` in the Queue, `Open Prof` in Details, or a header profession icon failed to switch the active game profession if the cursor remained stationary over the button during a UI refresh; the secure switch proxy now re-attaches automatically.
+- **Enchanting Disenchant Exclusion Fix:**
+  - Automatically excluded all crafted wands (including custom WoW Forever wands) and Enchanting-crafted gear from disenchant value and profit calculations, both with and without `DisenchantBuddy`.
+
+---
+
 ## v1.0.12
 ### RU
 - **Счётчик доступных крафтов за вычетом очереди:**
