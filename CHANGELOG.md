@@ -1,22 +1,44 @@
 # Changelog / Список изменений
 
+## v1.0.14
+### RU
+- **Отображение кулдаунов на крафты:**
+  - Для рецептов с временем восстановления (трансмутации, луноткань, солеварка и т.д.) теперь отображается оставшийся кулдаун в списке рецептов (`[КД: ...]`), в деталях рецепта, в тултипе и в очереди крафта (`На КД (...)`); кнопка «Создать» блокируется и показывает оставшееся время до готовности.
+- **Учёт залогов аукциона в журнале заработка («Касса»):**
+  - В режиме **«Касса»** теперь отслеживается списание залога (`Залог АХ`) при выставлении скрафченных предметов и материалов распыления на аукцион (с точным сопоставлением сумм по `PLAYER_MONEY`). При успешной продаже залог возвращается в письме с АХ (итоговая выручка точно равна `цена - 5%`), а при отмене или истечении срока лота потерянный залог учитывается в расходах.
+- **Исправления интерфейса:**
+  - Исправлено пропадание тултипов рецептов и реагентов через полсекунды после наведения — `DetachSecureProfProxy` больше не скрывает чужие тултипы при фоновом обновлении окна.
+  - Исправлена работа защищённой кнопки переключения профессии («Выбрать: ...», «Открыть проф.», иконки в шапке): прокси перенесён на стратум `HIGH` с привязкой `SetAllPoints`, исправлен конфликт `AnyUp`/`AnyDown`, добавлена анимация нажатия и авто-отцепление при скрытии кнопки или смене вкладки.
+
+### EN
+- **Recipe Cooldown Display:**
+  - Recipes with cooldowns (transmutes, Mooncloth, Salt Shaker, etc.) now display remaining cooldown time in the recipe list (`[CD: ...]`), Recipe Details header, recipe tooltip, and Crafting Queue (`On CD (...)`), with the Craft button disabled and showing remaining time.
+- **AH Deposit Tracking in Profit Log (Cash Mode):**
+  - Cashflow mode now tracks Auction House posting deposits (`AH deposit`) for crafted items and disenchant materials with exact `PLAYER_MONEY` reconciliation. Sold auctions automatically net out when AH mail refunds the deposit (`sale - 5%`), while expired or cancelled auctions retain the lost deposit as an expense.
+- **UI Fixes:**
+  - Fixed recipe and reagent tooltips disappearing shortly after hover during background UI refreshes (`DetachSecureProfProxy` now hides `GameTooltip` only when owned by the detached button).
+  - Fixed secure profession switching buttons (`Switch to: ...`, `Open Prof`, and header icons): moved the secure proxy to `HIGH` strata with `SetAllPoints`, fixed `AnyUp` click timing so spells cast before detach, added button press visual feedback, and auto-detached when switching tabs.
+
+---
+
 ## v1.0.13
 ### RU
 - **Исправление переключения профессии из очереди и шапки:**
   - Исправлена ситуация, когда при наведённом курсоре на кнопку «Выбрать: ...» в очереди, «Открыть проф.» в деталях или иконку профессии в шапке после обновления окна клик не переключал активную профессию в клиенте игры — защищённый прокси теперь автоматически перепривязывается без необходимости уводить курсор.
 - **Исправление расчёта распыления для Наложения чар:**
-  - Все крафтовые жезлы (включая кастомные жезлы WoW Forever, такие как «Жезл из ветви грез») и экипировка, создаваемая Наложением чар, автоматически исключаются из расчёта выручки и прибыли от распыления (работает как с `DisenchantBuddy`, так и без него).
+  - Все крафтовые жезлы (включая «Жезл из ветви грез» и остальные жезлы Наложения чар) и экипировка, создаваемая Наложением чар, автоматически исключаются из расчёта выручки и прибыли от распыления (работает как с `DisenchantBuddy`, так и без него).
 
 ### EN
 - **Profession Switching Button Fix:**
   - Fixed an issue where clicking `Switch to: ...` in the Queue, `Open Prof` in Details, or a header profession icon failed to switch the active game profession if the cursor remained stationary over the button during a UI refresh; the secure switch proxy now re-attaches automatically.
 - **Enchanting Disenchant Exclusion Fix:**
-  - Automatically excluded all crafted wands (including custom WoW Forever wands) and Enchanting-crafted gear from disenchant value and profit calculations, both with and without `DisenchantBuddy`.
+  - Automatically excluded all crafted wands and Enchanting-crafted gear from disenchant value and profit calculations, both with and without `DisenchantBuddy`.
 
 ---
 
 ## v1.0.12
 ### RU
+
 - **Счётчик доступных крафтов за вычетом очереди:**
   - В списке рецептов слева и во вкладке «Заработок» рядом с общим доступным количеством `[N]` добавлен второй счётчик в круглых скобках `(M)` (или `(0)` серым цветом), показывающий сколько ещё штук можно поставить в очередь после вычета материалов, уже зарезервированных в текущей очереди крафта.
 - **Калькулятор прокачки (упущенная выгода реагентов в наличии):**
