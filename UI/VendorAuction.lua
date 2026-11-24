@@ -684,25 +684,38 @@ local function CollectBankMatches()
 		end
 	end
 
-	-- Берём сначала меньшие/неполные стаки целиком через UseContainerItem (без SplitContainerItem, который даёт ERR_ITEM_CANT_BE_SPLIT)
+	-- Подбираем стаки с минимальным перебором: сначала берём наибольшие стаки <= остатка
+	-- (чтобы закрывать ровные стаки без лишних хвостов), а на финальный остаток — наименьший стак >= остатка
 	for _, entry in ipairs(order) do
-		table.sort(entry.slots, function(a, b)
-			if a.count ~= b.count then
-				return a.count < b.count
-			end
-			if a.bag ~= b.bag then
-				return a.bag < b.bag
-			end
-			return a.slot < b.slot
-		end)
+		local pool = {}
+		for _, s in ipairs(entry.slots) do
+			pool[#pool + 1] = s
+		end
 		local picked = {}
 		local rem = entry.need
-		for _, s in ipairs(entry.slots) do
-			if rem <= 0 then
+		while rem > 0 and #pool > 0 do
+			local bestIdx = nil
+			local bestCount = -1
+			for i, s in ipairs(pool) do
+				if s.count <= rem and s.count > bestCount then
+					bestIdx = i
+					bestCount = s.count
+				end
+			end
+			if not bestIdx then
+				bestCount = math.huge
+				for i, s in ipairs(pool) do
+					if s.count < bestCount then
+						bestIdx = i
+						bestCount = s.count
+					end
+				end
+			end
+			if not bestIdx then
 				break
 			end
-			local take = math.min(rem, s.count)
-			s.take = take
+			local s = table.remove(pool, bestIdx)
+			s.take = math.min(rem, s.count)
 			picked[#picked + 1] = s
 			entry.totalTake = entry.totalTake + s.count
 			rem = rem - s.count
