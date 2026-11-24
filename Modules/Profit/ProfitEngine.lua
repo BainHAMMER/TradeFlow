@@ -446,6 +446,35 @@ function ns:BuildProfitList(opts)
 		if evalProfit and evalProfit > 0 then
 			local name, icon, outItemID, _, _, hex = self:GetRecipeDisplay(recipeID)
 			local gphInfo = (sortBy == "gph") and EvaluateGoldPerHour(recipeID, evalOut, outItemID, evalSource) or nil
+			if sortBy == "gph" and evalSource == "disenchant" and (channel == "all" or channel == "safe") and alts then
+				local altOut, altSrc = 0, nil
+				if (alts.vendor or 0) > altOut then
+					altOut = alts.vendor
+					altSrc = "vendor"
+				end
+				if channel == "all" then
+					local ahVal = alts.ah or 0
+					if ahVal == 0 and outItemID and outItemID > 0 then
+						local ahUnit = self:GetAuctionPrice(outItemID)
+						if ahUnit and ahUnit > 0 then
+							ahVal = math.floor(ahUnit * (rec.numMade or 1) * (1 - AUCTION_CUT) + 0.5)
+						end
+					end
+					if ahVal > altOut then
+						altOut = ahVal
+						altSrc = "ah"
+					end
+				end
+				if altSrc and altOut > 0 then
+					local altGph = EvaluateGoldPerHour(recipeID, altOut, outItemID, altSrc)
+					if altGph and altGph.gph and (not gphInfo or not gphInfo.gph or altGph.gph > gphInfo.gph) then
+						gphInfo = altGph
+						evalOut = altOut
+						evalProfit = altOut - craftCost
+						evalSource = altSrc
+					end
+				end
+			end
 			local ageDays = gphInfo and gphInfo.ageDays or GetMaxAuctionAgeDays(outItemID, evalSource, breakdown)
 			local passFresh = (not freshOnly) or (not ageDays or ageDays <= 3)
 			if passFresh then

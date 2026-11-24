@@ -730,16 +730,22 @@ function ns:GetBankShoppingMatches()
 	return CollectBankMatches()
 end
 
-local function FindFreePlayerBagSlot(itemID)
+local function FindFreePlayerBagSlot(itemID, reservedSlots)
 	local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
 	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
 	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
 	local GetFree = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+	if not GetID then
+		return nil, nil
+	end
 	local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
 	local itemFamily = (itemID and C_Item and C_Item.GetItemFamily and C_Item.GetItemFamily(itemID))
 		or (itemID and GetItemFamily and GetItemFamily(itemID))
 		or 0
-	for _, bag in ipairs(ns:GetPlayerContainerIDs()) do
+	-- Обходим сумки и слоты с конца, чтобы сплит не сталкивался с UseContainerItem (который заполняет с сумки 0, слота 1)
+	local bags = ns:GetPlayerContainerIDs()
+	for bi = #bags, 1, -1 do
+		local bag = bags[bi]
 		if bag ~= reagentBag then
 			local free, family
 			if GetFree then
@@ -749,8 +755,9 @@ local function FindFreePlayerBagSlot(itemID)
 				or (itemFamily and itemFamily > 0 and bit and bit.band and bit.band(itemFamily, family) ~= 0)
 			if bagOk and (not free or free > 0) then
 				local slots = GetNumSlots and GetNumSlots(bag) or 0
-				for slot = 1, slots do
-					if not (GetID and GetID(bag, slot)) then
+				for slot = slots, 1, -1 do
+					local key = bag .. ":" .. slot
+					if not (reservedSlots and reservedSlots[key]) and not GetID(bag, slot) then
 						local _, locked = ReadContainerSlot(bag, slot, GetInfo)
 						if not locked then
 							return bag, slot
@@ -838,6 +845,7 @@ function ns:WithdrawBankShoppingList()
 		beforeBags = {},
 		expectedByItem = {},
 		slotQueue = {},
+		reservedSlots = {},
 		steps = 0,
 	}
 	for _, m in ipairs(matches) do
@@ -889,8 +897,8 @@ function ns:WithdrawBankShoppingList()
 			return
 		end
 		local curID = GetID and GetID(s.bag, s.slot)
-		if curID and curID ~= s.itemID then
-			if C_Timer and C_Timer.After then
+		if not curID or curID ~= s.itemID then
+			if #job.slotQueue > 0 and C_Timer and C_Timer.After then
 				C_Timer.After(0.05, StepNext)
 			else
 				FinishBankWithdraw(job)
@@ -905,7 +913,11 @@ function ns:WithdrawBankShoppingList()
 				C_Timer.After(0.15, StepNext)
 				return
 			end
-			FinishBankWithdraw(job)
+			if #job.slotQueue > 0 and C_Timer and C_Timer.After then
+				C_Timer.After(0.05, StepNext)
+			else
+				FinishBankWithdraw(job)
+			end
 			return
 		end
 
@@ -917,11 +929,15 @@ function ns:WithdrawBankShoppingList()
 		job.steps = job.steps + 1
 		local movedAny = false
 		if wantTake > 0 and wantTake < curCount and SplitItem and PickupItem then
-			local dstBag, dstSlot = FindFreePlayerBagSlot(s.itemID)
+			local dstBag, dstSlot = FindFreePlayerBagSlot(s.itemID, job.reservedSlots)
 			if dstBag and dstSlot then
 				local okSplit = RunSafe("BankSplitItem", SplitItem, s.bag, s.slot, wantTake)
 				if okSplit and (not CursorHasItem or CursorHasItem()) then
-					movedAny = RunSafe("BankPickupItem", PickupItem, dstBag, dstSlot)
+					local okPickup = RunSafe("BankPickupItem", PickupItem, dstBag, dstSlot)
+					movedAny = okPickup and not (CursorHasItem and CursorHasItem())
+					if movedAny then
+						job.reservedSlots[dstBag .. ":" .. dstSlot] = true
+					end
 				end
 				if CursorHasItem and CursorHasItem() and ClearCursor then
 					ClearCursor()

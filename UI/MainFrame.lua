@@ -1764,14 +1764,16 @@ function ns:RefreshDetailsView()
 	end
 	local cdRem = (metrics.learned and self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID)) or 0
 	if cdRem > 0 then
-		thParts[#thParts + 1] = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(cdRem)) .. "|r"
+		local cdStr = ns.FormatCooldown(cdRem)
+		thParts[#thParts + 1] = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], cdStr) .. "|r"
+		d._lastCdText = cdStr
 	else
+		d._lastCdText = ""
 		local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(recipeID) or 0
 		if baseCd > 0 then
 			thParts[#thParts + 1] = "|cffffb84d" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(baseCd)) .. "|r"
 		end
 	end
-	d._hasActiveCooldown = (cdRem > 0)
 	d.thresholdLine:SetText(table.concat(thParts, "   |   "))
 
 	for i = 1, 6 do
@@ -2056,10 +2058,11 @@ function ns:RenderRecipeListRows()
 				local cdTag = ""
 				local cdRem = (entry.learned and self.GetRecipeCooldownRemaining) and self:GetRecipeCooldownRemaining(entry.recipeID) or 0
 				if cdRem > 0 then
-					cdTag = " |cffff6666" .. string.format(L["RECIPE_COOLDOWN_BADGE"], ns.FormatCooldown(cdRem)) .. "|r"
-					row._hasActiveCooldown = true
+					local cdStr = ns.FormatCooldown(cdRem)
+					cdTag = " |cffff6666" .. string.format(L["RECIPE_COOLDOWN_BADGE"], cdStr) .. "|r"
+					row._lastCdText = cdStr
 				else
-					row._hasActiveCooldown = false
+					row._lastCdText = ""
 					local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(entry.recipeID) or 0
 					if baseCd > 0 then
 						cdTag = " |cffffb84d" .. string.format(L["RECIPE_COOLDOWN_BADGE"], ns.FormatCooldown(baseCd)) .. "|r"
@@ -2269,7 +2272,8 @@ function ns:TickCooldownDisplays()
 		for _, row in ipairs(f.recipeRows) do
 			if row:IsShown() and row.entryData and not row.entryData.isHeader and row.entryData.learned then
 				local cd = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(row.entryData.recipeID) or 0
-				if cd > 0 or row._hasActiveCooldown then
+				local curText = (cd > 0) and ns.FormatCooldown(cd) or ""
+				if curText ~= (row._lastCdText or "") then
 					needList = true
 					break
 				end
@@ -2281,23 +2285,28 @@ function ns:TickCooldownDisplays()
 	end
 	local d = self.detailsView
 	if d and d:IsVisible() and d.currentRecipeID then
-		local cd = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(d.currentRecipeID) or 0
-		if cd > 0 or d._hasActiveCooldown then
+		local learned = self.IsRecipeLearned and self:IsRecipeLearned(d.currentRecipeID)
+		local cd = (learned and self.GetRecipeCooldownRemaining) and self:GetRecipeCooldownRemaining(d.currentRecipeID) or 0
+		local curText = (cd > 0) and ns.FormatCooldown(cd) or ""
+		if curText ~= (d._lastCdText or "") then
 			self:RefreshDetailsView()
 		end
 	end
 	local qv = self.queueView
 	if qv and qv:IsVisible() and qv.activeMode == "queue" and self.GetQueue then
-		local needQueue = false
-		for _, step in ipairs(self:GetQueue()) do
+		local parts = {}
+		for i, step in ipairs(self:GetQueue()) do
 			local cd = self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(step.recipeID) or 0
-			if cd > 0 or step._wasOnCooldown then
-				step._wasOnCooldown = (cd > 0)
-				needQueue = true
+			if cd > 0 then
+				parts[#parts + 1] = i .. ":" .. tostring(step.recipeID) .. ":" .. ns.FormatCooldown(cd)
 			end
 		end
-		if needQueue then
+		local sig = table.concat(parts, "|")
+		if qv._lastCdSig ~= nil and sig ~= qv._lastCdSig then
+			qv._lastCdSig = sig
 			self:RefreshQueueAndShoppingView()
+		else
+			qv._lastCdSig = sig
 		end
 	end
 end
