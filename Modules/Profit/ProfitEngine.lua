@@ -5,6 +5,16 @@ local _, ns = ...
 -------------------------------------------------------------------------------
 local AUCTION_CUT = ns.AUCTION_CUT or 0.05
 local MIN_CRAFT_TIME = 1.0 -- минимальное время каста для защиты от деления на 0 при мгновенных крафтах
+local DISENCHANT_SPELL_ID = 13262
+local DEFAULT_DISENCHANT_TIME = 3.0
+
+local function GetDisenchantCastTime()
+	local ct = ns.GetRecipeCastTime and ns:GetRecipeCastTime(DISENCHANT_SPELL_ID)
+	if type(ct) == "number" and ct > 0 then
+		return ct
+	end
+	return DEFAULT_DISENCHANT_TIME
+end
 local profitCache = nil
 local profitCacheKey = nil
 local profitCachePriceRev = -1
@@ -184,6 +194,11 @@ local function EvaluateGoldPerHour(recipeID, evalOut, outItemID, outSource)
 		return nil
 	end
 
+	local baseTime = rootCast
+	if outSource == "disenchant" then
+		baseTime = baseTime + GetDisenchantCastTime() * math.max(1, rec.numMade or 1)
+	end
+
 	local lambda = 0
 	local bestLambda = 0
 	local bestCost, bestTime, bestChoices
@@ -191,7 +206,7 @@ local function EvaluateGoldPerHour(recipeID, evalOut, outItemID, outSource)
 	for _ = 1, 6 do
 		local memo = {}
 		local choices = {}
-		local sumCost, sumTime, okAll = 0, rootCast, true
+		local sumCost, sumTime, okAll = 0, baseTime, true
 		for _, r in ipairs(rec.reagents) do
 			local _, rCost, rTime, rSub = EvalItemForRate(r.itemID, lambda, {}, memo)
 			if not rCost then
