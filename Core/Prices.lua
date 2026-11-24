@@ -500,15 +500,32 @@ function ns:GetReagentBestPrice(itemID, visiting)
 end
 
 -- Выручка, которую вычитаем из цены за +1 навык и в калькуляторе прокачки (alts — 6-е значение
--- GetRecipeEconomy): продажа торговцу, если отмечена «Продажа торговцу», или распыление, если оно
--- включено в настройках, — что больше. Перепродажа на аукционе в прокачку не входит, как и раньше.
+-- GetRecipeEconomy): при «Продажа торговцу» — только торговец или распыление; при снятой галке —
+-- лучший из всех доступных каналов (торговец, аукцион -5%, распыление).
 function ns.GetSkillUpReturn(alts, deductVendor)
-	local vendor = (deductVendor and alts and alts.vendor) or 0
-	local de = (alts and alts.disenchant) or 0
-	if de > vendor then
-		return de, "disenchant"
+	if not alts then
+		return 0, nil
 	end
-	return vendor, (vendor > 0) and "vendor" or nil
+	local best = 0
+	local bestSrc = nil
+	local vendor = alts.vendor or 0
+	if vendor > best then
+		best = vendor
+		bestSrc = "vendor"
+	end
+	if not deductVendor then
+		local ah = alts.ah or 0
+		if ah > best then
+			best = ah
+			bestSrc = "ah"
+		end
+	end
+	local de = alts.disenchant or 0
+	if de > best then
+		best = de
+		bestSrc = "disenchant"
+	end
+	return best, bestSrc
 end
 
 local OUTPUT_SOURCES = { "vendor", "ah", "disenchant" }
