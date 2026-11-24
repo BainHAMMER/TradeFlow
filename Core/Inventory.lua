@@ -10,6 +10,8 @@ ns.invRev = 1            -- Ревизия инвентаря для мгнов�
 
 local craftCountCache = {}
 local craftCountCacheRev = 0
+local subCountCache = {}
+local subCountCacheRev = 0
 local bagScanPending = false
 local bankOpen = false
 
@@ -294,7 +296,29 @@ function ns:GetCraftableReagentCount(itemID, visiting)
 	if not itemID or itemID <= 0 then
 		return 0, 0, 0
 	end
-	visiting = visiting or {}
+	-- Вызов верхнего уровня (без visiting) запоминаем до смены ревизии инвентаря: один и тот же
+	-- промежуточный реагент (ткань, нити, полосы) входит в десятки рецептов, и без кэша его дерево
+	-- пересчитывалось для каждого рецепта профессии со всеми вызовами GetItemCount.
+	-- Вложенные вызовы не кэшируются: их результат зависит от того, какие предметы уже в visiting.
+	local topLevel = (visiting == nil)
+	if topLevel then
+		if subCountCacheRev ~= self.invRev then
+			subCountCache = {}
+			subCountCacheRev = self.invRev
+		end
+		local cached = subCountCache[itemID]
+		if cached then
+			return cached[1], cached[2], cached[3]
+		end
+	end
+	local bag, vendor, bank = self:ComputeCraftableReagentCount(itemID, visiting or {})
+	if topLevel then
+		subCountCache[itemID] = { bag, vendor, bank }
+	end
+	return bag, vendor, bank
+end
+
+function ns:ComputeCraftableReagentCount(itemID, visiting)
 	if visiting[itemID] then
 		return 0, 0, 0
 	end

@@ -979,6 +979,7 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 	local pendingFav = self.pendingBlizzFavorites
 	local now = GetTime and GetTime() or 0
 	local newlyLearned = false
+	local recipesChanged = false
 
 	local recipeIDs = C_TradeSkillUI.GetAllRecipeIDs and C_TradeSkillUI.GetAllRecipeIDs() or {}
 	for _, recipeID in ipairs(recipeIDs) do
@@ -1044,22 +1045,32 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 			end
 
 			local bundledSL = self.RecipeData and self.RecipeData[recipeID] and self.RecipeData[recipeID].skillLine
-			self.liveRecipes[recipeID] = {
-				recipeID = recipeID,
-				skillLine = bundledSL or skillLine,
-				name = info.name,
-				icon = info.icon,
-				categoryID = catID,
-				categoryName = self.categoriesBySkill[skillLine][catID],
-				learned = info.learned and true or false,
-				favorite = isFav,
-				difficulty = diffKey,
-				outputItemID = outItemID,
-				numMade = numMade,
-				reagents = reagents,
-				recipeType = recipeType,
-				sourceText = (type(info.sourceText) == "string" and info.sourceText ~= "") and info.sourceText or nil,
-			}
+			local isLearned = info.learned and true or false
+			-- Кэши счётчиков, остатка по очереди, прибыли и маршрута сбрасываем только при реальных
+			-- изменениях рецепта: после каждого крафта TRADE_SKILL_LIST_UPDATE пересканирует профессию,
+			-- и безусловный InvalidateCraftCounts заставлял пересчитывать всё заново
+			if not prevLive or prevLive.reagents ~= reagents or prevLive.outputItemID ~= outItemID
+				or prevLive.numMade ~= numMade or prevLive.learned ~= isLearned
+				or prevLive.difficulty ~= diffKey or prevLive.favorite ~= isFav then
+				recipesChanged = true
+			end
+			-- Запись обновляется на месте: новая таблица на каждый рецепт при каждом скане давала мусор
+			local live = prevLive or {}
+			live.recipeID = recipeID
+			live.skillLine = bundledSL or skillLine
+			live.name = info.name
+			live.icon = info.icon
+			live.categoryID = catID
+			live.categoryName = self.categoriesBySkill[skillLine][catID]
+			live.learned = isLearned
+			live.favorite = isFav
+			live.difficulty = diffKey
+			live.outputItemID = outItemID
+			live.numMade = numMade
+			live.reagents = reagents
+			live.recipeType = recipeType
+			live.sourceText = (type(info.sourceText) == "string" and info.sourceText ~= "") and info.sourceText or nil
+			self.liveRecipes[recipeID] = live
 
 			if outItemID and outItemID > 0 and self.RegisterProducedItem then
 				self:RegisterProducedItem(outItemID, recipeID)
@@ -1071,7 +1082,7 @@ function ns:ScanActiveTradeSkill(preserveSkillLine)
 		self.charDB.favorites = favMap
 		self.charDB.professions = self.playerProfessions
 	end
-	if self.InvalidateCraftCounts then
+	if (recipesChanged or newlyLearned or addedProf) and self.InvalidateCraftCounts then
 		self:InvalidateCraftCounts()
 	end
 	if (newlyLearned or addedProf) and self.InvalidatePrices then
