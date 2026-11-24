@@ -715,10 +715,11 @@ local function CollectBankMatches()
 				break
 			end
 			local s = table.remove(pool, bestIdx)
-			s.take = math.min(rem, s.count)
+			local take = math.min(rem, s.count)
+			s.take = take
 			picked[#picked + 1] = s
-			entry.totalTake = entry.totalTake + s.count
-			rem = rem - s.count
+			entry.totalTake = entry.totalTake + take
+			rem = rem - take
 		end
 		entry.slots = picked
 	end
@@ -727,6 +728,39 @@ end
 
 function ns:GetBankShoppingMatches()
 	return CollectBankMatches()
+end
+
+local function FindFreePlayerBagSlot(itemID)
+	local GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
+	local GetFree = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+	local reagentBag = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
+	local itemFamily = (itemID and C_Item and C_Item.GetItemFamily and C_Item.GetItemFamily(itemID))
+		or (itemID and GetItemFamily and GetItemFamily(itemID))
+		or 0
+	for _, bag in ipairs(ns:GetPlayerContainerIDs()) do
+		if bag ~= reagentBag then
+			local free, family
+			if GetFree then
+				free, family = GetFree(bag)
+			end
+			local bagOk = (not family or family == 0)
+				or (itemFamily and itemFamily > 0 and bit and bit.band and bit.band(itemFamily, family) ~= 0)
+			if bagOk and (not free or free > 0) then
+				local slots = GetNumSlots and GetNumSlots(bag) or 0
+				for slot = 1, slots do
+					if not (GetID and GetID(bag, slot)) then
+						local _, locked = ReadContainerSlot(bag, slot, GetInfo)
+						if not locked then
+							return bag, slot
+						end
+					end
+				end
+			end
+		end
+	end
+	return nil, nil
 end
 
 local function FinishBankWithdraw(job)
@@ -787,7 +821,10 @@ function ns:WithdrawBankShoppingList()
 		self:LogTrace("WithdrawBank", #matches .. " items")
 	end
 	local UseItem = (C_Container and C_Container.UseContainerItem) or UseContainerItem
+	local SplitItem = (C_Container and C_Container.SplitContainerItem) or SplitContainerItem
+	local PickupItem = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
 	local GetID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+	local GetInfo = (C_Container and C_Container.GetContainerItemInfo) or GetContainerItemInfo
 	if not UseItem then
 		return
 	end
@@ -814,6 +851,8 @@ function ns:WithdrawBankShoppingList()
 					bag = s.bag,
 					slot = s.slot,
 					count = s.count,
+					take = s.take or s.count,
+					retries = 0,
 				}
 			end
 		end
@@ -858,13 +897,42 @@ function ns:WithdrawBankShoppingList()
 			end
 			return
 		end
+		local curCount, curLocked = ReadContainerSlot(s.bag, s.slot, GetInfo)
+		if curLocked then
+			if (s.retries or 0) < 4 and C_Timer and C_Timer.After then
+				s.retries = (s.retries or 0) + 1
+				table.insert(job.slotQueue, 1, s)
+				C_Timer.After(0.15, StepNext)
+				return
+			end
+			FinishBankWithdraw(job)
+			return
+		end
 
+		local wantTake = math.min(s.take or curCount, curCount)
 		if ns.LogTrace then
-			ns:LogTrace("BankStep", "bag=" .. tostring(s.bag) .. " slot=" .. tostring(s.slot) .. " x" .. tostring(s.count))
+			ns:LogTrace("BankStep", "bag=" .. tostring(s.bag) .. " slot=" .. tostring(s.slot) .. " " .. tostring(wantTake) .. "/" .. tostring(curCount))
 		end
 
 		job.steps = job.steps + 1
-		local movedAny = RunSafe("BankUseItem", UseItem, s.bag, s.slot)
+		local movedAny = false
+		if wantTake > 0 and wantTake < curCount and SplitItem and PickupItem then
+			local dstBag, dstSlot = FindFreePlayerBagSlot(s.itemID)
+			if dstBag and dstSlot then
+				local okSplit = RunSafe("BankSplitItem", SplitItem, s.bag, s.slot, wantTake)
+				if okSplit and (not CursorHasItem or CursorHasItem()) then
+					movedAny = RunSafe("BankPickupItem", PickupItem, dstBag, dstSlot)
+				end
+				if CursorHasItem and CursorHasItem() and ClearCursor then
+					ClearCursor()
+				end
+			end
+			if not movedAny then
+				movedAny = RunSafe("BankUseItem", UseItem, s.bag, s.slot)
+			end
+		else
+			movedAny = RunSafe("BankUseItem", UseItem, s.bag, s.slot)
+		end
 		if not movedAny then
 			FinishBankWithdraw(job)
 			return
