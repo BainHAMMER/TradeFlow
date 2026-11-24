@@ -944,9 +944,13 @@ function ProfitMod:RenderRows()
 					local kindKey = "PROFIT_LOG_KIND_" .. string.upper(e.kind or "ah_buy")
 					local kindTag = L[kindKey] or e.kind or ""
 					local amt = e.amount or 0
-					if cnt > 1 then
+					if cnt > 1 and e.kind ~= "ah_deposit" then
 						local unitP = math.floor(math.abs(amt) / cnt + 0.5)
-						row.sub:SetText(string.format(L["PROFIT_LOG_UNIT_FMT"], kindTag, ns.FormatMoney(unitP)))
+						if unitP > 0 then
+							row.sub:SetText(string.format(L["PROFIT_LOG_UNIT_FMT"], kindTag, ns.FormatMoney(unitP)))
+						else
+							row.sub:SetText(kindTag)
+						end
 					else
 						row.sub:SetText(kindTag)
 					end
