@@ -2223,25 +2223,55 @@ function ns:RefreshRankBarOnly()
 	f.rankBar.text:SetText(string.format("%s  %d / %d", profName, rank, maxRank))
 end
 
+-- Перерисовка окна с дебаунсом «по затишью»: после крафта подряд приходят UNIT_SPELLCAST_SUCCEEDED
+-- (очередь), BAG_UPDATE (сумки, скан через 0.08 с) и TRADE_SKILL_LIST_UPDATE (скан профессии через 0.15 с).
+-- Короткий дебаунс с первого вызова давал на один крафт три полных RefreshMainWindow с пересчётом
+-- всех рецептов. Теперь окно перерисовывается, когда запросы утихли на VISIBLE_REFRESH_QUIET,
+-- а после крафта ещё и не раньше ns.craftSettleUntil (ns:MarkCraftSettle), чтобы сумки и скан
+-- профессии успели прийти; но не позже VISIBLE_REFRESH_MAX_WAIT после первого запроса.
+local VISIBLE_REFRESH_QUIET = 0.1
+local VISIBLE_REFRESH_MAX_WAIT = 0.5
+local CRAFT_SETTLE_TIME = 0.3
 local pendingVisibleRefresh = false
+local visibleRefreshFirstAt = 0
+local visibleRefreshLastAt = 0
+
+function ns:MarkCraftSettle()
+	if GetTime then
+		self.craftSettleUntil = GetTime() + CRAFT_SETTLE_TIME
+	end
+end
+
+local function VisibleRefreshCheck()
+	local now = GetTime()
+	local readyAt = math.max(visibleRefreshLastAt + VISIBLE_REFRESH_QUIET, ns.craftSettleUntil or 0)
+	local waitLeft = math.min(readyAt, visibleRefreshFirstAt + VISIBLE_REFRESH_MAX_WAIT) - now
+	if waitLeft > 0.005 then
+		C_Timer.After(waitLeft, VisibleRefreshCheck)
+		return
+	end
+	pendingVisibleRefresh = false
+	if ns.mainFrame and ns.mainFrame:IsShown() then
+		ns:RefreshMainWindow()
+	end
+end
+
 function ns:RefreshVisibleUI()
 	if not (self.mainFrame and self.mainFrame:IsShown()) then
 		return
 	end
+	if not (C_Timer and C_Timer.After and GetTime) then
+		self:RefreshMainWindow()
+		return
+	end
+	local now = GetTime()
+	visibleRefreshLastAt = now
 	if pendingVisibleRefresh then
 		return
 	end
-	if C_Timer and C_Timer.After then
-		pendingVisibleRefresh = true
-		C_Timer.After(0.05, function()
-			pendingVisibleRefresh = false
-			if ns.mainFrame and ns.mainFrame:IsShown() then
-				ns:RefreshMainWindow()
-			end
-		end)
-	else
-		self:RefreshMainWindow()
-	end
+	pendingVisibleRefresh = true
+	visibleRefreshFirstAt = now
+	C_Timer.After(VISIBLE_REFRESH_QUIET, VisibleRefreshCheck)
 end
 
 function ns:OnCombatEnded()

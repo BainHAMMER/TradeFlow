@@ -15,6 +15,8 @@ local remPoolCache = {
 	bankPool = nil,
 	bagCounts = {},
 	bankCounts = {},
+	bagSub = {},
+	bankSub = {},
 }
 
 function ns:GetQueue()
@@ -287,17 +289,19 @@ local function GetRemainingPool(self, includeBank, allowSub)
 		remPoolCache.bankPool = nil
 		remPoolCache.bagCounts = {}
 		remPoolCache.bankCounts = {}
+		remPoolCache.bagSub = {}
+		remPoolCache.bankSub = {}
 	end
 	if includeBank then
 		if not remPoolCache.bankPool then
 			remPoolCache.bankPool = BuildRemainingPool(self, true, allowSub)
 		end
-		return remPoolCache.bankPool, remPoolCache.bankCounts
+		return remPoolCache.bankPool, remPoolCache.bankCounts, remPoolCache.bankSub
 	else
 		if not remPoolCache.bagPool then
 			remPoolCache.bagPool = BuildRemainingPool(self, false, allowSub)
 		end
-		return remPoolCache.bagPool, remPoolCache.bagCounts
+		return remPoolCache.bagPool, remPoolCache.bagCounts, remPoolCache.bagSub
 	end
 end
 
@@ -317,7 +321,7 @@ function ns:GetRemainingCraftableCount(recipeID, includeBank)
 		return best, d or 0, wc or 0, wv or 0
 	end
 	local allowSub = not (self.db and self.db.options and self.db.options.autoSubcrafts == false)
-	local pool, countCache = GetRemainingPool(self, includeBank == true, allowSub)
+	local pool, countCache, subCache = GetRemainingPool(self, includeBank == true, allowSub)
 	local cached = countCache[recipeID]
 	if cached then
 		return cached[1], cached[2], cached[3], cached[4]
@@ -331,7 +335,14 @@ function ns:GetRemainingCraftableCount(recipeID, includeBank)
 		local have = math.max(0, pool[r.itemID] or 0)
 		local subD, subV = 0, 0
 		if allowSub then
-			subD, subV = GetCraftableReagentFromPool(r.itemID, pool)
+			-- Пул после сборки не меняется, поэтому докрафт реагента из него считаем один раз на пул,
+			-- а не заново для каждого рецепта списка
+			local sub = subCache[r.itemID]
+			if not sub then
+				sub = { GetCraftableReagentFromPool(r.itemID, pool) }
+				subCache[r.itemID] = sub
+			end
+			subD, subV = sub[1], sub[2]
 		end
 		direct = math.min(direct, math.floor(have / r.quantity))
 		withCraft = math.min(withCraft, math.floor((have + subD) / r.quantity))
@@ -762,6 +773,11 @@ castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
 				isSubcraft = (step.isSubcraft == true)
 				break
 			end
+		end
+		-- Крафт рецепта: следом придут сумки и скан профессии, перерисовку окна откладываем до них
+		if (matchedIndex or (ns.liveRecipes and ns.liveRecipes[spellID]) or (ns.RecipeData and ns.RecipeData[spellID]))
+			and ns.MarkCraftSettle then
+			ns:MarkCraftSettle()
 		end
 		if ns.NotifyModules then
 			ns:NotifyModules("OnCraftSucceeded", spellID, isSubcraft)
