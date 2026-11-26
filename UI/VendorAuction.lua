@@ -382,12 +382,13 @@ function ns:BuyVendorShoppingList(onlyItemID)
 	if vendorBar and vendorBar.btn then
 		vendorBar.btn:SetEnabled(false)
 	end
+	local buyCalls = {}
 	for _, m in ipairs(matches) do
 		if not onlyItemID or m.itemID == onlyItemID then
 			if m.stackSize > 1 then
 				-- Для предметов, продающихся пачками (напр. по 5 шт), BuyMerchantItem(slot) без аргумента покупает 1 пачку
 				for _ = 1, m.batches do
-					BuyMerchantItem(m.slot)
+					buyCalls[#buyCalls + 1] = { slot = m.slot }
 				end
 			else
 				local remainingBatches = m.batches
@@ -395,7 +396,7 @@ function ns:BuyVendorShoppingList(onlyItemID)
 				maxBatch = math.max(1, maxBatch)
 				while remainingBatches > 0 do
 					local buyNow = math.min(remainingBatches, maxBatch)
-					BuyMerchantItem(m.slot, buyNow)
+					buyCalls[#buyCalls + 1] = { slot = m.slot, count = buyNow }
 					remainingBatches = remainingBatches - buyNow
 				end
 			end
@@ -443,11 +444,35 @@ function ns:BuyVendorShoppingList(onlyItemID)
 			ns:RefreshQueueAndShoppingView()
 		end
 	end
-	if C_Timer and C_Timer.After then
-		C_Timer.After(0.25, Finish)
-	else
-		Finish()
+
+	-- Отправляем покупки небольшими порциями, чтобы сервер не отбрасывал вызовы BuyMerchantItem по burst-троттлингу
+	local BUY_CALLS_PER_TICK = 4
+	local callIdx = 1
+	local function PumpBuyCalls()
+		if not (MerchantFrame and MerchantFrame:IsShown()) then
+			Finish()
+			return
+		end
+		local sent = 0
+		while callIdx <= #buyCalls and sent < BUY_CALLS_PER_TICK do
+			local c = buyCalls[callIdx]
+			callIdx = callIdx + 1
+			sent = sent + 1
+			if c.count then
+				BuyMerchantItem(c.slot, c.count)
+			else
+				BuyMerchantItem(c.slot)
+			end
+		end
+		if callIdx <= #buyCalls and C_Timer and C_Timer.After then
+			C_Timer.After(0.15, PumpBuyCalls)
+		elseif C_Timer and C_Timer.After then
+			C_Timer.After(0.25, Finish)
+		else
+			Finish()
+		end
 	end
+	PumpBuyCalls()
 end
 
 function ns:RefreshVendorBar()
