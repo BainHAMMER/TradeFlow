@@ -2,6 +2,21 @@
 
 Detailed implementation notes for developers. End-user release notes live in [CHANGELOG.md](CHANGELOG.md).
 
+## v1.0.16
+### RU
+- **Быстрый батч-скан Снайпера:** `C_AuctionHouse.SearchForItemKeys` (чанки по 100, `AUCTION_HOUSE_BROWSE_RESULTS_UPDATED`/`ADDED`, `HasFullBrowseResults`/`RequestMoreBrowseResults`, фолбэк на `Auctionator.API.v1.MultiSearchAdvanced`), обход 5с троттлинга в `Core/Prices.lua` (`ProcessBrowseResults`) для активного батча и очистка пропавших хитов.
+- **Периодический авто-скан и дозагрузка стакана:** тикер `ScheduleNextSnipeAutoScan` (`1–15s`, `snipeAutoScanInterval`) с защитами `pendingBuy`, `IsThrottledMessageSystemReady`, `lastExternalAhActivityAt`; `RequestTopSnipeHitDetails` (`SendSearchQuery`, 3с таймаут по `detailQueryToken`, `SNIPE_BUY_WAIT` на кнопке до прихода `COMMODITY_SEARCH_RESULTS_UPDATED`).
+- **EMA авто-подстройка и управление целями:** `UpdateSnipeMarketEMA` (`alpha=0.25`, `EMA_SAMPLE_INTERVAL=15s`, `EMA_LOW_STREAK_THRESHOLD=4`, `EMA_MAX_UP_MULT=1.5`), `GetSnipeLiveMarketPrice`, `SetSnipeTargetEnabled`, инлайн-`priceBox` с `editingItemID` защитой при скролле/пересортировке, `ResetSnipeTargetPin`, синхронизация `snipeDiscountPct` (`5–80%`).
+- **UI и упаковка:** сохранение `windowPos` (`absRight`/`absTop`, `ApplyUIScale(skipSave)`), `TradeFlowMainFrame` переведён на `HIGH` + динамический `FrameLevel + 20` для `TradeFlowSecureProfProxy`, `d.cooldownText` в шапке деталей, тултипы для всех опций `ToggleSettingsFrame` и модулей (`settingsTipKey`), `CHANGELOG_TECH.md` добавлен в `.pkgmeta` `ignore`.
+
+### EN
+- **Fast Batch Sniper Scan:** Native `C_AuctionHouse.SearchForItemKeys` (100-item chunks, pagination via `AUCTION_HOUSE_BROWSE_RESULTS_ADDED`, fallback to `MultiSearchAdvanced`), batch-aware `ProcessBrowseResults` in `Core/Prices.lua`, and stale-hit clearing.
+- **Periodic Auto-Scan & Hit Breakdown:** `ScheduleNextSnipeAutoScan` (`1–15s`) with `pendingBuy`/throttle/external-activity guards; `RequestTopSnipeHitDetails` (`SendSearchQuery` + 3s `detailQueryToken` guard + `SNIPE_BUY_WAIT` state).
+- **EMA Repricing & Target Controls:** `UpdateSnipeMarketEMA`, `GetSnipeLiveMarketPrice`, per-item `enabled` toggle, inline `priceBox` with `editingItemID` scroll/re-sort safety, `ResetSnipeTargetPin`, and dynamic `snipeDiscountPct`.
+- **UI & Packaging:** Scale-independent `windowPos` persistence (`ApplyUIScale(skipSave)`), `HIGH` strata on `TradeFlowMainFrame` + dynamic `FrameLevel + 20` on `TradeFlowSecureProfProxy`, `d.cooldownText` header anchor, Settings tooltips (`settingsTipKey`), and `.pkgmeta` ignore for `CHANGELOG_TECH.md`.
+
+---
+
 ## v1.0.15
 ### RU
 - **Оптимизация производительности (устранена просадка FPS после крафта):**

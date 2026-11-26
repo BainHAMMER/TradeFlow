@@ -1,5 +1,32 @@
 # Changelog / Список изменений
 
+## v1.0.16
+### RU
+- **Ускоренный Снайпер аукциона:** сканирование списка целей теперь занимает доли секунды и не блокирует вкладку покупок; добавлен автоматический опрос при открытом аукционе (интервал `1–15` сек в настройках + быстрая галка «Авто» на плашке).
+- **Удобное управление целями Снайпера:**
+  - Плашка Снайпера перенесена под нижние вкладки аукциона.
+  - В списке Снайпера появились галки вкл/выкл на каждом предмете (пауза без удаления), поле для ручной фиксации точного порога цены и кнопка «Авто» для возврата к авто-подстройке.
+  - Добавлена авто-подстройка порогов под текущий рынок и настраиваемый процент скидки (`5–80%`).
+  - Для найденных хитов автоматически подгружается точное количество дешёвых штук до выкупа.
+- **Удобство и исправления интерфейса:**
+  - Окно TradeFlow теперь запоминает своё положение между перезапусками и `/reload` при любом масштабе.
+  - Окно TradeFlow больше не становится некликабельным при открытии аукциона.
+  - Перенесён таймер кулдауна в правый верхний угол деталей рецепта, упрощены тултипы и добавлены подсказки ко всем пунктам настроек.
+
+### EN
+- **Faster Auction House Sniper:** scanning sniper targets now takes a fraction of a second without blocking the Shopping tab; added periodic auto-scanning while the Auction House is open (configurable `1–15s` interval + quick `Auto` toggle on the bar).
+- **Sniper Target Controls:**
+  - Moved the Sniper bar below the bottom Auction House tabs.
+  - Added per-item enable/pause checkboxes, an inline price input to pin exact thresholds, and an `Auto` button to unpin.
+  - Added automatic price adjustment to current market prices with a configurable target discount (`5–80%`).
+  - Automatically fetches exact cheap lot counts for spotted hits before buyout.
+- **UI Improvements & Fixes:**
+  - TradeFlow now remembers its window position across `/reload` and game sessions at any UI scale.
+  - Fixed the TradeFlow window becoming unclickable when opening the Auction House.
+  - Moved the recipe cooldown label to the top-right of Recipe Details, simplified tooltips, and added tooltips to all Settings options.
+
+---
+
 ## v1.0.15
 ### RU
 - Убраны просадки FPS после крафта из очереди (спасибо `frostmx`).
