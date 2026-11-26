@@ -152,8 +152,8 @@ function ns:AttachSecureProfProxy(btn, skillLine)
 	end
 	secureProfProxy.targetBtn = btn
 	secureProfProxy.skillLine = skillLine
-	secureProfProxy:SetFrameStrata("HIGH")
-	secureProfProxy:SetFrameLevel(50)
+	secureProfProxy:SetFrameStrata((btn.GetFrameStrata and btn:GetFrameStrata()) or "HIGH")
+	secureProfProxy:SetFrameLevel(((btn.GetFrameLevel and btn:GetFrameLevel()) or 50) + 20)
 	secureProfProxy:ClearAllPoints()
 	secureProfProxy:SetAllPoints(btn)
 	secureProfProxy:SetAttribute("type", "spell")

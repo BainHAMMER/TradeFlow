@@ -1452,13 +1452,21 @@ RequestTopSnipeHitDetails = function()
 	if (now - (lastDetailQueryAt[itemID] or 0)) < 2.0 then
 		return
 	end
+	detailQueryToken = detailQueryToken + 1
+	local dTok = detailQueryToken
 	if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
 		pendingSnipeDetailQueued = itemID
+		if C_Timer and C_Timer.After then
+			C_Timer.After(3.0, function()
+				if detailQueryToken == dTok and pendingSnipeDetailQueued == itemID then
+					pendingSnipeDetailQueued = nil
+					ns:RefreshSnipeBar()
+				end
+			end)
+		end
 		return
 	end
 	pendingSnipeDetailQueued = nil
-	detailQueryToken = detailQueryToken + 1
-	local dTok = detailQueryToken
 	pendingSnipeDetailItemID = itemID
 	lastDetailQueryAt[itemID] = now
 	local key = C_AuctionHouse.MakeItemKey and C_AuctionHouse.MakeItemKey(itemID) or { itemID = itemID }
@@ -2404,6 +2412,9 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			pendingSnipeDetailQueued = nil
 			if RequestTopSnipeHitDetails then
 				RequestTopSnipeHitDetails()
+			end
+			if not pendingSnipeDetailItemID and not pendingSnipeDetailQueued then
+				ns:RefreshSnipeBar()
 			end
 		end
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" then
