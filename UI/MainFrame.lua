@@ -173,6 +173,41 @@ function ns:GetUIScale()
 	return math.floor(s * 20 + 0.5) / 20
 end
 
+function ns:SaveMainWindowPosition()
+	local f = self.mainFrame
+	if not (f and self.db and self.db.options) then
+		return
+	end
+	local right, top = f:GetRight(), f:GetTop()
+	local scale = f:GetScale() or 1.0
+	if right and top and right > 0 and top > 0 and scale > 0 then
+		self.db.options.windowPos = {
+			absRight = math.floor(right * scale + 0.5),
+			absTop = math.floor(top * scale + 0.5),
+		}
+	end
+end
+
+function ns:RestoreMainWindowPosition()
+	local f = self.mainFrame
+	local pos = self.db and self.db.options and self.db.options.windowPos
+	if not (f and type(pos) == "table") then
+		return false
+	end
+	local absRight = tonumber(pos.absRight)
+	local absTop = tonumber(pos.absTop)
+	if not (absRight and absTop and absRight > 0 and absTop > 0) then
+		return false
+	end
+	local scale = f:GetScale() or 1.0
+	if scale <= 0 then
+		scale = 1.0
+	end
+	f:ClearAllPoints()
+	f:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
+	return true
+end
+
 function ns:ApplyUIScale()
 	if not self.mainFrame then
 		return
@@ -190,6 +225,7 @@ function ns:ApplyUIScale()
 		local absTop = top * oldScale
 		self.mainFrame:ClearAllPoints()
 		self.mainFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
+		self:SaveMainWindowPosition()
 	end
 end
 
@@ -553,7 +589,12 @@ function ns:CreateMainFrame()
 	f:EnableMouse(true)
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
-	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		if ns.SaveMainWindowPosition then
+			ns:SaveMainWindowPosition()
+		end
+	end)
 	f:SetBackdrop({
 		bgFile = "Interface\\FrameGeneral\\UI-Background-Rock",
 		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
@@ -567,6 +608,9 @@ function ns:CreateMainFrame()
 		end
 	end)
 	f:SetScript("OnHide", function()
+		if not ns.isRebuildingFrame and ns.SaveMainWindowPosition then
+			ns:SaveMainWindowPosition()
+		end
 		if ns.StopCooldownTicker then
 			ns:StopCooldownTicker()
 		end
@@ -1178,6 +1222,7 @@ function ns:CreateMainFrame()
 	self.mainFrame = f
 	self:ApplyUIScale()
 	self:ApplyWindowLayout(false)
+	self:RestoreMainWindowPosition()
 	return f
 end
 
@@ -2399,7 +2444,7 @@ function ns:ToggleSettingsFrame()
 			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
 			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
 			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
-			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      defaultTrue = false, invalidatePrices = false },
+			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      tip = L["OPT_AH_STOCK_TIP"], defaultTrue = false, invalidatePrices = false },
 		}
 		for _, mSpec in ipairs((self.GetModuleSettingsSpecs and self:GetModuleSettingsSpecs()) or {}) do
 			opts[#opts + 1] = mSpec
@@ -2448,6 +2493,15 @@ function ns:ToggleSettingsFrame()
 					end
 				end
 			end)
+			if o.tip then
+				cb:SetScript("OnEnter", function(self)
+					GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+					GameTooltip:SetText(o.label, 1, 0.82, 0)
+					GameTooltip:AddLine(o.tip, 0.85, 0.85, 0.85, true)
+					GameTooltip:Show()
+				end)
+				cb:SetScript("OnLeave", GameTooltip_Hide)
+			end
 			sf.checks[i] = { cb = cb, opt = o }
 		end
 

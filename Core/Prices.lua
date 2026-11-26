@@ -792,8 +792,59 @@ for _, ev in ipairs({
 	"TRAINER_UPDATE",
 	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
+	"AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
 }) do
 	pcall(priceFrame.RegisterEvent, priceFrame, ev)
+end
+
+local function ProcessBrowseResults(results)
+	if type(results) ~= "table" or #results == 0 then
+		return
+	end
+	local now = time and time() or 0
+	local snipeBatchSet = ns.GetActiveSnipeBatchSet and ns:GetActiveSnipeBatchSet()
+	local byItem = {}
+	for _, r in ipairs(results) do
+		local itemID = r and r.itemKey and r.itemKey.itemID
+		local minP = r and r.minPrice or 0
+		local qty = r and r.totalQuantity or 0
+		if itemID and IsTrackedAhItem(itemID) and minP > 0 and qty > 0 then
+			local agg = byItem[itemID]
+			if not agg then
+				byItem[itemID] = { minPrice = minP, totalQty = qty }
+			else
+				if minP < agg.minPrice then
+					agg.minPrice = minP
+				end
+				agg.totalQty = agg.totalQty + qty
+			end
+		end
+	end
+	local updatedAny = false
+	for itemID, agg in pairs(byItem) do
+		local inSnipeBatch = snipeBatchSet and snipeBatchSet[itemID] == true
+		local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
+		local keepTiers = prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 60
+		if inSnipeBatch then
+			-- В явном батч-скане снайпера обновляем сразу, обходя 5с троттлинг;
+			-- детальные тиры сохраняем только если мин. цена и объём не изменились.
+			if keepTiers and prev.price == agg.minPrice and prev.total == agg.totalQty then
+				prev.ts = now
+				if ns.NotifyModules then
+					ns:NotifyModules("OnAuctionStockUpdated", itemID)
+				end
+			else
+				RecordAuctionStock(itemID, agg.minPrice, agg.totalQty, agg.totalQty, nil, true)
+			end
+			updatedAny = true
+		elseif not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then
+			RecordAuctionStock(itemID, agg.minPrice, agg.totalQty, agg.totalQty, nil, true)
+			updatedAny = true
+		end
+	end
+	if updatedAny then
+		SchedulePriceInvalidation()
+	end
 end
 
 priceFrame:SetScript("OnEvent", function(_, event, arg1)
@@ -865,25 +916,9 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 			SchedulePriceInvalidation()
 		end
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" and C_AuctionHouse and C_AuctionHouse.GetBrowseResults then
-		local results = C_AuctionHouse.GetBrowseResults()
-		if type(results) == "table" then
-			local now = time and time() or 0
-			local updatedAny = false
-			for _, r in ipairs(results) do
-				local itemID = r and r.itemKey and r.itemKey.itemID
-				if itemID and IsTrackedAhItem(itemID) and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
-					local prev = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
-					local keepTiers = prev and not prev.isAggregate and prev.tiers and #prev.tiers >= 1 and (now - (prev.ts or 0)) <= 60
-					if not keepTiers and (not prev or (now - (prev.ts or 0)) > 5) then
-						RecordAuctionStock(itemID, r.minPrice, r.totalQuantity, r.totalQuantity, nil, true)
-						updatedAny = true
-					end
-				end
-			end
-			if updatedAny then
-				SchedulePriceInvalidation()
-			end
-		end
+		ProcessBrowseResults(C_AuctionHouse.GetBrowseResults())
+	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" and type(arg1) == "table" then
+		ProcessBrowseResults(arg1)
 	elseif event == "MERCHANT_SHOW" then
 		local changed = false
 		if GetMerchantNumItems and GetMerchantItemInfo and GetMerchantItemLink then

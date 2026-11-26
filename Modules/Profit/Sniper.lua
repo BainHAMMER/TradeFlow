@@ -8,12 +8,25 @@ local MAX_SNIPE_STOCK_AGE = 3600 -- не сигналим по вчерашне�
 local DEFAULT_SNIPE_MAX_SPEND = 100000 -- 10g по умолчанию за 1 клик выкупа
 local DEFAULT_SNIPE_MAX_QTY = 200
 local DEFAULT_SNIPE_MIN_RESERVE = 0
+local DEFAULT_SNIPE_AUTOSCAN_INTERVAL = 5
+local MIN_SNIPE_AUTOSCAN_INTERVAL = 1
+local MAX_SNIPE_AUTOSCAN_INTERVAL = 15
+local DEFAULT_SNIPE_DISCOUNT_PCT = 20
+local MIN_SNIPE_DISCOUNT_PCT = 5
+local MAX_SNIPE_DISCOUNT_PCT = 80
+local EMA_SAMPLE_INTERVAL = 15
+local EMA_ALPHA = 0.25
+local EMA_LOW_STREAK_THRESHOLD = 4
+local EMA_MAX_UP_MULT = 1.5
+local EXTERNAL_AH_PAUSE_SEC = 6
 local snipeBar = nil
 local sniperSettingsFrame = nil
 local sniperSettingsAnchorKind = nil
 local sniperSettingsSpecialRegistered = false
 local lastSoundAt = -10
 local lastAutoScanAt = -30
+local lastExternalAhActivityAt = -30
+local autoScanTimerToken = 0
 local lastChatHitAt = {}
 local lastSnipeListSig = nil
 local snipeSyncToken = 0
@@ -22,6 +35,162 @@ local hookedAuctionFrames = {}
 local pendingBuy = nil
 local pendingSnipeBid = nil
 local buyTokenCounter = 0
+local SNIPE_BATCH_CHUNK_SIZE = 100
+local SNIPE_BATCH_TIMEOUT = 6.0
+local activeSnipeBatch = nil
+local snipeBatchToken = 0
+local pendingSnipeDetailItemID = nil
+local pendingSnipeDetailQueued = nil
+local lastDetailQueryAt = {}
+
+function ns:GetActiveSnipeBatchSet()
+	return activeSnipeBatch and activeSnipeBatch.chunkSet or nil
+end
+
+function ns:GetSnipeAutoScanInterval()
+	local opts = self.db and self.db.options
+	local v = opts and tonumber(opts.snipeAutoScanInterval)
+	if not v then
+		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+	end
+	v = math.floor(v + 0.5)
+	if v < MIN_SNIPE_AUTOSCAN_INTERVAL then
+		return MIN_SNIPE_AUTOSCAN_INTERVAL
+	elseif v > MAX_SNIPE_AUTOSCAN_INTERVAL then
+		return MAX_SNIPE_AUTOSCAN_INTERVAL
+	end
+	return v
+end
+
+function ns:GetSnipeDiscountPct()
+	local opts = self.db and self.db.options
+	local v = opts and tonumber(opts.snipeDiscountPct)
+	if not v then
+		return DEFAULT_SNIPE_DISCOUNT_PCT
+	end
+	v = math.floor(v + 0.5)
+	if v < MIN_SNIPE_DISCOUNT_PCT then
+		return MIN_SNIPE_DISCOUNT_PCT
+	elseif v > MAX_SNIPE_DISCOUNT_PCT then
+		return MAX_SNIPE_DISCOUNT_PCT
+	end
+	return v
+end
+
+function ns:GetSnipeDiscountRatio()
+	return (100 - self:GetSnipeDiscountPct()) / 100
+end
+
+local function ParseSnipeDiscountPct(text)
+	if text == nil then
+		return DEFAULT_SNIPE_DISCOUNT_PCT
+	end
+	local s = tostring(text):gsub("^%s+", ""):gsub("%s+$", ""):gsub("%%$", "")
+	if s == "" then
+		return DEFAULT_SNIPE_DISCOUNT_PCT
+	end
+	if not s:match("^%d+$") then
+		return nil
+	end
+	local n = tonumber(s)
+	if not n or n < MIN_SNIPE_DISCOUNT_PCT or n > MAX_SNIPE_DISCOUNT_PCT then
+		return nil
+	end
+	return n
+end
+
+function ns:IsSnipeTargetEnabled(target)
+	return target ~= nil and target.enabled ~= false
+end
+
+function ns:GetSnipeLiveMarketPrice(itemID)
+	if not itemID or itemID <= 0 then
+		return nil, nil
+	end
+	local stock = self.realmDB and self.realmDB.ahStock and self.realmDB.ahStock[itemID]
+	local now = time and time() or 0
+	if stock and stock.price and stock.price > 0 then
+		if not stock.ts or stock.ts <= 0 or now <= 0 or (now - stock.ts) <= MAX_SNIPE_STOCK_AGE then
+			return stock.price, "live"
+		end
+	end
+	local p, src = self:GetAuctionPrice(itemID)
+	return p, src
+end
+
+local function UpdateSnipeMarketEMA(target, livePrice, now)
+	if not (target and livePrice and livePrice > 0) then
+		return false
+	end
+	local opts = ns.db and ns.db.options
+	if opts and opts.snipeAutoReprice == false then
+		return false
+	end
+	if target.manual == true then
+		return false
+	end
+	local lastAt = target.lastEmaAt or 0
+	if now > 0 and lastAt > 0 and (now - lastAt) < EMA_SAMPLE_INTERVAL then
+		return false
+	end
+	local ratio = ns:GetSnipeDiscountRatio()
+	if not target.emaPrice or target.emaPrice <= 0 then
+		target.emaPrice = livePrice
+		target.lastEmaAt = now
+		target.lowStreak = 0
+		-- При первичной инициализации якоря не сбиваем уже сработавший хит вниз
+		if livePrice > (target.maxPrice or 0) then
+			local newMax = math.max(1, math.floor(target.emaPrice * ratio + 0.5))
+			if newMax ~= target.maxPrice then
+				target.maxPrice = newMax
+				target.ts = now
+				return true
+			end
+		end
+		return false
+	end
+
+	if livePrice <= (target.maxPrice or 0) then
+		-- Похоже на дешёвый лот: игнорируем разовые выбросы, тянем якорь вниз только при устойчивом падении рынка
+		target.lowStreak = (target.lowStreak or 0) + 1
+		target.lastEmaAt = now
+		if target.lowStreak < EMA_LOW_STREAK_THRESHOLD then
+			return false
+		end
+		target.emaPrice = math.max(1, math.floor(target.emaPrice * (1 - EMA_ALPHA) + livePrice * EMA_ALPHA + 0.5))
+	else
+		target.lowStreak = 0
+		target.lastEmaAt = now
+		local capped = math.min(livePrice, math.max(1, math.floor(target.emaPrice * EMA_MAX_UP_MULT + 0.5)))
+		target.emaPrice = math.max(1, math.floor(target.emaPrice * (1 - EMA_ALPHA) + capped * EMA_ALPHA + 0.5))
+	end
+
+	local newMax = math.max(1, math.floor(target.emaPrice * ratio + 0.5))
+	if newMax ~= target.maxPrice then
+		target.maxPrice = newMax
+		target.ts = now
+		return true
+	end
+	return false
+end
+
+local function ParseAutoScanInterval(text)
+	if text == nil then
+		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+	end
+	local s = tostring(text):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" then
+		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+	end
+	if not s:match("^%d+$") then
+		return nil
+	end
+	local n = tonumber(s)
+	if not n or n < MIN_SNIPE_AUTOSCAN_INTERVAL or n > MAX_SNIPE_AUTOSCAN_INTERVAL then
+		return nil
+	end
+	return n
+end
 
 local function EnsureSnipeDB()
 	if not ns.realmDB then
@@ -45,6 +214,94 @@ local function GetActiveAuctionFrame()
 	return nil
 end
 
+local function StopSnipeAutoScan()
+	autoScanTimerToken = autoScanTimerToken + 1
+end
+
+local ScheduleNextSnipeAutoScan
+
+function ns:SetSnipeAutoScanEnabled(on)
+	local enabled = (on == true)
+	if self.db and self.db.options then
+		self.db.options.snipeAutoScan = enabled
+	end
+	if snipeBar and snipeBar.autoScanCb then
+		snipeBar.autoScanCb:SetChecked(enabled)
+	end
+	if sniperSettingsFrame and sniperSettingsFrame.cbAutoScan then
+		sniperSettingsFrame.cbAutoScan:SetChecked(enabled)
+	end
+	if enabled then
+		ScheduleNextSnipeAutoScan(0.1)
+	else
+		StopSnipeAutoScan()
+	end
+	self:RefreshSnipeUI()
+end
+
+ScheduleNextSnipeAutoScan = function(delayOverride)
+	autoScanTimerToken = autoScanTimerToken + 1
+	local tok = autoScanTimerToken
+	if not (C_Timer and C_Timer.After) then
+		return
+	end
+	if not (C_AuctionHouse and C_AuctionHouse.SearchForItemKeys) then
+		return
+	end
+	if not IsAuctionHouseOpen() then
+		return
+	end
+	if not (ns.IsModuleEnabled and ns:IsModuleEnabled("profit")) then
+		return
+	end
+	if not (ns.db and ns.db.options and ns.db.options.snipeAutoScan == true) then
+		return
+	end
+	if #ns:GetActiveSnipeTargetList() == 0 then
+		return
+	end
+	local delay = delayOverride or ns:GetSnipeAutoScanInterval()
+	if delay < 0.1 then
+		delay = 0.1
+	end
+	C_Timer.After(delay, function()
+		if tok ~= autoScanTimerToken then
+			return
+		end
+		if not IsAuctionHouseOpen() then
+			return
+		end
+		if not (ns.IsModuleEnabled and ns:IsModuleEnabled("profit")) then
+			return
+		end
+		if not (ns.db and ns.db.options and ns.db.options.snipeAutoScan == true) then
+			return
+		end
+		if #ns:GetActiveSnipeTargetList() == 0 then
+			return
+		end
+		if activeSnipeBatch then
+			return
+		end
+		if pendingBuy then
+			ScheduleNextSnipeAutoScan(2.0)
+			return
+		end
+		local now = GetTime and GetTime() or 0
+		local sinceExt = now - lastExternalAhActivityAt
+		if sinceExt >= 0 and sinceExt < EXTERNAL_AH_PAUSE_SEC then
+			ScheduleNextSnipeAutoScan(math.max(0.5, EXTERNAL_AH_PAUSE_SEC - sinceExt + 0.2))
+			return
+		end
+		if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+			ScheduleNextSnipeAutoScan(0.6)
+			return
+		end
+		lastAutoScanAt = now
+		ns:SearchSnipeTargetsOnAH()
+	end)
+end
+
 function ns:GetSnipeTargets()
 	return EnsureSnipeDB()
 end
@@ -61,21 +318,67 @@ function ns:GetSnipeTargetList()
 	return list
 end
 
-function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync)
+function ns:GetActiveSnipeTargetList()
+	local targets = EnsureSnipeDB()
+	local list = {}
+	for _, t in pairs(targets) do
+		if t and t.enabled ~= false then
+			list[#list + 1] = t
+		end
+	end
+	table.sort(list, function(a, b)
+		return (a.itemID or 0) < (b.itemID or 0)
+	end)
+	return list
+end
+
+function ns:SetSnipeTargetEnabled(itemID, enabled)
+	local targets = EnsureSnipeDB()
+	local t = targets[itemID]
+	if not t then
+		return
+	end
+	t.enabled = (enabled == true)
+	if not t.enabled then
+		if self.snipeHits then
+			self.snipeHits[itemID] = nil
+		end
+	else
+		self:EvaluateSnipeItem(itemID, true)
+		if not activeSnipeBatch then
+			ScheduleNextSnipeAutoScan()
+		end
+	end
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+end
+
+function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync, isManual)
 	if not itemID or itemID <= 0 or not maxPrice or maxPrice <= 0 then
 		return false
 	end
 	local targets = EnsureSnipeDB()
+	local prev = targets[itemID]
+	local now = time and time() or 0
+	local liveP = self:GetSnipeLiveMarketPrice(itemID)
 	targets[itemID] = {
 		itemID = itemID,
 		maxPrice = math.max(1, math.floor(maxPrice + 0.5)),
-		recipeID = recipeID,
-		ts = time and time() or 0,
+		recipeID = recipeID or (prev and prev.recipeID),
+		ts = now,
+		enabled = (prev and prev.enabled == false) and false or true,
+		manual = (isManual == true),
+		emaPrice = (liveP and liveP > 0) and liveP or (prev and prev.emaPrice) or nil,
+		lastEmaAt = (liveP and liveP > 0) and now or (prev and prev.lastEmaAt) or 0,
+		lowStreak = 0,
 	}
 	self:EvaluateSnipeItem(itemID, true)
 	if not deferSync then
 		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
+		if not activeSnipeBatch then
+			ScheduleNextSnipeAutoScan()
+		end
 	end
 	return true
 end
@@ -350,9 +653,9 @@ function ns:AddManualSnipeTarget(itemInput, priceInput, explicitItemID)
 			return false
 		end
 	else
-		local curAh = self.GetAuctionPrice and self:GetAuctionPrice(itemID) or nil
+		local curAh = self:GetSnipeLiveMarketPrice(itemID)
 		if curAh and curAh > 0 then
-			maxPrice = math.max(1, math.floor(curAh * 0.80 + 0.5))
+			maxPrice = math.max(1, math.floor(curAh * self:GetSnipeDiscountRatio() + 0.5))
 		else
 			if self.Print then
 				self:Print(L["SNIPE_ADD_NEED_PRICE"])
@@ -360,7 +663,7 @@ function ns:AddManualSnipeTarget(itemInput, priceInput, explicitItemID)
 			return false
 		end
 	end
-	if not self:AddSnipeTarget(itemID, maxPrice, nil, false) then
+	if not self:AddSnipeTarget(itemID, maxPrice, nil, false, priceStr ~= "") then
 		return false
 	end
 	local name, _, _, link, _, hex = self:GetItemDisplay(itemID)
@@ -473,34 +776,76 @@ function ns:ImportShoppingToSnipe(discountRatio)
 	return added
 end
 
+function ns:SetSnipeTargetPrice(itemID, maxPrice, isManual)
+	local targets = EnsureSnipeDB()
+	local t = targets[itemID]
+	if not t or not maxPrice or maxPrice <= 0 then
+		return false
+	end
+	t.maxPrice = math.max(1, math.floor(maxPrice + 0.5))
+	t.manual = (isManual ~= false)
+	t.ts = time and time() or 0
+	t.lowStreak = 0
+	self:EvaluateSnipeItem(itemID, true)
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+	return true
+end
+
+function ns:ResetSnipeTargetPin(itemID)
+	local targets = EnsureSnipeDB()
+	local t = targets[itemID]
+	if not t then
+		return false
+	end
+	local now = time and time() or 0
+	t.manual = false
+	t.lowStreak = 0
+	local cur = self:GetSnipeLiveMarketPrice(itemID)
+	if cur and cur > 0 then
+		t.emaPrice = cur
+		t.lastEmaAt = now
+		t.maxPrice = math.max(1, math.floor(cur * self:GetSnipeDiscountRatio() + 0.5))
+		t.ts = now
+	end
+	self:EvaluateSnipeItem(itemID, true)
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+	return true
+end
+
 function ns:AdjustSnipeTarget(itemID, factor)
 	local targets = EnsureSnipeDB()
 	local t = targets[itemID]
 	if not t then
 		return
 	end
-	t.maxPrice = math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5))
-	self:EvaluateSnipeItem(itemID, true)
-	self:SyncSnipeShoppingList(true)
-	self:RefreshSnipeUI()
+	self:SetSnipeTargetPrice(itemID, math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5)), true)
 end
 
 function ns:RepriceSnipeTargets(ratio)
-	local r = ratio or 0.80
+	local r = ratio or self:GetSnipeDiscountRatio()
+	local discPct = math.max(1, math.floor((1 - r) * 100 + 0.5))
 	local targets = EnsureSnipeDB()
+	local now = time and time() or 0
 	local updated = 0
 	for itemID, t in pairs(targets) do
-		local cur = self:GetAuctionPrice(itemID)
-		if cur and cur > 0 then
-			t.maxPrice = math.max(1, math.floor(cur * r + 0.5))
-			t.ts = time and time() or 0
-			self:EvaluateSnipeItem(itemID, true)
-			updated = updated + 1
+		if not t.manual then
+			local cur = self:GetSnipeLiveMarketPrice(itemID)
+			if cur and cur > 0 then
+				t.maxPrice = math.max(1, math.floor(cur * r + 0.5))
+				t.ts = now
+				t.emaPrice = cur
+				t.lastEmaAt = now
+				t.lowStreak = 0
+				self:EvaluateSnipeItem(itemID, true)
+				updated = updated + 1
+			end
 		end
 	end
 	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
-	self:Print(string.format(L["SNIPE_REPRICED_MSG"], updated))
+	self:Print(string.format(L["SNIPE_REPRICED_MSG"], updated, discPct))
 	return updated
 end
 
@@ -544,7 +889,7 @@ function ns:EvaluateSnipeItem(itemID, silent)
 	end
 	local targets = EnsureSnipeDB()
 	local target = targets[itemID]
-	if not target then
+	if not target or target.enabled == false then
 		self.snipeHits[itemID] = nil
 		return nil
 	end
@@ -553,6 +898,9 @@ function ns:EvaluateSnipeItem(itemID, silent)
 	if not stock or (stock.ts and stock.ts > 0 and now > 0 and (now - stock.ts) > MAX_SNIPE_STOCK_AGE) then
 		self.snipeHits[itemID] = nil
 		return nil
+	end
+	if stock.price and stock.price > 0 and (not stock.ts or stock.ts <= 0 or now <= 0 or (now - stock.ts) <= 60) then
+		UpdateSnipeMarketEMA(target, stock.price, now)
 	end
 
 	local bestQty = nil
@@ -677,7 +1025,7 @@ function ns:SyncSnipeShoppingList(silent)
 	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then
 		return
 	end
-	local targets = self:GetSnipeTargetList()
+	local targets = self:GetActiveSnipeTargetList()
 	local listName = L["SNIPE_LIST_NAME"]
 	local parts = {}
 	for _, t in ipairs(targets) do
@@ -726,48 +1074,19 @@ function ns:SyncSnipeShoppingList(silent)
 	end)
 end
 
-function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
-	if not IsAuctionHouseOpen() then
-		self:Print(L["AH_NOT_OPEN"])
-		return
-	end
+local function RunAuctionatorSnipeSearch(items, skipPriceFilter)
 	local api = Auctionator and Auctionator.API and Auctionator.API.v1
 	if not (api and (api.MultiSearchAdvanced or api.MultiSearchExact)) then
-		self:Print(L["ATR_NOT_FOUND"])
+		ns:Print(L["ATR_NOT_FOUND"])
 		return
 	end
-	if self.LogTrace then
-		self:LogTrace("SnipeSearchAH", tostring(targetOrFilter or "all"))
-	end
-
-	self:SyncSnipeShoppingList(true)
-	local targets = EnsureSnipeDB()
-	local items = {}
-	local skipPriceFilter = (ignorePrice == true) or (targetOrFilter == "hits")
-	if targetOrFilter == "hits" then
-		for _, h in ipairs(self:GetSnipeHitList()) do
-			if targets[h.itemID] then
-				items[#items + 1] = targets[h.itemID]
-			end
-		end
-	elseif type(targetOrFilter) == "number" then
-		if targets[targetOrFilter] then
-			items[1] = targets[targetOrFilter]
-		end
-	else
-		items = self:GetSnipeTargetList()
-	end
-	if #items == 0 then
-		return
-	end
-
-	self:WithLoadedItems(items, function()
+	ns:WithLoadedItems(items, function()
 		if not IsAuctionHouseOpen() then
 			return
 		end
 		local advanced, names = {}, {}
 		for _, t in ipairs(items) do
-			local name, _, _, _, loaded = self:GetItemDisplay(t.itemID)
+			local name, _, _, _, loaded = ns:GetItemDisplay(t.itemID)
 			if loaded and name then
 				names[#names + 1] = name
 				local q = {
@@ -790,6 +1109,247 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 			pcall(api.MultiSearchExact, ADDON_NAME, names)
 		end
 	end)
+end
+
+local function CancelSnipeBatch(silent)
+	if not activeSnipeBatch then
+		return
+	end
+	activeSnipeBatch = nil
+	if not silent then
+		ns:RefreshSnipeUI()
+		ScheduleNextSnipeAutoScan()
+	end
+end
+
+local SendNextSnipeBatchChunk
+local RequestTopSnipeHitDetails
+
+SendNextSnipeBatchChunk = function()
+	local batch = activeSnipeBatch
+	if not batch then
+		return
+	end
+	if not IsAuctionHouseOpen() then
+		CancelSnipeBatch(true)
+		return
+	end
+	local chunk = batch.chunks[batch.index]
+	if not chunk or #chunk == 0 then
+		CancelSnipeBatch(false)
+		return
+	end
+	if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+		batch.throttleRetries = (batch.throttleRetries or 0) + 1
+		if batch.throttleRetries > 12 then
+			CancelSnipeBatch(false)
+			return
+		end
+		batch.waitingThrottle = true
+		if C_Timer and C_Timer.After then
+			local tok = batch.token
+			local idx = batch.index
+			C_Timer.After(0.35, function()
+				if activeSnipeBatch and activeSnipeBatch.token == tok and activeSnipeBatch.index == idx and activeSnipeBatch.waitingThrottle then
+					SendNextSnipeBatchChunk()
+				end
+			end)
+		end
+		return
+	end
+	batch.throttleRetries = 0
+
+	local keys = {}
+	local chunkSet = {}
+	for _, itemID in ipairs(chunk) do
+		chunkSet[itemID] = true
+		if C_AuctionHouse.MakeItemKey then
+			keys[#keys + 1] = C_AuctionHouse.MakeItemKey(itemID)
+		else
+			keys[#keys + 1] = { itemID = itemID }
+		end
+	end
+	batch.chunkSet = chunkSet
+	batch.seen = {}
+	batch.waitingThrottle = false
+	batch.waitingResults = true
+	batch.gotInitialUpdate = false
+	batch.pendingMore = false
+
+	local ok = pcall(C_AuctionHouse.SearchForItemKeys, keys, {})
+	if not ok then
+		local fallbackItems = batch.items
+		CancelSnipeBatch(true)
+		ns:RefreshSnipeBar()
+		RunAuctionatorSnipeSearch(fallbackItems, false)
+		return
+	end
+
+	if C_Timer and C_Timer.After then
+		local tok = batch.token
+		local idx = batch.index
+		C_Timer.After(SNIPE_BATCH_TIMEOUT, function()
+			if activeSnipeBatch and activeSnipeBatch.token == tok and activeSnipeBatch.index == idx then
+				CancelSnipeBatch(false)
+			end
+		end)
+	end
+end
+
+local function HandleSnipeBatchResults(results, isAdded)
+	local batch = activeSnipeBatch
+	if not (batch and batch.waitingResults and batch.chunkSet) then
+		return
+	end
+	if isAdded and not batch.gotInitialUpdate then
+		lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+		return
+	end
+	local chunkSet = batch.chunkSet
+	if type(results) == "table" then
+		-- Если пришёл непустой ответ, в котором нет ни одного itemID из нашего чанка —
+		-- это чужой browse-запрос, игнорируем его чтобы не сбросить свои хиты.
+		if #results > 0 then
+			local matchedAny = false
+			for _, r in ipairs(results) do
+				local id = r and r.itemKey and r.itemKey.itemID
+				if id and chunkSet[id] then
+					matchedAny = true
+					break
+				end
+			end
+			if not matchedAny then
+				lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+				return
+			end
+		end
+		if not isAdded then
+			batch.gotInitialUpdate = true
+		end
+		for _, r in ipairs(results) do
+			local id = r and r.itemKey and r.itemKey.itemID
+			if id and chunkSet[id] and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
+				batch.seen[id] = true
+			end
+		end
+	elseif not isAdded then
+		batch.gotInitialUpdate = true
+	end
+
+	local hasFull = (not (C_AuctionHouse and C_AuctionHouse.HasFullBrowseResults)) or C_AuctionHouse.HasFullBrowseResults()
+	if not hasFull then
+		if C_AuctionHouse and C_AuctionHouse.RequestMoreBrowseResults then
+			if (not C_AuctionHouse.IsThrottledMessageSystemReady) or C_AuctionHouse.IsThrottledMessageSystemReady() then
+				batch.pendingMore = false
+				pcall(C_AuctionHouse.RequestMoreBrowseResults)
+			else
+				batch.pendingMore = true
+			end
+		end
+		return
+	end
+
+	-- Чанк полностью получен: убираем устаревшие хиты по позициям, которых на AH больше нет (0 лотов)
+	for itemID in pairs(chunkSet) do
+		if not batch.seen[itemID] then
+			if ns.realmDB and ns.realmDB.ahStock then
+				ns.realmDB.ahStock[itemID] = nil
+			end
+			ns:EvaluateSnipeItem(itemID, true)
+		end
+	end
+
+	batch.waitingResults = false
+	batch.index = batch.index + 1
+	if batch.index <= #batch.chunks then
+		SendNextSnipeBatchChunk()
+	else
+		activeSnipeBatch = nil
+		ns:RefreshSnipeUI()
+		if RequestTopSnipeHitDetails then
+			RequestTopSnipeHitDetails()
+		end
+		ScheduleNextSnipeAutoScan()
+	end
+end
+
+local function StartSnipeBatchScan(items)
+	if activeSnipeBatch then
+		return
+	end
+	local chunks = {}
+	local cur = {}
+	for _, t in ipairs(items) do
+		if t and t.itemID and t.itemID > 0 then
+			cur[#cur + 1] = t.itemID
+			if #cur >= SNIPE_BATCH_CHUNK_SIZE then
+				chunks[#chunks + 1] = cur
+				cur = {}
+			end
+		end
+	end
+	if #cur > 0 then
+		chunks[#chunks + 1] = cur
+	end
+	if #chunks == 0 then
+		return
+	end
+	snipeBatchToken = snipeBatchToken + 1
+	activeSnipeBatch = {
+		token = snipeBatchToken,
+		chunks = chunks,
+		index = 1,
+		items = items,
+		chunkSet = nil,
+		seen = nil,
+		waitingThrottle = false,
+		waitingResults = false,
+		pendingMore = false,
+	}
+	ns:RefreshSnipeBar()
+	SendNextSnipeBatchChunk()
+end
+
+function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
+	if not IsAuctionHouseOpen() then
+		self:Print(L["AH_NOT_OPEN"])
+		return
+	end
+	if self.LogTrace then
+		self:LogTrace("SnipeSearchAH", tostring(targetOrFilter or "all"))
+	end
+
+	self:SyncSnipeShoppingList(true)
+	local targets = EnsureSnipeDB()
+	local items = {}
+	local skipPriceFilter = (ignorePrice == true) or (targetOrFilter == "hits")
+	if targetOrFilter == "hits" then
+		for _, h in ipairs(self:GetSnipeHitList()) do
+			if targets[h.itemID] then
+				items[#items + 1] = targets[h.itemID]
+			end
+		end
+	elseif type(targetOrFilter) == "number" then
+		if targets[targetOrFilter] then
+			items[1] = targets[targetOrFilter]
+		end
+	else
+		items = self:GetActiveSnipeTargetList()
+	end
+	if #items == 0 then
+		return
+	end
+
+	-- Общий скан снайпера: нативный батч-запрос C_AuctionHouse.SearchForItemKeys (до 100 позиций за 1 запрос)
+	if targetOrFilter == nil and C_AuctionHouse and C_AuctionHouse.SearchForItemKeys then
+		StartSnipeBatchScan(items)
+		return
+	end
+
+	CancelSnipeBatch(true)
+	lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+	self:RefreshSnipeBar()
+	RunAuctionatorSnipeSearch(items, skipPriceFilter)
 end
 
 local function HookAuctionFrameShow(ah)
@@ -865,6 +1425,44 @@ local function IsCommodityItem(itemID)
 		end
 	end
 	return true
+end
+
+RequestTopSnipeHitDetails = function()
+	if activeSnipeBatch or pendingBuy or not IsAuctionHouseOpen() then
+		return
+	end
+	if not (C_AuctionHouse and C_AuctionHouse.SendSearchQuery) then
+		return
+	end
+	local hits = ns:GetSnipeHitList()
+	local first = hits and hits[1]
+	if not (first and first.itemID) then
+		return
+	end
+	local itemID = first.itemID
+	if not IsCommodityItem(itemID) then
+		return
+	end
+	local stock = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
+	if stock and not stock.isAggregate and stock.tiers and #stock.tiers > 0 then
+		return
+	end
+	local now = GetTime and GetTime() or 0
+	if (now - (lastDetailQueryAt[itemID] or 0)) < 2.0 then
+		return
+	end
+	if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+		pendingSnipeDetailQueued = itemID
+		return
+	end
+	pendingSnipeDetailQueued = nil
+	pendingSnipeDetailItemID = itemID
+	lastDetailQueryAt[itemID] = now
+	local key = C_AuctionHouse.MakeItemKey and C_AuctionHouse.MakeItemKey(itemID) or { itemID = itemID }
+	local ok = pcall(C_AuctionHouse.SendSearchQuery, key, {}, false)
+	if not ok then
+		pendingSnipeDetailItemID = nil
+	end
 end
 
 local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
@@ -1130,7 +1728,7 @@ end
 function ns:RefreshSnipeBar()
 	local ah = GetActiveAuctionFrame()
 	local enabled = self.IsModuleEnabled and self:IsModuleEnabled("profit")
-	local targets = self:GetSnipeTargetList()
+	local targets = self:GetActiveSnipeTargetList()
 	local hits = self:GetSnipeHitList()
 	if not (ah and enabled and (#targets > 0 or pendingBuy)) then
 		if snipeBar then
@@ -1179,9 +1777,27 @@ function ns:RefreshSnipeBar()
 		end)
 		snipeBar.settingsBtn:SetScript("OnLeave", GameTooltip_Hide)
 
+		snipeBar.autoScanCb = CreateFrame("CheckButton", nil, snipeBar, "UICheckButtonTemplate")
+		snipeBar.autoScanCb:SetSize(22, 22)
+		snipeBar.autoScanCb:SetPoint("RIGHT", snipeBar.settingsBtn, "LEFT", -48, 0)
+		snipeBar.autoScanCb.text = snipeBar.autoScanCb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		snipeBar.autoScanCb.text:SetPoint("LEFT", snipeBar.autoScanCb, "RIGHT", 2, 0)
+		snipeBar.autoScanCb.text:SetText(L["SNIPE_AUTOSCAN_SHORT"])
+		snipeBar.autoScanCb:SetHitRectInsets(0, -44, 0, 0)
+		snipeBar.autoScanCb:SetScript("OnClick", function(self)
+			ns:SetSnipeAutoScanEnabled(self:GetChecked() and true or false)
+		end)
+		snipeBar.autoScanCb:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
+			GameTooltip:AddLine(string.format(L["SNIPE_AUTOSCAN_TIP"], ns:GetSnipeAutoScanInterval()), 0.85, 0.85, 0.85, true)
+			GameTooltip:Show()
+		end)
+		snipeBar.autoScanCb:SetScript("OnLeave", GameTooltip_Hide)
+
 		snipeBar.scanBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
-		snipeBar.scanBtn:SetSize(112, 24)
-		snipeBar.scanBtn:SetPoint("RIGHT", snipeBar.settingsBtn, "LEFT", -6, 0)
+		snipeBar.scanBtn:SetSize(104, 24)
+		snipeBar.scanBtn:SetPoint("RIGHT", snipeBar.autoScanCb, "LEFT", -8, 0)
 		snipeBar.scanBtn:SetScript("OnClick", function()
 			ns:SearchSnipeTargetsOnAH()
 		end)
@@ -1194,7 +1810,7 @@ function ns:RefreshSnipeBar()
 		snipeBar.scanBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		snipeBar.openBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
-		snipeBar.openBtn:SetSize(110, 24)
+		snipeBar.openBtn:SetSize(98, 24)
 		snipeBar.openBtn:SetPoint("RIGHT", snipeBar.scanBtn, "LEFT", -6, 0)
 		snipeBar.openBtn:SetScript("OnClick", function()
 			local hits = ns:GetSnipeHitList()
@@ -1224,7 +1840,7 @@ function ns:RefreshSnipeBar()
 		snipeBar.openBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		snipeBar.buyBtn = CreateFrame("Button", "TradeFlowSnipeBuyBtn", snipeBar, "UIPanelButtonTemplate")
-		snipeBar.buyBtn:SetSize(142, 24)
+		snipeBar.buyBtn:SetSize(134, 24)
 		snipeBar.buyBtn:SetPoint("RIGHT", snipeBar.openBtn, "LEFT", -6, 0)
 		snipeBar.buyBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		snipeBar.buyBtn:SetScript("OnClick", function(_, button)
@@ -1278,19 +1894,31 @@ function ns:RefreshSnipeBar()
 	end
 	snipeBar:ClearAllPoints()
 	local ahScale = (ah.GetEffectiveScale and ah:GetEffectiveScale()) or 1
-	local uiScale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-	local ahTop = (ah.GetTop and ah:GetTop() or 0) * ahScale
-	local screenTop = (UIParent and UIParent.GetTop and UIParent:GetTop() or 768) * uiScale
-	if ahTop > 0 and (ahTop + 42 * ahScale) > screenTop then
-		snipeBar:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 0, -2)
-		snipeBar:SetPoint("TOPRIGHT", ah, "BOTTOMRIGHT", 0, -2)
-	else
+	local ahBottom = (ah.GetBottom and ah:GetBottom() or 0) * ahScale
+	-- Нижние вкладки AH (Blizzard + Auctionator) выступают на ~32px ниже рамки AuctionHouseFrame
+	local bottomOffset = 32
+	if ahBottom > 0 and (ahBottom - (bottomOffset + 42) * ahScale) < 0 then
 		snipeBar:SetPoint("BOTTOMLEFT", ah, "TOPLEFT", 0, 2)
 		snipeBar:SetPoint("BOTTOMRIGHT", ah, "TOPRIGHT", 0, 2)
+		snipeBar._anchorPos = "top"
+	else
+		snipeBar:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 0, -bottomOffset)
+		snipeBar:SetPoint("TOPRIGHT", ah, "BOTTOMRIGHT", 0, -bottomOffset)
+		snipeBar._anchorPos = "bottom"
 	end
 
 	snipeBar.settingsBtn:SetText(L["SNIPE_SETTINGS_BAR_BTN"])
-	snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
+	if snipeBar.autoScanCb then
+		snipeBar.autoScanCb:SetChecked(self.db and self.db.options and self.db.options.snipeAutoScan == true)
+		snipeBar.autoScanCb.text:SetText(L["SNIPE_AUTOSCAN_SHORT"])
+	end
+	if activeSnipeBatch then
+		snipeBar.scanBtn:SetText(L["SNIPE_SCANNING_BTN"])
+		snipeBar.scanBtn:SetEnabled(false)
+	else
+		snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
+		snipeBar.scanBtn:SetEnabled(true)
+	end
 
 	snipeBar.openBtn:SetText(string.format(L["SNIPE_FIND_HIT_BTN"], #hits))
 	if #hits > 0 or pendingBuy then
@@ -1393,13 +2021,16 @@ local function FillSniperSettingsInputs(sf)
 	sf.maxSpendBox:SetText((maxSpend > 0) and ns.FormatMoneyPlain(maxSpend) or "0")
 	sf.minReserveBox:SetText((minReserve > 0) and ns.FormatMoneyPlain(minReserve) or "0")
 	sf.maxQtyBox:SetText(tostring(maxQty or 0))
+	sf.autoScanIntervalBox:SetText(tostring(ns:GetSnipeAutoScanInterval()))
+	sf.discountPctBox:SetText(tostring(ns:GetSnipeDiscountPct()))
 	sf.cbAutoScan:SetChecked(ns.db and ns.db.options and ns.db.options.snipeAutoScan == true)
+	sf.cbAutoReprice:SetChecked(not (ns.db and ns.db.options and ns.db.options.snipeAutoReprice == false))
 end
 
 function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 	if not sniperSettingsFrame then
 		local sf = CreateFrame("Frame", "TradeFlowSniperSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(350, 216)
+		sf:SetSize(350, 304)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1459,10 +2090,14 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		sf.maxSpendBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_SPEND"], L["SNIPE_LIMIT_MAX_SPEND"], L["SNIPE_LIMIT_MAX_SPEND_TIP"], -38)
 		sf.minReserveBox = MakeLimitRow(L["SNIPE_LIMIT_MIN_RESERVE"], L["SNIPE_LIMIT_MIN_RESERVE"], L["SNIPE_LIMIT_MIN_RESERVE_TIP"], -70)
 		sf.maxQtyBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY_TIP"], -102)
+		sf.autoScanIntervalBox = MakeLimitRow(L["SNIPE_AUTOSCAN_INTERVAL"], L["SNIPE_AUTOSCAN_INTERVAL"], L["SNIPE_AUTOSCAN_INTERVAL_TIP"], -134)
+		sf.autoScanIntervalBox.placeholder:SetText("1 - 15")
+		sf.discountPctBox = MakeLimitRow(L["SNIPE_DISCOUNT_PCT"], L["SNIPE_DISCOUNT_PCT"], L["SNIPE_DISCOUNT_PCT_TIP"], -166)
+		sf.discountPctBox.placeholder:SetText("5 - 80")
 
 		local cbAutoScan = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
 		cbAutoScan:SetSize(22, 22)
-		cbAutoScan:SetPoint("TOPLEFT", 10, -128)
+		cbAutoScan:SetPoint("TOPLEFT", 10, -194)
 		cbAutoScan.text = cbAutoScan:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 4, 0)
 		cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
@@ -1470,14 +2105,30 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		cbAutoScan:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_TOP")
 			GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
-			GameTooltip:AddLine(L["SNIPE_AUTOSCAN_TIP"], 0.85, 0.85, 0.85, true)
+			GameTooltip:AddLine(string.format(L["SNIPE_AUTOSCAN_TIP"], ns:GetSnipeAutoScanInterval()), 0.85, 0.85, 0.85, true)
 			GameTooltip:Show()
 		end)
 		cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
 		sf.cbAutoScan = cbAutoScan
 
+		local cbAutoReprice = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
+		cbAutoReprice:SetSize(22, 22)
+		cbAutoReprice:SetPoint("TOPLEFT", 10, -220)
+		cbAutoReprice.text = cbAutoReprice:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		cbAutoReprice.text:SetPoint("LEFT", cbAutoReprice, "RIGHT", 4, 0)
+		cbAutoReprice.text:SetText(L["SNIPE_AUTOREPRICE_CB"])
+		cbAutoReprice:SetHitRectInsets(0, -240, 0, 0)
+		cbAutoReprice:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_AUTOREPRICE_CB"], 1, 0.82, 0)
+			GameTooltip:AddLine(string.format(L["SNIPE_AUTOREPRICE_TIP"], ns:GetSnipeDiscountPct()), 0.85, 0.85, 0.85, true)
+			GameTooltip:Show()
+		end)
+		cbAutoReprice:SetScript("OnLeave", GameTooltip_Hide)
+		sf.cbAutoReprice = cbAutoReprice
+
 		local hint = sf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-		hint:SetPoint("TOPLEFT", 12, -156)
+		hint:SetPoint("TOPLEFT", 12, -248)
 		hint:SetPoint("RIGHT", -12, 0)
 		hint:SetJustifyH("LEFT")
 		hint:SetText(L["SNIPE_LIMIT_HINT"])
@@ -1498,11 +2149,31 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns:Print(L["SNIPE_LIMIT_BAD_QTY"])
 				return
 			end
+			local interval = ParseAutoScanInterval(sf.autoScanIntervalBox:GetText())
+			if interval == nil then
+				ns:Print(L["SNIPE_AUTOSCAN_BAD_INTERVAL"])
+				return
+			end
+			local discPct = ParseSnipeDiscountPct(sf.discountPctBox:GetText())
+			if discPct == nil then
+				ns:Print(L["SNIPE_DISCOUNT_BAD"])
+				return
+			end
+			local autoOn = cbAutoScan:GetChecked() and true or false
+			local autoReprice = cbAutoReprice:GetChecked() and true or false
 			if ns.db and ns.db.options then
 				ns.db.options.snipeMaxSpend = maxSpend
 				ns.db.options.snipeMinReserve = minReserve
 				ns.db.options.snipeMaxQty = maxQty
-				ns.db.options.snipeAutoScan = cbAutoScan:GetChecked() and true or false
+				ns.db.options.snipeAutoScanInterval = interval
+				ns.db.options.snipeDiscountPct = discPct
+				ns.db.options.snipeAutoReprice = autoReprice
+				ns.db.options.snipeAutoScan = autoOn
+			end
+			if autoOn then
+				ScheduleNextSnipeAutoScan()
+			else
+				StopSnipeAutoScan()
 			end
 			sf:Hide()
 			ns:RefreshSnipeUI()
@@ -1511,10 +2182,14 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 
 		sf.maxSpendBox:SetScript("OnTabPressed", function() sf.minReserveBox:SetFocus() end)
 		sf.minReserveBox:SetScript("OnTabPressed", function() sf.maxQtyBox:SetFocus() end)
-		sf.maxQtyBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
+		sf.maxQtyBox:SetScript("OnTabPressed", function() sf.autoScanIntervalBox:SetFocus() end)
+		sf.autoScanIntervalBox:SetScript("OnTabPressed", function() sf.discountPctBox:SetFocus() end)
+		sf.discountPctBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
 		sf.maxSpendBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.minReserveBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.maxQtyBox:SetScript("OnEnterPressed", SaveLimits)
+		sf.autoScanIntervalBox:SetScript("OnEnterPressed", SaveLimits)
+		sf.discountPctBox:SetScript("OnEnterPressed", SaveLimits)
 
 		local saveBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
 		saveBtn:SetSize(158, 22)
@@ -1531,6 +2206,12 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns.db.options.snipeMaxSpend = DEFAULT_SNIPE_MAX_SPEND
 				ns.db.options.snipeMinReserve = DEFAULT_SNIPE_MIN_RESERVE
 				ns.db.options.snipeMaxQty = DEFAULT_SNIPE_MAX_QTY
+				ns.db.options.snipeAutoScanInterval = DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+				ns.db.options.snipeDiscountPct = DEFAULT_SNIPE_DISCOUNT_PCT
+				ns.db.options.snipeAutoReprice = true
+			end
+			if ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
+				ScheduleNextSnipeAutoScan()
 			end
 			FillSniperSettingsInputs(sf)
 			ns:RefreshSnipeUI()
@@ -1553,7 +2234,11 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 	sniperSettingsAnchorKind = newKind
 	sf:ClearAllPoints()
 	if anchorBtn and anchorBtn.IsVisible and anchorBtn:IsVisible() then
-		sf:SetPoint("TOPRIGHT", anchorBtn, "BOTTOMRIGHT", 0, -4)
+		if newKind == "ah" and snipeBar and snipeBar._anchorPos == "bottom" then
+			sf:SetPoint("BOTTOMRIGHT", anchorBtn, "TOPRIGHT", 0, 4)
+		else
+			sf:SetPoint("TOPRIGHT", anchorBtn, "BOTTOMRIGHT", 0, -4)
+		end
 	else
 		sf:SetPoint("CENTER")
 	end
@@ -1566,6 +2251,8 @@ for _, ev in ipairs({
 	"AUCTION_HOUSE_SHOW",
 	"AUCTION_HOUSE_CLOSED",
 	"AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
+	"AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
+	"AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
 	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"AUCTION_ITEM_LIST_UPDATE",
 	"COMMODITY_PRICE_UPDATED",
@@ -1593,7 +2280,7 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if event == "AUCTION_HOUSE_SHOW" then
 		HookAuctionFrameShow(AuctionHouseFrame)
 		HookAuctionFrameShow(AuctionFrame)
-		local targets = ns:GetSnipeTargetList()
+		local targets = ns:GetActiveSnipeTargetList()
 		for _, t in ipairs(targets) do
 			ns:EvaluateSnipeItem(t.itemID, true)
 		end
@@ -1604,7 +2291,12 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			C_Timer.After(0.15, function() ns:RefreshSnipeBar() end)
 			if #targets > 0 and ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
 				local tNow = GetTime and GetTime() or 0
-				if (tNow - lastAutoScanAt) >= 30 then
+				if C_AuctionHouse and C_AuctionHouse.SearchForItemKeys then
+					local interval = ns:GetSnipeAutoScanInterval()
+					local minOpenCd = math.min(5, interval)
+					local wait = (tNow - lastAutoScanAt >= minOpenCd) and 0.45 or math.max(0.45, minOpenCd - (tNow - lastAutoScanAt))
+					ScheduleNextSnipeAutoScan(wait)
+				elseif (tNow - lastAutoScanAt) >= 30 then
 					C_Timer.After(0.45, function()
 						local cbNow = GetTime and GetTime() or 0
 						if IsAuctionHouseOpen() and ns.IsModuleEnabled and ns:IsModuleEnabled("profit") and (cbNow - lastAutoScanAt) >= 30 then
@@ -1687,7 +2379,53 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 				pendingSnipeBid = nil
 			end
 		end
+	elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+		if activeSnipeBatch then
+			if activeSnipeBatch.pendingMore and C_AuctionHouse and C_AuctionHouse.RequestMoreBrowseResults then
+				activeSnipeBatch.pendingMore = false
+				pcall(C_AuctionHouse.RequestMoreBrowseResults)
+			elseif activeSnipeBatch.waitingThrottle then
+				SendNextSnipeBatchChunk()
+			end
+		elseif pendingSnipeDetailQueued then
+			pendingSnipeDetailQueued = nil
+			if RequestTopSnipeHitDetails then
+				RequestTopSnipeHitDetails()
+			end
+		end
+	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" then
+		if activeSnipeBatch and activeSnipeBatch.waitingResults then
+			HandleSnipeBatchResults(C_AuctionHouse and C_AuctionHouse.GetBrowseResults and C_AuctionHouse.GetBrowseResults(), false)
+		else
+			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+		end
+		if next(ns:GetSnipeTargets()) ~= nil then
+			ns:RefreshSnipeUI()
+		end
+	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
+		if activeSnipeBatch and activeSnipeBatch.waitingResults then
+			HandleSnipeBatchResults(arg1, true)
+		else
+			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+		end
+		if next(ns:GetSnipeTargets()) ~= nil then
+			ns:RefreshSnipeUI()
+		end
+	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "AUCTION_ITEM_LIST_UPDATE" then
+		local isOwnDetail = (event == "COMMODITY_SEARCH_RESULTS_UPDATED" and pendingSnipeDetailItemID and tonumber(arg1) == pendingSnipeDetailItemID)
+		if isOwnDetail then
+			pendingSnipeDetailItemID = nil
+		elseif not pendingBuy then
+			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+		end
+		if next(ns:GetSnipeTargets()) ~= nil then
+			ns:RefreshSnipeUI()
+		end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
+		StopSnipeAutoScan()
+		CancelSnipeBatch(true)
+		pendingSnipeDetailItemID = nil
+		pendingSnipeDetailQueued = nil
 		pendingSnipeBid = nil
 		if pendingBuy then
 			CancelPendingCommodity(nil, nil)
