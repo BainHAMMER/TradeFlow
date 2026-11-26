@@ -41,6 +41,7 @@ local activeSnipeBatch = nil
 local snipeBatchToken = 0
 local pendingSnipeDetailItemID = nil
 local pendingSnipeDetailQueued = nil
+local detailQueryToken = 0
 local lastDetailQueryAt = {}
 
 function ns:GetActiveSnipeBatchSet()
@@ -1265,10 +1266,10 @@ local function HandleSnipeBatchResults(results, isAdded)
 		SendNextSnipeBatchChunk()
 	else
 		activeSnipeBatch = nil
-		ns:RefreshSnipeUI()
 		if RequestTopSnipeHitDetails then
 			RequestTopSnipeHitDetails()
 		end
+		ns:RefreshSnipeUI()
 		ScheduleNextSnipeAutoScan()
 	end
 end
@@ -1456,12 +1457,21 @@ RequestTopSnipeHitDetails = function()
 		return
 	end
 	pendingSnipeDetailQueued = nil
+	detailQueryToken = detailQueryToken + 1
+	local dTok = detailQueryToken
 	pendingSnipeDetailItemID = itemID
 	lastDetailQueryAt[itemID] = now
 	local key = C_AuctionHouse.MakeItemKey and C_AuctionHouse.MakeItemKey(itemID) or { itemID = itemID }
 	local ok = pcall(C_AuctionHouse.SendSearchQuery, key, {}, false)
 	if not ok then
 		pendingSnipeDetailItemID = nil
+	elseif C_Timer and C_Timer.After then
+		C_Timer.After(3.0, function()
+			if detailQueryToken == dTok and pendingSnipeDetailItemID == itemID then
+				pendingSnipeDetailItemID = nil
+				ns:RefreshSnipeBar()
+			end
+		end)
 	end
 end
 
@@ -1930,6 +1940,9 @@ function ns:RefreshSnipeBar()
 			snipeBar.buyBtn:SetText(string.format(L["SNIPE_BUY_CONFIRM"], pendingBuy.qty or 1))
 			snipeBar.buyBtn:SetEnabled(true)
 		elseif pendingBuy and pendingBuy.state == "buying" then
+			snipeBar.buyBtn:SetText(L["SNIPE_BUY_WAIT"])
+			snipeBar.buyBtn:SetEnabled(false)
+		elseif first and (pendingSnipeDetailItemID == first.itemID or pendingSnipeDetailQueued == first.itemID) then
 			snipeBar.buyBtn:SetText(L["SNIPE_BUY_WAIT"])
 			snipeBar.buyBtn:SetEnabled(false)
 		elseif first then
