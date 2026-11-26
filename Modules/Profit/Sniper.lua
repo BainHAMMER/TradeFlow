@@ -189,6 +189,28 @@ local function ParseAutoScanInterval(text)
 	return n
 end
 
+local function EnsureSnipeDB()
+	if not ns.realmDB then
+		return {}
+	end
+	ns.realmDB.snipeTargets = ns.realmDB.snipeTargets or {}
+	return ns.realmDB.snipeTargets
+end
+
+local function IsAuctionHouseOpen()
+	return (AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (AuctionFrame and AuctionFrame:IsShown())
+end
+
+local function GetActiveAuctionFrame()
+	if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
+		return AuctionHouseFrame
+	end
+	if AuctionFrame and AuctionFrame:IsShown() then
+		return AuctionFrame
+	end
+	return nil
+end
+
 local function StopSnipeAutoScan()
 	autoScanTimerToken = autoScanTimerToken + 1
 end
@@ -274,28 +296,6 @@ ScheduleNextSnipeAutoScan = function(delayOverride)
 		lastAutoScanAt = now
 		ns:SearchSnipeTargetsOnAH()
 	end)
-end
-
-local function EnsureSnipeDB()
-	if not ns.realmDB then
-		return {}
-	end
-	ns.realmDB.snipeTargets = ns.realmDB.snipeTargets or {}
-	return ns.realmDB.snipeTargets
-end
-
-local function IsAuctionHouseOpen()
-	return (AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (AuctionFrame and AuctionFrame:IsShown())
-end
-
-local function GetActiveAuctionFrame()
-	if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
-		return AuctionHouseFrame
-	end
-	if AuctionFrame and AuctionFrame:IsShown() then
-		return AuctionFrame
-	end
-	return nil
 end
 
 function ns:GetSnipeTargets()
