@@ -39,6 +39,9 @@ local SNIPE_BATCH_CHUNK_SIZE = 100
 local SNIPE_BATCH_TIMEOUT = 6.0
 local activeSnipeBatch = nil
 local snipeBatchToken = 0
+local pendingSnipeDetailItemID = nil
+local pendingSnipeDetailQueued = nil
+local lastDetailQueryAt = {}
 
 function ns:GetActiveSnipeBatchSet()
 	return activeSnipeBatch and activeSnipeBatch.chunkSet or nil
@@ -1120,6 +1123,7 @@ local function CancelSnipeBatch(silent)
 end
 
 local SendNextSnipeBatchChunk
+local RequestTopSnipeHitDetails
 
 SendNextSnipeBatchChunk = function()
 	local batch = activeSnipeBatch
@@ -1262,6 +1266,9 @@ local function HandleSnipeBatchResults(results, isAdded)
 	else
 		activeSnipeBatch = nil
 		ns:RefreshSnipeUI()
+		if RequestTopSnipeHitDetails then
+			RequestTopSnipeHitDetails()
+		end
 		ScheduleNextSnipeAutoScan()
 	end
 end
@@ -1418,6 +1425,44 @@ local function IsCommodityItem(itemID)
 		end
 	end
 	return true
+end
+
+RequestTopSnipeHitDetails = function()
+	if activeSnipeBatch or pendingBuy or not IsAuctionHouseOpen() then
+		return
+	end
+	if not (C_AuctionHouse and C_AuctionHouse.SendSearchQuery) then
+		return
+	end
+	local hits = ns:GetSnipeHitList()
+	local first = hits and hits[1]
+	if not (first and first.itemID) then
+		return
+	end
+	local itemID = first.itemID
+	if not IsCommodityItem(itemID) then
+		return
+	end
+	local stock = ns.realmDB and ns.realmDB.ahStock and ns.realmDB.ahStock[itemID]
+	if stock and not stock.isAggregate and stock.tiers and #stock.tiers > 0 then
+		return
+	end
+	local now = GetTime and GetTime() or 0
+	if (now - (lastDetailQueryAt[itemID] or 0)) < 2.0 then
+		return
+	end
+	if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+		pendingSnipeDetailQueued = itemID
+		return
+	end
+	pendingSnipeDetailQueued = nil
+	pendingSnipeDetailItemID = itemID
+	lastDetailQueryAt[itemID] = now
+	local key = C_AuctionHouse.MakeItemKey and C_AuctionHouse.MakeItemKey(itemID) or { itemID = itemID }
+	local ok = pcall(C_AuctionHouse.SendSearchQuery, key, {}, false)
+	if not ok then
+		pendingSnipeDetailItemID = nil
+	end
 end
 
 local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
@@ -2342,6 +2387,11 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			elseif activeSnipeBatch.waitingThrottle then
 				SendNextSnipeBatchChunk()
 			end
+		elseif pendingSnipeDetailQueued then
+			pendingSnipeDetailQueued = nil
+			if RequestTopSnipeHitDetails then
+				RequestTopSnipeHitDetails()
+			end
 		end
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" then
 		if activeSnipeBatch and activeSnipeBatch.waitingResults then
@@ -2362,7 +2412,10 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			ns:RefreshSnipeUI()
 		end
 	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "AUCTION_ITEM_LIST_UPDATE" then
-		if not pendingBuy then
+		local isOwnDetail = (event == "COMMODITY_SEARCH_RESULTS_UPDATED" and pendingSnipeDetailItemID and tonumber(arg1) == pendingSnipeDetailItemID)
+		if isOwnDetail then
+			pendingSnipeDetailItemID = nil
+		elseif not pendingBuy then
 			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
 		end
 		if next(ns:GetSnipeTargets()) ~= nil then
@@ -2371,6 +2424,8 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		StopSnipeAutoScan()
 		CancelSnipeBatch(true)
+		pendingSnipeDetailItemID = nil
+		pendingSnipeDetailQueued = nil
 		pendingSnipeBid = nil
 		if pendingBuy then
 			CancelPendingCommodity(nil, nil)
