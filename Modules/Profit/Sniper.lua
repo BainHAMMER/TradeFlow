@@ -766,17 +766,51 @@ function ns:ImportShoppingToSnipe(discountRatio)
 	return added
 end
 
+function ns:SetSnipeTargetPrice(itemID, maxPrice, isManual)
+	local targets = EnsureSnipeDB()
+	local t = targets[itemID]
+	if not t or not maxPrice or maxPrice <= 0 then
+		return false
+	end
+	t.maxPrice = math.max(1, math.floor(maxPrice + 0.5))
+	t.manual = (isManual ~= false)
+	t.ts = time and time() or 0
+	t.lowStreak = 0
+	self:EvaluateSnipeItem(itemID, true)
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+	return true
+end
+
+function ns:ResetSnipeTargetPin(itemID)
+	local targets = EnsureSnipeDB()
+	local t = targets[itemID]
+	if not t then
+		return false
+	end
+	local now = time and time() or 0
+	t.manual = false
+	t.lowStreak = 0
+	local cur = self:GetSnipeLiveMarketPrice(itemID)
+	if cur and cur > 0 then
+		t.emaPrice = cur
+		t.lastEmaAt = now
+		t.maxPrice = math.max(1, math.floor(cur * self:GetSnipeDiscountRatio() + 0.5))
+		t.ts = now
+	end
+	self:EvaluateSnipeItem(itemID, true)
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+	return true
+end
+
 function ns:AdjustSnipeTarget(itemID, factor)
 	local targets = EnsureSnipeDB()
 	local t = targets[itemID]
 	if not t then
 		return
 	end
-	t.maxPrice = math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5))
-	t.manual = true
-	self:EvaluateSnipeItem(itemID, true)
-	self:SyncSnipeShoppingList(true)
-	self:RefreshSnipeUI()
+	self:SetSnipeTargetPrice(itemID, math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5)), true)
 end
 
 function ns:RepriceSnipeTargets(ratio)
@@ -786,16 +820,17 @@ function ns:RepriceSnipeTargets(ratio)
 	local now = time and time() or 0
 	local updated = 0
 	for itemID, t in pairs(targets) do
-		local cur = self:GetSnipeLiveMarketPrice(itemID)
-		if cur and cur > 0 then
-			t.maxPrice = math.max(1, math.floor(cur * r + 0.5))
-			t.ts = now
-			t.emaPrice = cur
-			t.lastEmaAt = now
-			t.lowStreak = 0
-			t.manual = false
-			self:EvaluateSnipeItem(itemID, true)
-			updated = updated + 1
+		if not t.manual then
+			local cur = self:GetSnipeLiveMarketPrice(itemID)
+			if cur and cur > 0 then
+				t.maxPrice = math.max(1, math.floor(cur * r + 0.5))
+				t.ts = now
+				t.emaPrice = cur
+				t.lastEmaAt = now
+				t.lowStreak = 0
+				self:EvaluateSnipeItem(itemID, true)
+				updated = updated + 1
+			end
 		end
 	end
 	self:SyncSnipeShoppingList(true)
