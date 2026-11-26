@@ -1,6 +1,15 @@
 package-as: TradeFlow
 enable-nolib-creation: no
 
+optional-dependencies:
+  - auctionator
+  - tradeskillmaster
+  - syndicator
+  - tomtom
+  - questie
+  - atlaslootclassic
+  - disenchantbuddy
+
 manual-changelog:
   filename: CHANGELOG.md
   markup-type: markdown

@@ -9,7 +9,7 @@
 ## X-License: GPL-3.0-or-later
 ## X-Curse-Project-ID: 1810340
 ## SavedVariables: TradeFlowDB
-## OptionalDeps: Auctionator, TradeSkillMaster, Syndicator, QuestieDB, AtlasLootClassic, TomTom
+## OptionalDeps: Auctionator, TradeSkillMaster, Syndicator, QuestieDB, AtlasLootClassic, TomTom, DisenchantBuddy
 ## IconTexture: Interface\AddOns\TradeFlow\Media\Icon
 ## AddonCompartmentFunc: TradeFlow_OnAddonCompartmentClick
 
