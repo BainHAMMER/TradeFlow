@@ -18,6 +18,7 @@ local ProfitMod = {
 	id = "profit",
 	optionKey = "modProfitEnabled",
 	settingsLabelKey = "OPT_MOD_PROFIT",
+	settingsTipKey = "OPT_MOD_PROFIT_TIP",
 	tabTitleKey = "TAB_PROFIT",
 	tabWidth = 148,
 	defaultEnabled = true,

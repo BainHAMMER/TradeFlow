@@ -2441,10 +2441,10 @@ end
 function ns:ToggleSettingsFrame()
 	if not self.settingsFrame then
 		local opts = {
-			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
-			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
-			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
-			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      tip = L["OPT_AH_STOCK_TIP"], defaultTrue = false, invalidatePrices = false },
+			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    tip = L["OPT_INCLUDE_DE_TIP"],    defaultTrue = true,  invalidatePrices = true },
+			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], tip = L["OPT_TOOLTIP_EXTRA_TIP"], defaultTrue = false, invalidatePrices = false },
+			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], tip = L["OPT_GROUP_CAT_TIP"],     defaultTrue = false, invalidatePrices = false },
+			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      tip = L["OPT_AH_STOCK_TIP"],      defaultTrue = false, invalidatePrices = false },
 		}
 		for _, mSpec in ipairs((self.GetModuleSettingsSpecs and self:GetModuleSettingsSpecs()) or {}) do
 			opts[#opts + 1] = mSpec
