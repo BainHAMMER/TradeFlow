@@ -272,7 +272,7 @@ function ProfitMod:CreateView(parent)
 	importShopBtn:SetText(L["SNIPE_IMPORT_SHOP"])
 	importShopBtn:SetScript("OnClick", function()
 		if ns.ImportShoppingToSnipe then
-			ns:ImportShoppingToSnipe(0.80)
+			ns:ImportShoppingToSnipe()
 		end
 	end)
 
@@ -296,7 +296,7 @@ function ProfitMod:CreateView(parent)
 	local repriceBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
 	repriceBtn:SetSize(88, 20)
 	repriceBtn:SetPoint("LEFT", scanSnipeBtn, "RIGHT", 4, 0)
-	repriceBtn:SetText(L["SNIPE_REPRICE_BTN"])
+	repriceBtn:SetText(string.format(L["SNIPE_REPRICE_BTN"], ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20))
 	repriceBtn:SetScript("OnClick", function()
 		if ns.RepriceSnipeTargets then
 			ns:RepriceSnipeTargets()
@@ -304,8 +304,9 @@ function ProfitMod:CreateView(parent)
 	end)
 	repriceBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(self:GetText() or L["SNIPE_REPRICE_BTN"], 1, 0.82, 0)
-		GameTooltip:AddLine(string.format(L["SNIPE_REPRICE_TIP"], ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20), 0.85, 0.85, 0.85, true)
+		local pct = ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20
+		GameTooltip:SetText(self:GetText() or string.format(L["SNIPE_REPRICE_BTN"], pct), 1, 0.82, 0)
+		GameTooltip:AddLine(string.format(L["SNIPE_REPRICE_TIP"], pct), 0.85, 0.85, 0.85, true)
 		GameTooltip:Show()
 	end)
 	repriceBtn:SetScript("OnLeave", GameTooltip_Hide)
@@ -382,7 +383,7 @@ function ProfitMod:CreateView(parent)
 	snipePriceBox:SetAutoFocus(false)
 	snipePriceBox.placeholder = snipePriceBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	snipePriceBox.placeholder:SetPoint("LEFT", 4, 0)
-	snipePriceBox.placeholder:SetText(L["SNIPE_PRICE_PLACEHOLDER"])
+	snipePriceBox.placeholder:SetText(string.format(L["SNIPE_PRICE_PLACEHOLDER"], ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20))
 
 	local function PickCursorItemID()
 		if not (CursorHasItem and CursorHasItem()) then
@@ -479,7 +480,7 @@ function ProfitMod:CreateView(parent)
 	snipePriceBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 	snipePriceBox:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["SNIPE_PRICE_PLACEHOLDER"], 1, 0.82, 0)
+		GameTooltip:SetText(string.format(L["SNIPE_PRICE_PLACEHOLDER"], ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20), 1, 0.82, 0)
 		GameTooltip:AddLine(L["SNIPE_PRICE_TIP"], 0.85, 0.85, 0.85, true)
 		GameTooltip:Show()
 	end)
@@ -661,9 +662,9 @@ function ProfitMod:CreateView(parent)
 		row.snipeBtn:SetScript("OnClick", function()
 			local e = row.entryData
 			if e and e.recipeID and ns.AddRecipeReagentsToSnipe then
-				local added, total = ns:AddRecipeReagentsToSnipe(e.recipeID, 0.80, e.gphCraftPlan)
+				local added, total = ns:AddRecipeReagentsToSnipe(e.recipeID, nil, e.gphCraftPlan)
 				if added > 0 then
-					ns:Print(string.format(L["SNIPE_ADDED_MSG"], added))
+					ns:Print(string.format(L["SNIPE_ADDED_MSG"], added, ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20))
 				elseif total > 0 then
 					ns:Print(L["SNIPE_ALREADY_MSG"])
 				else
@@ -677,10 +678,10 @@ function ProfitMod:CreateView(parent)
 				return
 			end
 			GameTooltip:SetOwner(self, "ANCHOR_TOP")
-			GameTooltip:AddLine(L["SNIPE_BTN_TITLE"], 1, 0.82, 0)
+			GameTooltip:AddLine(string.format(L["SNIPE_BTN_TITLE"], ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20), 1, 0.82, 0)
 			GameTooltip:AddLine(L["SNIPE_BTN_DESC"], 0.85, 0.85, 0.85, true)
 			if ns.GetRecipeSnipePreview then
-				local items = ns:GetRecipeSnipePreview(e.recipeID, 0.80, e.gphCraftPlan)
+				local items = ns:GetRecipeSnipePreview(e.recipeID, nil, e.gphCraftPlan)
 				if #items == 0 then
 					GameTooltip:AddLine(L["SNIPE_NO_AH_MSG"], 1, 0.5, 0.3, true)
 				else
@@ -1249,6 +1250,13 @@ function ProfitMod:OnRefresh()
 	end
 
 	if isSniper then
+		local discPct = ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20
+		if f.repriceBtn then
+			f.repriceBtn:SetText(string.format(L["SNIPE_REPRICE_BTN"], discPct))
+		end
+		if f.snipePriceBox and f.snipePriceBox.placeholder then
+			f.snipePriceBox.placeholder:SetText(string.format(L["SNIPE_PRICE_PLACEHOLDER"], discPct))
+		end
 		if f.cbAutoScan then
 			f.cbAutoScan:SetChecked(ns.db and ns.db.options and ns.db.options.snipeAutoScan == true)
 		end

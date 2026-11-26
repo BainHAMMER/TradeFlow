@@ -680,7 +680,7 @@ function ns:GetRecipeSnipePreview(recipeID, discountRatio, craftPlan)
 	if not recipeID then
 		return items, 0, 0
 	end
-	local ratio = discountRatio or 0.80
+	local ratio = discountRatio or self:GetSnipeDiscountRatio()
 	local targets = EnsureSnipeDB()
 	local seenItems = {}
 	local visitedRecipes = {}
