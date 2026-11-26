@@ -208,7 +208,7 @@ function ns:RestoreMainWindowPosition()
 	return true
 end
 
-function ns:ApplyUIScale()
+function ns:ApplyUIScale(skipSave)
 	if not self.mainFrame then
 		return
 	end
@@ -225,7 +225,9 @@ function ns:ApplyUIScale()
 		local absTop = top * oldScale
 		self.mainFrame:ClearAllPoints()
 		self.mainFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
-		self:SaveMainWindowPosition()
+		if not skipSave then
+			self:SaveMainWindowPosition()
+		end
 	end
 end
 
@@ -1220,7 +1222,7 @@ function ns:CreateMainFrame()
 	self:CreateQueueAndShoppingView(bottomRight)
 
 	self.mainFrame = f
-	self:ApplyUIScale()
+	self:ApplyUIScale(true)
 	self:ApplyWindowLayout(false)
 	self:RestoreMainWindowPosition()
 	return f

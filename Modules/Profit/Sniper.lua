@@ -756,7 +756,7 @@ function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio, craftPlan)
 end
 
 function ns:ImportShoppingToSnipe(discountRatio)
-	local ratio = discountRatio or 0.80
+	local ratio = discountRatio or self:GetSnipeDiscountRatio()
 	local shopping = self.GetShoppingList and self:GetShoppingList() or {}
 	local targets = EnsureSnipeDB()
 	local added = 0
