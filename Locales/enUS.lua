@@ -50,6 +50,7 @@ ns.Locales.en = {
 	["OPT_INCLUDE_DE"] = "Include disenchant value",
 	["OPT_TOOLTIP_EXTRA"] = "Show economy & disenchant in tooltip",
 	["OPT_AH_STOCK"] = "Account for AH seen stock",
+	["OPT_AH_STOCK_TIP"] = "In the Leveling Planner, prices reagents across actual AH price tiers (accounting for low stock of cheap lots), and shows seen AH stock next to reagents in Recipe Details.",
 	["OPT_MOD_PROFIT"] = "Module: Profit",
 	["PROFIT_CH_ALL"] = "Channel: All",
 	["PROFIT_CH_SAFE"] = "Channel: Safe (Vendor+DE)",

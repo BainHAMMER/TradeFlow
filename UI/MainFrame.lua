@@ -2399,7 +2399,7 @@ function ns:ToggleSettingsFrame()
 			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
 			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
 			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
-			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      defaultTrue = false, invalidatePrices = false },
+			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      tip = L["OPT_AH_STOCK_TIP"], defaultTrue = false, invalidatePrices = false },
 		}
 		for _, mSpec in ipairs((self.GetModuleSettingsSpecs and self:GetModuleSettingsSpecs()) or {}) do
 			opts[#opts + 1] = mSpec
@@ -2448,6 +2448,15 @@ function ns:ToggleSettingsFrame()
 					end
 				end
 			end)
+			if o.tip then
+				cb:SetScript("OnEnter", function(self)
+					GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+					GameTooltip:SetText(o.label, 1, 0.82, 0)
+					GameTooltip:AddLine(o.tip, 0.85, 0.85, 0.85, true)
+					GameTooltip:Show()
+				end)
+				cb:SetScript("OnLeave", GameTooltip_Hide)
+			end
 			sf.checks[i] = { cb = cb, opt = o }
 		end
 
