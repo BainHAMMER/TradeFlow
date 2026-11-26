@@ -1,190 +1,129 @@
 # Changelog / Список изменений
 
-## v1.0.15
+## v1.0.16
 ### RU
-- **Оптимизация производительности (устранена просадка FPS после крафта):**
-  - Перерисовка окна после крафта из очереди объединена в один проход вместо трёх (дебаунс по затишью + окно ожидания сумок и скана профессии), записи `liveRecipes` обновляются на месте без лишних сбросов кэша, добавлено кэширование расчёта докрафта промежуточных реагентов (спасибо `frostmx`, PR #7).
-- **Кулдауны на крафты:**
-  - Базовое время восстановления рецепта теперь видно ещё до крафта (янтарный бейдж `[КД: ...]` в списке рецептов, строка в деталях и тултипе).
-  - Активные таймеры КД обновляются в реальном времени при открытом окне (перерисовывая панель только при фактическом изменении текста таймера).
-- **Умный забор материалов из банка:**
-  - Подбор стаков сначала забирает наибольшие целые стаки `<=` нехватки (без захвата лишних неполных хвостов), а на финальный остаток безопасно отделяет ровно нужное количество из наименьшего стака (с защитой от залоченных слотов, резервированием слотов назначения и фоллбэком на `UseContainerItem`).
-- **Экономика, Доход/ч и «Касса»:**
-  - В расчёте **Дохода/ч** при сбыте через распыление теперь учитывается время каста «Распыления», а при сравнении каналов автоматически выбирается канал с максимальным доходом в час.
-  - Исправлен расчёт строки **«Цена за +1 навык»** при снятой галке «Продажа торговцу» — теперь вычитается лучшая доступная выручка (включая аукцион `-5%`), совпадая с «Деталями рецепта» и калькулятором прокачки.
-  - В режиме **«Касса»** скрыта лишняя подпись `*/шт.` для строк `Залог АХ` и операций с нулевой ценой за штуку.
+- **Ускоренный Снайпер аукциона:** сканирование списка целей теперь занимает доли секунды и не блокирует вкладку покупок; добавлен автоматический опрос при открытом аукционе (интервал `1–15` сек в настройках + быстрая галка «Авто» на плашке).
+- **Удобное управление целями Снайпера:**
+  - Плашка Снайпера перенесена под нижние вкладки аукциона.
+  - В списке Снайпера появились галки вкл/выкл на каждом предмете (пауза без удаления), поле для ручной фиксации точного порога цены и кнопка «Авто» для возврата к авто-подстройке.
+  - Добавлена авто-подстройка порогов под текущий рынок и настраиваемый процент скидки (`5–80%`).
+  - Для найденных хитов автоматически подгружается точное количество дешёвых штук до выкупа.
+- **Удобство и исправления интерфейса:**
+  - Окно TradeFlow теперь запоминает своё положение между перезапусками и `/reload` при любом масштабе.
+  - Окно TradeFlow больше не становится некликабельным при открытии аукциона.
+  - Перенесён таймер кулдауна в правый верхний угол деталей рецепта, упрощены тултипы и добавлены подсказки ко всем пунктам настроек.
 
 ### EN
-- **Performance Optimization (Fixed FPS Drops After Crafting):**
-  - Coalesced post-craft UI updates into a single refresh instead of three, updated `liveRecipes` in place without unnecessary cache invalidations, and cached intermediate subcraft counts across recipes (thanks to `frostmx`, PR #7).
-- **Recipe Cooldowns:**
-  - Base recipe cooldowns are now shown before crafting (amber `[CD: ...]` badge in the recipe list, Details header, and tooltip).
-  - Active cooldown timers now tick live while the window is open, refreshing UI panels only when the formatted text changes.
-- **Smart Bank Withdrawal & Partial Stack Splitting:**
-  - Bank withdrawal now picks the largest whole stacks `<=` remaining need first and splits the exact remaining amount from the smallest overshoot stack (with lock-retry handling, reverse bag-slot reservation, and safe `UseContainerItem` fallback).
-- **Economy, Gold/hr & Cashflow Log:**
-  - Gold/hr calculations now include Disenchant cast time when the output channel is `disenchant`, and compare against non-disenchant channels to pick the highest Gold/hr option.
-  - Fixed **Cost per +1 skill** when `Sell to vendor` is unchecked to deduct the best available return (including AH `-5%`), matching Recipe Details and the Leveling Calculator.
-  - Hid redundant per-unit `/ea` suffixes on `AH deposit` and `0c/ea` rows in the Cashflow log.
+- **Faster Auction House Sniper:** scanning sniper targets now takes a fraction of a second without blocking the Shopping tab; added periodic auto-scanning while the Auction House is open (configurable `1–15s` interval + quick `Auto` toggle on the bar).
+- **Sniper Target Controls:**
+  - Moved the Sniper bar below the bottom Auction House tabs.
+  - Added per-item enable/pause checkboxes, an inline price input to pin exact thresholds, and an `Auto` button to unpin.
+  - Added automatic price adjustment to current market prices with a configurable target discount (`5–80%`).
+  - Automatically fetches exact cheap lot counts for spotted hits before buyout.
+- **UI Improvements & Fixes:**
+  - TradeFlow now remembers its window position across `/reload` and game sessions at any UI scale.
+  - Fixed the TradeFlow window becoming unclickable when opening the Auction House.
+  - Moved the recipe cooldown label to the top-right of Recipe Details, simplified tooltips, and added tooltips to all Settings options.
+
+---
+
+## v1.0.15
+### RU
+- Убраны просадки FPS после крафта из очереди (спасибо `frostmx`).
+- Кулдаун рецептов виден ещё до крафта, а активные таймеры обновляются в реальном времени.
+- Забор из банка теперь берёт ровно нужное количество материалов, аккуратно отделяя остаток из наименьшего стака.
+- В «Доходе/ч» учитывается время на распыление; исправлена «Цена за +1 навык» при выключенной продаже торговцу; убраны лишние подписи `/шт.` у залогов в «Кассе».
+
+### EN
+- Fixed FPS drops after crafting from the queue (thanks to `frostmx`).
+- Recipe cooldowns are now visible before crafting, and active timers update live.
+- Bank withdrawal now takes the exact needed amount, cleanly splitting the remainder from the smallest stack.
+- Gold/hr now includes disenchant cast time; fixed Cost per +1 skill when Sell to vendor is unchecked; hid redundant `/ea` labels on AH deposits in Cash mode.
 
 ---
 
 ## v1.0.14
 ### RU
-- **Отображение кулдаунов на крафты:**
-  - Для рецептов с временем восстановления (трансмутации, луноткань, солеварка и т.д.) теперь отображается оставшийся кулдаун в списке рецептов (`[КД: ...]`), в деталях рецепта, в тултипе и в очереди крафта (`На КД (...)`); кнопка «Создать» блокируется и показывает оставшееся время до готовности.
-- **Учёт залогов аукциона в журнале заработка («Касса»):**
-  - В режиме **«Касса»** теперь отслеживается списание залога (`Залог АХ`) при выставлении скрафченных предметов и материалов распыления на аукцион (с точным сопоставлением сумм по `PLAYER_MONEY`). При успешной продаже залог возвращается в письме с АХ (итоговая выручка точно равна `цена - 5%`), а при отмене или истечении срока лота потерянный залог учитывается в расходах.
-- **Исправления интерфейса:**
-  - Исправлено пропадание тултипов рецептов и реагентов через полсекунды после наведения — `DetachSecureProfProxy` больше не скрывает чужие тултипы при фоновом обновлении окна.
-  - Исправлена работа защищённой кнопки переключения профессии («Выбрать: ...», «Открыть проф.», иконки в шапке): прокси перенесён на стратум `HIGH` с привязкой `SetAllPoints`, исправлен конфликт `AnyUp`/`AnyDown`, добавлена анимация нажатия и авто-отцепление при скрытии кнопки или смене вкладки.
+- Появилось отображение кулдаунов на крафты (список рецептов, детали, тултип и очередь).
+- В «Кассе» теперь учитываются залоги при выставлении лотов на аукцион.
+- Исправлено пропадание тултипов при наведении и работа кнопок переключения профессии.
 
 ### EN
-- **Recipe Cooldown Display:**
-  - Recipes with cooldowns (transmutes, Mooncloth, Salt Shaker, etc.) now display remaining cooldown time in the recipe list (`[CD: ...]`), Recipe Details header, recipe tooltip, and Crafting Queue (`On CD (...)`), with the Craft button disabled and showing remaining time.
-- **AH Deposit Tracking in Profit Log (Cash Mode):**
-  - Cashflow mode now tracks Auction House posting deposits (`AH deposit`) for crafted items and disenchant materials with exact `PLAYER_MONEY` reconciliation. Sold auctions automatically net out when AH mail refunds the deposit (`sale - 5%`), while expired or cancelled auctions retain the lost deposit as an expense.
-- **UI Fixes:**
-  - Fixed recipe and reagent tooltips disappearing shortly after hover during background UI refreshes (`DetachSecureProfProxy` now hides `GameTooltip` only when owned by the detached button).
-  - Fixed secure profession switching buttons (`Switch to: ...`, `Open Prof`, and header icons): moved the secure proxy to `HIGH` strata with `SetAllPoints`, fixed `AnyUp` click timing so spells cast before detach, added button press visual feedback, and auto-detached when switching tabs.
+- Added recipe cooldown display across the recipe list, details, tooltips, and queue.
+- Cash mode now tracks Auction House posting deposits.
+- Fixed tooltips disappearing on hover and improved profession switching buttons.
 
 ---
 
 ## v1.0.13
 ### RU
-- **Исправление переключения профессии из очереди и шапки:**
-  - Исправлена ситуация, когда при наведённом курсоре на кнопку «Выбрать: ...» в очереди, «Открыть проф.» в деталях или иконку профессии в шапке после обновления окна клик не переключал активную профессию в клиенте игры — защищённый прокси теперь автоматически перепривязывается без необходимости уводить курсор.
-- **Исправление расчёта распыления для Наложения чар:**
-  - Все крафтовые жезлы (включая «Жезл из ветви грез» и остальные жезлы Наложения чар) и экипировка, создаваемая Наложением чар, автоматически исключаются из расчёта выручки и прибыли от распыления (работает как с `DisenchantBuddy`, так и без него).
+- Кнопки переключения профессии в очереди и шапке теперь срабатывают без необходимости уводить курсор.
+- Крафтовые жезлы и вещи Наложения чар больше не считаются распыляемыми в расчёте прибыли.
 
 ### EN
-- **Profession Switching Button Fix:**
-  - Fixed an issue where clicking `Switch to: ...` in the Queue, `Open Prof` in Details, or a header profession icon failed to switch the active game profession if the cursor remained stationary over the button during a UI refresh; the secure switch proxy now re-attaches automatically.
-- **Enchanting Disenchant Exclusion Fix:**
-  - Automatically excluded all crafted wands and Enchanting-crafted gear from disenchant value and profit calculations, both with and without `DisenchantBuddy`.
+- Profession switching buttons in the queue and header now work even without moving the cursor away.
+- Crafted wands and Enchanting gear are no longer counted as disenchantable in profit calculations.
 
 ---
 
 ## v1.0.12
 ### RU
-
-- **Счётчик доступных крафтов за вычетом очереди:**
-  - В списке рецептов слева и во вкладке «Заработок» рядом с общим доступным количеством `[N]` добавлен второй счётчик в круглых скобках `(M)` (или `(0)` серым цветом), показывающий сколько ещё штук можно поставить в очередь после вычета материалов, уже зарезервированных в текущей очереди крафта.
-- **Калькулятор прокачки (упущенная выгода реагентов в наличии):**
-  - Реагенты, которые уже лежат в сумках или банке персонажа, при построении маршрута прокачки теперь оцениваются по их рыночной стоимости на аукционе / себестоимости крафта (упущенная выгода), а не как бесплатные (`0c`). Это устраняет выбор невыгодных рецептов только из-за наличия дорогих реагентов в сумке. Бесплатными для последующих шагов считаются только полуфабрикаты, созданные предыдущим шагом самого маршрута.
+- Рядом с количеством доступных крафтов `[N]` добавлен остаток `(M)` за вычетом уже поставленного в очередь.
+- Калькулятор прокачки теперь учитывает рыночную стоимость реагентов в сумках и банке, чтобы не предлагать невыгодные рецепты.
 
 ### EN
-- **Remaining Craftable Count Badge (Minus Queue):**
-  - Added a secondary `(M)` badge next to `[N]` in the recipe list and Profit Scanner showing how many additional crafts can be queued after subtracting materials already reserved by the active crafting queue (displayed as grey `(0)` when all available materials are reserved).
-- **Leveling Calculator (Opportunity Cost for Owned Reagents):**
-  - Reagents already in the player's bags or bank are now valued at their market / crafting price (opportunity cost) during route planning rather than `0c`, preventing the calculator from picking inefficient recipes simply because expensive materials happen to be in the inventory. Only intermediate items produced by an earlier step of the route itself carry `0c` purchase cost.
+- Added a `(M)` badge next to `[N]` showing remaining craftable count after subtracting queued items.
+- The Leveling Calculator now accounts for the market value of reagents already in your bags and bank.
 
 ---
 
 ## v1.0.11
 ### RU
-- **Свободное закрытие и управление окном в бою:**
-  - Защищённый каст смены профессии вынесен во внешний прокси на `UIParent`, благодаря чему главное окно `TradeFlow` больше не блокируется движком WoW в бою и мгновенно закрывается (по `X`, клавише `Esc` или `/tf`), открывается, сворачивается и меняет масштаб прямо во время боя.
-- **Оформление списка изменений:**
-  - Настроена публикация форматированного списка изменений на CurseForge и GitHub Releases вместо сырого лога коммитов.
+- Окно TradeFlow теперь свободно открывается, закрывается (`X`, `Esc`, `/tf`), сворачивается и масштабируется прямо в бою.
 
 ### EN
-- **Combat-Safe Window Closing & Controls:**
-  - Moved secure profession switching to an external `UIParent` proxy button so the main `TradeFlow` window is never locked down during combat and can be closed (`X`, `Esc`, `/tf`), opened, minimized, and scaled freely while in combat.
-- **Release Notes Formatting:**
-  - Configured formatted Markdown changelog publishing for CurseForge and GitHub Releases instead of raw git commit logs.
+- The TradeFlow window can now be opened, closed (`X`, `Esc`, `/tf`), minimized, and scaled freely during combat.
 
 ---
 
 ## v1.0.10
 ### RU
-- **Управление окном и список рецептов:**
-  - Добавлен вертикальный ползунок прокрутки в список рецептов слева.
-  - Добавлена кнопка сворачивания списка рецептов (`>>` / `<<`) в левом верхнем углу шапки — складывает левую панель и уменьшает ширину окна почти вдвое.
-  - Добавлена кнопка минимизации окна (`-` / `+`) рядом с крестиком закрытия — сворачивает окно до компактной панели «Очередь / Список покупок».
-  - В окно «Настройки» добавлен ползунок «Масштаб окна» (`60%–140%` с кнопкой сброса `100%`), работающий отдельно от общего масштаба интерфейса игры.
-- **Исправления:**
-  - Исправлено добавление рецептов в избранное по ПКМ (звезда больше не сбрасывается при первом нажатии во время синхронизации с интерфейсом Blizzard).
-  - Исправлена блокировка `ADDON_ACTION_BLOCKED` при открытии или закрытии окна профессий во время боя (открытие/закрытие откладывается до выхода из боя).
-  - Исправлена ошибка «Эти предметы разделить невозможно» при автоматическом заборе материалов из банка.
+- Добавлены ползунок прокрутки списка рецептов, сворачивание списка (`>>`/`<<`), минимизация до очереди (`-`/`+`) и масштаб окна (`60%–140%`) в настройках.
+- Исправлены добавление в избранное по ПКМ, работа в бою и разделение стаков при заборе из банка.
 
 ### EN
-- **Window Controls & Recipe List:**
-  - Added a vertical scrollbar to the recipe list.
-  - Added a button (`>>` / `<<`) in the top-left header to collapse/expand the recipe list pane.
-  - Added a minimize button (`-` / `+`) next to the close button to compact the window down to the Queue & Shopping List panel.
-  - Added an independent Window Scale slider (`60%–140%` with a `100%` reset button) in Settings.
-- **Fixes:**
-  - Fixed right-click recipe favorite toggling so the star no longer resets on the first click while syncing with the Blizzard UI.
-  - Fixed combat lockdown errors (`ADDON_ACTION_BLOCKED`) when opening or closing the window during combat.
-  - Fixed `"Couldn't split those items"` errors when automatically withdrawing materials from the bank.
+- Added a recipe list scrollbar, recipe pane collapse (`>>`/`<<`), compact queue mode (`-`/`+`), and window scale (`60%–140%`) in Settings.
+- Fixed right-click favorites, combat errors, and bank stack splitting.
 
 ---
 
 ## v1.0.9
 ### RU
-- **Модуль «Заработок» и очередь:**
-  - Добавлена сортировка **«Сорт: Доход/ч»** — ранжирует рецепты по прибыли в час с учётом полного времени крафта и промежуточных полуфабрикатов (автоматически сравнивая покупку полуфабриката на аукционе и его ручной крафт).
-  - Добавлены фильтры неизученных рецептов по источникам: **«У тренера»**, **«У вендора (в наличии)»**, **«Прочие»**.
-  - Кнопки **«В очередь все»** и `Shift+ЛКМ` по `+Очередь` теперь вычитают материалы, которые уже зарезервированы текущей очередью крафта.
-- **Снайпер аукциона:**
-  - Добавлена кнопка быстрого выкупа на плашке Снайпера над аукционом (с проверкой актуальной цены и авто-отменой, если дешёвый лот уже купили).
-  - Добавлено окно **«Настройки снайпера»** («Лимиты»): максимальный бюджет на один выкуп (по умолчанию `10g`), неснижаемый резерв золота в сумке и лимит штук за одну покупку (по умолчанию `200`).
-  - Добавлено ручное добавление предметов в Снайпер (по названию, ID, перетаскиванием из сумки, `Shift+кликом` или командой `/tf snipe`).
-- **Журнал заработка («Крафт» и «Касса»):**
-  - Добавлен переключатель режимов **«Крафт»** (расчётная прибыль с учётом фактической цены закупки материалов) и **«Касса»** (реальное движение золота: закупки на АХ, покупки реагентов у торговцев, обучение у тренера, продажа вендору и выручка с почты АХ, включая материалы от распыления).
-  - Кнопка **«Очистить лог заработка»** перенесена в окно «Настройки» для защиты от случайного сброса.
-- **Наложение чар и Избранное:**
-  - Добавлен слот выбора цели для Наложения чар в панели очереди (автовыбор подходящей вещи или перетаскивание вручную) и подтверждение замены чар клавишей `Пробел`.
-  - Добавлено добавление/удаление рецептов в **Избранное** по ПКМ с синхронизацией со стандартным окном профессий Blizzard и отдельной категорией «Избранное».
+- Добавлены сортировка «Доход/ч», фильтры неизученных рецептов по источникам и учёт очереди в «В очередь все».
+- В Снайпере появились быстрый выкуп на плашке, лимиты покупок и ручное добавление целей (`/tf snipe`).
+- В логе заработка добавлены режимы «Крафт» и «Касса»; добавлены выбор цели для Наложения чар (`Пробел` для подтверждения) и Избранное по ПКМ.
 
 ### EN
-- **Profit Scanner & Queue:**
-  - Added **Sort: Gold/hr** ranking recipes by hourly profit across full crafting and subcraft duration.
-  - Added unlearned recipe source filters (**Trainer**, **Vendor (in stock)**, **Other**).
-  - **Queue All** and `Shift+Click` on `+Queue` now subtract materials already reserved by the active crafting queue.
-- **AH Sniper:**
-  - Added a fast buyout button on the floating AH Sniper bar with live price verification and auto-cancel if a deal vanishes.
-  - Added **Sniper Settings** (`Limits`) with max buyout budget (`10g` default), minimum gold reserve, and max quantity per purchase (`200` default).
-  - Added manual item entry (by name, ID, drag-and-drop, `Shift+Click`, or `/tf snipe`).
-- **Profit Log (Craft & Cash Modes):**
-  - Added **Craft** and **Cash** modes tracking actual AH purchases, vendor reagent purchases, trainer fees, vendor sales, and AH mail payouts (including disenchanted materials).
-  - Moved **Clear Profit Log** into the Settings window.
-- **Enchanting & Favorites:**
-  - Added automatic and drag-and-drop target item selection for Enchanting with `Spacebar` confirmation for replacing enchants.
-  - Added right-click recipe **Favorites** synced with the Blizzard Professions UI.
+- Added Gold/hr sorting, unlearned recipe source filters, and queue-aware Queue All.
+- Added quick buyout on the Sniper bar, buyout limits, and manual target entry (`/tf snipe`).
+- Added Craft & Cash log modes, Enchanting target selection (`Space` to confirm), and right-click Favorites.
 
 ---
 
 ## v1.0.8
-- Исправлено закрытие сессии профессии при первом открытии окна после `/reload` или смены языка.
-- Исправлена работа со стандартной общей вкладкой профессий Blizzard и профессиями вне TradeFlow (например, Рыбалкой).
-- Кнопка возврата в TradeFlow из окна Blizzard теперь появляется с самого первого открытия по клавише `K`.
-- Исправлена иконка Горного дела в шапке окна при открытии «Выплавки металлов».
+- Исправлено закрытие окна профессии после `/reload` и смены языка, улучшена совместимость со стандартным окном Blizzard и исправлена иконка Горного дела.
 
 ## v1.0.7
-- Добавлена вкладка **«Заработок»**: сканер прибыльных рецептов (по персонажу и альтам), **Снайпер** дешёвых реагентов на аукционе и **Лог** заработка.
-- Добавлено отображение времени крафта для каждого шага и общего времени очереди.
-- Безопасное переключение профессий из очереди без блокировок интерфейса.
-- Учёт материалов в банке при расчёте списка покупок и автоматический забор нужных реагентов при открытии банка.
-- Улучшен поиск маршрута в калькуляторе прокачки и добавлено окно диагностики `/tf log`.
+- Добавлена вкладка «Заработок» (прибыльные рецепты, Снайпер и Лог), время крафта очереди и автозабор материалов из банка.
 
 ## v1.0.6
-- Добавлен переключатель **«Приоритет: Скорость / Прибыль»** в калькуляторе прокачки.
-- Добавлена опция **«Учитывать кол-во лотов на аукционе»** в настройках (учёт глубины рынка по ценовым уровням).
-- Исправлено появление плашки забора материалов при открытии банка до открытия окна профессии.
+- Добавлены переключатель «Скорость / Прибыль» в калькуляторе прокачки и учёт наличия лотов на аукционе.
 
 ## v1.0.5
-- Добавлен расчёт **Распыления (Disenchant)** в деталях рецепта, списке рецептов и калькуляторе прокачки (таблицы шансов, количество пыли/субстанций/осколков и средняя выручка с учётом комиссии аукциона `-5%`).
-- Добавлено окно **«Настройки»** в шапке аддона.
+- Добавлен расчёт распыления и окно «Настройки».
 
 ## v1.0.4
-- Добавлено отображение источников получения для неизученных рецептов (торговцы, задания, дроп, цена свитка на аукционе) и интеграция с **TomTom**.
-- Добавлена группировка рецептов по **Категориям** и меню выбора сортировки.
-- Галка **«Продажа торговцу»** вынесена в шапку окна.
-- Добавлена кнопка возврата **«TradeFlow»** в стандартном окне профессий Blizzard.
+- Добавлены источники неизученных рецептов, метки TomTom, категории, сортировки и кнопка возврата из окна Blizzard.
 
 ## v1.0.3
-- Очистка статических таблиц, исправление локализации банковских реагентов и настройка автосборки для CurseForge.
-
-
+- Исправлена локализация банковских реагентов и настроена автосборка релизов.

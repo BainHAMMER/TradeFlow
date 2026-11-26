@@ -152,8 +152,8 @@ function ns:AttachSecureProfProxy(btn, skillLine)
 	end
 	secureProfProxy.targetBtn = btn
 	secureProfProxy.skillLine = skillLine
-	secureProfProxy:SetFrameStrata("HIGH")
-	secureProfProxy:SetFrameLevel(50)
+	secureProfProxy:SetFrameStrata((btn.GetFrameStrata and btn:GetFrameStrata()) or "HIGH")
+	secureProfProxy:SetFrameLevel(((btn.GetFrameLevel and btn:GetFrameLevel()) or 50) + 20)
 	secureProfProxy:ClearAllPoints()
 	secureProfProxy:SetAllPoints(btn)
 	secureProfProxy:SetAttribute("type", "spell")
@@ -173,7 +173,42 @@ function ns:GetUIScale()
 	return math.floor(s * 20 + 0.5) / 20
 end
 
-function ns:ApplyUIScale()
+function ns:SaveMainWindowPosition()
+	local f = self.mainFrame
+	if not (f and self.db and self.db.options) then
+		return
+	end
+	local right, top = f:GetRight(), f:GetTop()
+	local scale = f:GetScale() or 1.0
+	if right and top and right > 0 and top > 0 and scale > 0 then
+		self.db.options.windowPos = {
+			absRight = math.floor(right * scale + 0.5),
+			absTop = math.floor(top * scale + 0.5),
+		}
+	end
+end
+
+function ns:RestoreMainWindowPosition()
+	local f = self.mainFrame
+	local pos = self.db and self.db.options and self.db.options.windowPos
+	if not (f and type(pos) == "table") then
+		return false
+	end
+	local absRight = tonumber(pos.absRight)
+	local absTop = tonumber(pos.absTop)
+	if not (absRight and absTop and absRight > 0 and absTop > 0) then
+		return false
+	end
+	local scale = f:GetScale() or 1.0
+	if scale <= 0 then
+		scale = 1.0
+	end
+	f:ClearAllPoints()
+	f:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
+	return true
+end
+
+function ns:ApplyUIScale(skipSave)
 	if not self.mainFrame then
 		return
 	end
@@ -190,6 +225,9 @@ function ns:ApplyUIScale()
 		local absTop = top * oldScale
 		self.mainFrame:ClearAllPoints()
 		self.mainFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", absRight / scale, absTop / scale)
+		if not skipSave then
+			self:SaveMainWindowPosition()
+		end
 	end
 end
 
@@ -546,14 +584,19 @@ function ns:CreateMainFrame()
 	f:Hide()
 	f:SetSize(WIN_W, WIN_H)
 	f:SetPoint("CENTER")
-	f:SetFrameStrata("MEDIUM")
+	f:SetFrameStrata("HIGH")
 	f:SetToplevel(true)
 	f:SetClampedToScreen(true)
 	f:SetMovable(true)
 	f:EnableMouse(true)
 	f:RegisterForDrag("LeftButton")
 	f:SetScript("OnDragStart", f.StartMoving)
-	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		if ns.SaveMainWindowPosition then
+			ns:SaveMainWindowPosition()
+		end
+	end)
 	f:SetBackdrop({
 		bgFile = "Interface\\FrameGeneral\\UI-Background-Rock",
 		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
@@ -567,6 +610,9 @@ function ns:CreateMainFrame()
 		end
 	end)
 	f:SetScript("OnHide", function()
+		if not ns.isRebuildingFrame and ns.SaveMainWindowPosition then
+			ns:SaveMainWindowPosition()
+		end
 		if ns.StopCooldownTicker then
 			ns:StopCooldownTicker()
 		end
@@ -1176,8 +1222,9 @@ function ns:CreateMainFrame()
 	self:CreateQueueAndShoppingView(bottomRight)
 
 	self.mainFrame = f
-	self:ApplyUIScale()
+	self:ApplyUIScale(true)
 	self:ApplyWindowLayout(false)
+	self:RestoreMainWindowPosition()
 	return f
 end
 
@@ -1213,6 +1260,11 @@ function ns:CreateDetailsView(parent)
 	outBtn:SetScript("OnLeave", GameTooltip_Hide)
 	d.outBtn = outBtn
 
+	d.cooldownText = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	d.cooldownText:SetPoint("TOPRIGHT", d, "TOPRIGHT", -10, -8)
+	d.cooldownText:SetJustifyH("RIGHT")
+	d.cooldownText:SetWordWrap(false)
+
 	d.recipeTitle = d:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	d.recipeTitle:SetPoint("TOPLEFT", outBtn, "TOPRIGHT", 10, -2)
 	d.recipeTitle:SetPoint("RIGHT", -10, 0)
@@ -1221,8 +1273,10 @@ function ns:CreateDetailsView(parent)
 
 	d.thresholdLine = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	d.thresholdLine:SetPoint("TOPLEFT", d.recipeTitle, "BOTTOMLEFT", 0, -5)
-	d.thresholdLine:SetPoint("RIGHT", -10, 0)
+	d.thresholdLine:SetPoint("RIGHT", d, "RIGHT", -10, 0)
 	d.thresholdLine:SetJustifyH("LEFT")
+	d.thresholdLine:SetWordWrap(false)
+	if d.thresholdLine.SetMaxLines then d.thresholdLine:SetMaxLines(1) end
 
 	d.reagentsHeader = d:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	d.reagentsHeader:SetPoint("TOPLEFT", 10, -52)
@@ -1619,6 +1673,10 @@ function ns:RefreshDetailsView()
 		d.outBtn.icon:SetTexture(nil)
 		d.recipeTitle:SetText(L["NO_RECIPE_SELECTED"])
 		d.thresholdLine:SetText("")
+		if d.cooldownText then
+			d.cooldownText:SetText("")
+		end
+		d._lastCdText = ""
 		if d.sourceBtn then
 			d.sourceBtn.itemID = nil
 			d.sourceBtn.sourceDetail = nil
@@ -1763,15 +1821,26 @@ function ns:RefreshDetailsView()
 		end
 	end
 	local cdRem = (metrics.learned and self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID)) or 0
+	local cdDisplay = ""
 	if cdRem > 0 then
 		local cdStr = ns.FormatCooldown(cdRem)
-		thParts[#thParts + 1] = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], cdStr) .. "|r"
+		cdDisplay = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], cdStr) .. "|r"
 		d._lastCdText = cdStr
 	else
 		d._lastCdText = ""
 		local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(recipeID) or 0
 		if baseCd > 0 then
-			thParts[#thParts + 1] = "|cffffb84d" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(baseCd)) .. "|r"
+			cdDisplay = "|cffffb84d" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(baseCd)) .. "|r"
+		end
+	end
+	if d.cooldownText then
+		d.cooldownText:SetText(cdDisplay)
+		d.recipeTitle:ClearAllPoints()
+		d.recipeTitle:SetPoint("TOPLEFT", d.outBtn, "TOPRIGHT", 10, -2)
+		if cdDisplay ~= "" then
+			d.recipeTitle:SetPoint("RIGHT", d.cooldownText, "LEFT", -8, 0)
+		else
+			d.recipeTitle:SetPoint("RIGHT", d, "RIGHT", -10, 0)
 		end
 	end
 	d.thresholdLine:SetText(table.concat(thParts, "   |   "))
@@ -2374,10 +2443,10 @@ end
 function ns:ToggleSettingsFrame()
 	if not self.settingsFrame then
 		local opts = {
-			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    defaultTrue = true,  invalidatePrices = true },
-			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], defaultTrue = false, invalidatePrices = false },
-			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], defaultTrue = false, invalidatePrices = false },
-			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      defaultTrue = false, invalidatePrices = false },
+			{ key = "includeDisenchant", label = L["OPT_INCLUDE_DE"],    tip = L["OPT_INCLUDE_DE_TIP"],    defaultTrue = true,  invalidatePrices = true },
+			{ key = "tooltipExtraInfo",  label = L["OPT_TOOLTIP_EXTRA"], tip = L["OPT_TOOLTIP_EXTRA_TIP"], defaultTrue = false, invalidatePrices = false },
+			{ key = "groupByCategory",   label = L["GROUP_BY_CATEGORY"], tip = L["OPT_GROUP_CAT_TIP"],     defaultTrue = false, invalidatePrices = false },
+			{ key = "checkAuctionStock", label = L["OPT_AH_STOCK"],      tip = L["OPT_AH_STOCK_TIP"],      defaultTrue = false, invalidatePrices = false },
 		}
 		for _, mSpec in ipairs((self.GetModuleSettingsSpecs and self:GetModuleSettingsSpecs()) or {}) do
 			opts[#opts + 1] = mSpec
@@ -2426,6 +2495,15 @@ function ns:ToggleSettingsFrame()
 					end
 				end
 			end)
+			if o.tip then
+				cb:SetScript("OnEnter", function(self)
+					GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+					GameTooltip:SetText(o.label, 1, 0.82, 0)
+					GameTooltip:AddLine(o.tip, 0.85, 0.85, 0.85, true)
+					GameTooltip:Show()
+				end)
+				cb:SetScript("OnLeave", GameTooltip_Hide)
+			end
 			sf.checks[i] = { cb = cb, opt = o }
 		end
 

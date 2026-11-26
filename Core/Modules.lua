@@ -91,6 +91,7 @@ function ns:GetModuleSettingsSpecs()
 			res[#res + 1] = {
 				key = mod.optionKey,
 				label = L[mod.settingsLabelKey] or id,
+				tip = mod.settingsTipKey and L[mod.settingsTipKey] or nil,
 				defaultTrue = (mod.defaultEnabled ~= false),
 				moduleId = id,
 			}
