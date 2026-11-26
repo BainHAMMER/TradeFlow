@@ -1,5 +1,34 @@
 # Changelog / Список изменений
 
+## v1.0.15
+### RU
+- **Оптимизация производительности (устранена просадка FPS после крафта):**
+  - Перерисовка окна после крафта из очереди объединена в один проход вместо трёх (дебаунс по затишью + окно ожидания сумок и скана профессии), записи `liveRecipes` обновляются на месте без лишних сбросов кэша, добавлено кэширование расчёта докрафта промежуточных реагентов (спасибо `frostmx`, PR #7).
+- **Кулдауны на крафты:**
+  - Базовое время восстановления рецепта теперь видно ещё до крафта (янтарный бейдж `[КД: ...]` в списке рецептов, строка в деталях и тултипе).
+  - Активные таймеры КД обновляются в реальном времени при открытом окне (перерисовывая панель только при фактическом изменении текста таймера).
+- **Умный забор материалов из банка:**
+  - Подбор стаков сначала забирает наибольшие целые стаки `<=` нехватки (без захвата лишних неполных хвостов), а на финальный остаток безопасно отделяет ровно нужное количество из наименьшего стака (с защитой от залоченных слотов, резервированием слотов назначения и фоллбэком на `UseContainerItem`).
+- **Экономика, Доход/ч и «Касса»:**
+  - В расчёте **Дохода/ч** при сбыте через распыление теперь учитывается время каста «Распыления», а при сравнении каналов автоматически выбирается канал с максимальным доходом в час.
+  - Исправлен расчёт строки **«Цена за +1 навык»** при снятой галке «Продажа торговцу» — теперь вычитается лучшая доступная выручка (включая аукцион `-5%`), совпадая с «Деталями рецепта» и калькулятором прокачки.
+  - В режиме **«Касса»** скрыта лишняя подпись `*/шт.` для строк `Залог АХ` и операций с нулевой ценой за штуку.
+
+### EN
+- **Performance Optimization (Fixed FPS Drops After Crafting):**
+  - Coalesced post-craft UI updates into a single refresh instead of three, updated `liveRecipes` in place without unnecessary cache invalidations, and cached intermediate subcraft counts across recipes (thanks to `frostmx`, PR #7).
+- **Recipe Cooldowns:**
+  - Base recipe cooldowns are now shown before crafting (amber `[CD: ...]` badge in the recipe list, Details header, and tooltip).
+  - Active cooldown timers now tick live while the window is open, refreshing UI panels only when the formatted text changes.
+- **Smart Bank Withdrawal & Partial Stack Splitting:**
+  - Bank withdrawal now picks the largest whole stacks `<=` remaining need first and splits the exact remaining amount from the smallest overshoot stack (with lock-retry handling, reverse bag-slot reservation, and safe `UseContainerItem` fallback).
+- **Economy, Gold/hr & Cashflow Log:**
+  - Gold/hr calculations now include Disenchant cast time when the output channel is `disenchant`, and compare against non-disenchant channels to pick the highest Gold/hr option.
+  - Fixed **Cost per +1 skill** when `Sell to vendor` is unchecked to deduct the best available return (including AH `-5%`), matching Recipe Details and the Leveling Calculator.
+  - Hid redundant per-unit `/ea` suffixes on `AH deposit` and `0c/ea` rows in the Cashflow log.
+
+---
+
 ## v1.0.14
 ### RU
 - **Отображение кулдаунов на крафты:**

@@ -1,7 +1,7 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
-ns.VERSION = "1.0.14"
+ns.VERSION = "1.0.15"
 ns.ICON = "Interface\\AddOns\\TradeFlow\\Media\\Icon"
 
 -- Сопоставление skillLine <-> базовое заклинание профессии для открытия окна
