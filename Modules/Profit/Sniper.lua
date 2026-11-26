@@ -8,12 +8,18 @@ local MAX_SNIPE_STOCK_AGE = 3600 -- не сигналим по вчерашне�
 local DEFAULT_SNIPE_MAX_SPEND = 100000 -- 10g по умолчанию за 1 клик выкупа
 local DEFAULT_SNIPE_MAX_QTY = 200
 local DEFAULT_SNIPE_MIN_RESERVE = 0
+local DEFAULT_SNIPE_AUTOSCAN_INTERVAL = 5
+local MIN_SNIPE_AUTOSCAN_INTERVAL = 1
+local MAX_SNIPE_AUTOSCAN_INTERVAL = 15
+local EXTERNAL_AH_PAUSE_SEC = 6
 local snipeBar = nil
 local sniperSettingsFrame = nil
 local sniperSettingsAnchorKind = nil
 local sniperSettingsSpecialRegistered = false
 local lastSoundAt = -10
 local lastAutoScanAt = -30
+local lastExternalAhActivityAt = -30
+local autoScanTimerToken = 0
 local lastChatHitAt = {}
 local lastSnipeListSig = nil
 local snipeSyncToken = 0
@@ -29,6 +35,106 @@ local snipeBatchToken = 0
 
 function ns:GetActiveSnipeBatchSet()
 	return activeSnipeBatch and activeSnipeBatch.chunkSet or nil
+end
+
+function ns:GetSnipeAutoScanInterval()
+	local opts = self.db and self.db.options
+	local v = opts and tonumber(opts.snipeAutoScanInterval)
+	if not v then
+		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+	end
+	v = math.floor(v + 0.5)
+	if v < MIN_SNIPE_AUTOSCAN_INTERVAL then
+		return MIN_SNIPE_AUTOSCAN_INTERVAL
+	elseif v > MAX_SNIPE_AUTOSCAN_INTERVAL then
+		return MAX_SNIPE_AUTOSCAN_INTERVAL
+	end
+	return v
+end
+
+local function ParseAutoScanInterval(text)
+	if text == nil then
+		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+	end
+	local s = tostring(text):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" then
+		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+	end
+	if not s:match("^%d+$") then
+		return nil
+	end
+	local n = tonumber(s)
+	if not n or n < MIN_SNIPE_AUTOSCAN_INTERVAL or n > MAX_SNIPE_AUTOSCAN_INTERVAL then
+		return nil
+	end
+	return n
+end
+
+local function StopSnipeAutoScan()
+	autoScanTimerToken = autoScanTimerToken + 1
+end
+
+local function ScheduleNextSnipeAutoScan(delayOverride)
+	autoScanTimerToken = autoScanTimerToken + 1
+	local tok = autoScanTimerToken
+	if not (C_Timer and C_Timer.After) then
+		return
+	end
+	if not (C_AuctionHouse and C_AuctionHouse.SearchForItemKeys) then
+		return
+	end
+	if not IsAuctionHouseOpen() then
+		return
+	end
+	if not (ns.IsModuleEnabled and ns:IsModuleEnabled("profit")) then
+		return
+	end
+	if not (ns.db and ns.db.options and ns.db.options.snipeAutoScan == true) then
+		return
+	end
+	if next(EnsureSnipeDB()) == nil then
+		return
+	end
+	local delay = delayOverride or ns:GetSnipeAutoScanInterval()
+	if delay < 0.1 then
+		delay = 0.1
+	end
+	C_Timer.After(delay, function()
+		if tok ~= autoScanTimerToken then
+			return
+		end
+		if not IsAuctionHouseOpen() then
+			return
+		end
+		if not (ns.IsModuleEnabled and ns:IsModuleEnabled("profit")) then
+			return
+		end
+		if not (ns.db and ns.db.options and ns.db.options.snipeAutoScan == true) then
+			return
+		end
+		if next(EnsureSnipeDB()) == nil then
+			return
+		end
+		if activeSnipeBatch then
+			return
+		end
+		if pendingBuy then
+			ScheduleNextSnipeAutoScan(2.0)
+			return
+		end
+		local now = GetTime and GetTime() or 0
+		local sinceExt = now - lastExternalAhActivityAt
+		if sinceExt >= 0 and sinceExt < EXTERNAL_AH_PAUSE_SEC then
+			ScheduleNextSnipeAutoScan(math.max(0.5, EXTERNAL_AH_PAUSE_SEC - sinceExt + 0.2))
+			return
+		end
+		if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+			ScheduleNextSnipeAutoScan(0.6)
+			return
+		end
+		lastAutoScanAt = now
+		ns:SearchSnipeTargetsOnAH()
+	end)
 end
 
 local function EnsureSnipeDB()
@@ -778,6 +884,7 @@ local function CancelSnipeBatch(silent)
 	activeSnipeBatch = nil
 	if not silent then
 		ns:RefreshSnipeUI()
+		ScheduleNextSnipeAutoScan()
 	end
 end
 
@@ -871,6 +978,7 @@ local function HandleSnipeBatchResults(results, isAdded)
 				end
 			end
 			if not matchedAny then
+				lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
 				return
 			end
 		end
@@ -912,6 +1020,7 @@ local function HandleSnipeBatchResults(results, isAdded)
 	else
 		activeSnipeBatch = nil
 		ns:RefreshSnipeUI()
+		ScheduleNextSnipeAutoScan()
 	end
 end
 
@@ -1375,9 +1484,38 @@ function ns:RefreshSnipeBar()
 		end)
 		snipeBar.settingsBtn:SetScript("OnLeave", GameTooltip_Hide)
 
+		snipeBar.autoScanCb = CreateFrame("CheckButton", nil, snipeBar, "UICheckButtonTemplate")
+		snipeBar.autoScanCb:SetSize(22, 22)
+		snipeBar.autoScanCb:SetPoint("RIGHT", snipeBar.settingsBtn, "LEFT", -48, 0)
+		snipeBar.autoScanCb.text = snipeBar.autoScanCb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		snipeBar.autoScanCb.text:SetPoint("LEFT", snipeBar.autoScanCb, "RIGHT", 2, 0)
+		snipeBar.autoScanCb.text:SetText(L["SNIPE_AUTOSCAN_SHORT"])
+		snipeBar.autoScanCb:SetHitRectInsets(0, -44, 0, 0)
+		snipeBar.autoScanCb:SetScript("OnClick", function(self)
+			local on = self:GetChecked() and true or false
+			if ns.db and ns.db.options then
+				ns.db.options.snipeAutoScan = on
+			end
+			if sniperSettingsFrame and sniperSettingsFrame.cbAutoScan then
+				sniperSettingsFrame.cbAutoScan:SetChecked(on)
+			end
+			if on then
+				ScheduleNextSnipeAutoScan(0.1)
+			else
+				StopSnipeAutoScan()
+			end
+		end)
+		snipeBar.autoScanCb:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
+			GameTooltip:AddLine(string.format(L["SNIPE_AUTOSCAN_TIP"], ns:GetSnipeAutoScanInterval()), 0.85, 0.85, 0.85, true)
+			GameTooltip:Show()
+		end)
+		snipeBar.autoScanCb:SetScript("OnLeave", GameTooltip_Hide)
+
 		snipeBar.scanBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
-		snipeBar.scanBtn:SetSize(112, 24)
-		snipeBar.scanBtn:SetPoint("RIGHT", snipeBar.settingsBtn, "LEFT", -6, 0)
+		snipeBar.scanBtn:SetSize(104, 24)
+		snipeBar.scanBtn:SetPoint("RIGHT", snipeBar.autoScanCb, "LEFT", -8, 0)
 		snipeBar.scanBtn:SetScript("OnClick", function()
 			ns:SearchSnipeTargetsOnAH()
 		end)
@@ -1390,7 +1528,7 @@ function ns:RefreshSnipeBar()
 		snipeBar.scanBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		snipeBar.openBtn = CreateFrame("Button", nil, snipeBar, "UIPanelButtonTemplate")
-		snipeBar.openBtn:SetSize(110, 24)
+		snipeBar.openBtn:SetSize(98, 24)
 		snipeBar.openBtn:SetPoint("RIGHT", snipeBar.scanBtn, "LEFT", -6, 0)
 		snipeBar.openBtn:SetScript("OnClick", function()
 			local hits = ns:GetSnipeHitList()
@@ -1420,7 +1558,7 @@ function ns:RefreshSnipeBar()
 		snipeBar.openBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 		snipeBar.buyBtn = CreateFrame("Button", "TradeFlowSnipeBuyBtn", snipeBar, "UIPanelButtonTemplate")
-		snipeBar.buyBtn:SetSize(142, 24)
+		snipeBar.buyBtn:SetSize(134, 24)
 		snipeBar.buyBtn:SetPoint("RIGHT", snipeBar.openBtn, "LEFT", -6, 0)
 		snipeBar.buyBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		snipeBar.buyBtn:SetScript("OnClick", function(_, button)
@@ -1474,18 +1612,24 @@ function ns:RefreshSnipeBar()
 	end
 	snipeBar:ClearAllPoints()
 	local ahScale = (ah.GetEffectiveScale and ah:GetEffectiveScale()) or 1
-	local uiScale = (UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-	local ahTop = (ah.GetTop and ah:GetTop() or 0) * ahScale
-	local screenTop = (UIParent and UIParent.GetTop and UIParent:GetTop() or 768) * uiScale
-	if ahTop > 0 and (ahTop + 42 * ahScale) > screenTop then
-		snipeBar:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 0, -2)
-		snipeBar:SetPoint("TOPRIGHT", ah, "BOTTOMRIGHT", 0, -2)
-	else
+	local ahBottom = (ah.GetBottom and ah:GetBottom() or 0) * ahScale
+	-- Нижние вкладки AH (Blizzard + Auctionator) выступают на ~32px ниже рамки AuctionHouseFrame
+	local bottomOffset = 32
+	if ahBottom > 0 and (ahBottom - (bottomOffset + 42) * ahScale) < 0 then
 		snipeBar:SetPoint("BOTTOMLEFT", ah, "TOPLEFT", 0, 2)
 		snipeBar:SetPoint("BOTTOMRIGHT", ah, "TOPRIGHT", 0, 2)
+		snipeBar._anchorPos = "top"
+	else
+		snipeBar:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 0, -bottomOffset)
+		snipeBar:SetPoint("TOPRIGHT", ah, "BOTTOMRIGHT", 0, -bottomOffset)
+		snipeBar._anchorPos = "bottom"
 	end
 
 	snipeBar.settingsBtn:SetText(L["SNIPE_SETTINGS_BAR_BTN"])
+	if snipeBar.autoScanCb then
+		snipeBar.autoScanCb:SetChecked(self.db and self.db.options and self.db.options.snipeAutoScan == true)
+		snipeBar.autoScanCb.text:SetText(L["SNIPE_AUTOSCAN_SHORT"])
+	end
 	if activeSnipeBatch then
 		snipeBar.scanBtn:SetText(L["SNIPE_SCANNING_BTN"])
 		snipeBar.scanBtn:SetEnabled(false)
@@ -1595,13 +1739,14 @@ local function FillSniperSettingsInputs(sf)
 	sf.maxSpendBox:SetText((maxSpend > 0) and ns.FormatMoneyPlain(maxSpend) or "0")
 	sf.minReserveBox:SetText((minReserve > 0) and ns.FormatMoneyPlain(minReserve) or "0")
 	sf.maxQtyBox:SetText(tostring(maxQty or 0))
+	sf.autoScanIntervalBox:SetText(tostring(ns:GetSnipeAutoScanInterval()))
 	sf.cbAutoScan:SetChecked(ns.db and ns.db.options and ns.db.options.snipeAutoScan == true)
 end
 
 function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 	if not sniperSettingsFrame then
 		local sf = CreateFrame("Frame", "TradeFlowSniperSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(350, 216)
+		sf:SetSize(350, 248)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1661,10 +1806,12 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		sf.maxSpendBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_SPEND"], L["SNIPE_LIMIT_MAX_SPEND"], L["SNIPE_LIMIT_MAX_SPEND_TIP"], -38)
 		sf.minReserveBox = MakeLimitRow(L["SNIPE_LIMIT_MIN_RESERVE"], L["SNIPE_LIMIT_MIN_RESERVE"], L["SNIPE_LIMIT_MIN_RESERVE_TIP"], -70)
 		sf.maxQtyBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY_TIP"], -102)
+		sf.autoScanIntervalBox = MakeLimitRow(L["SNIPE_AUTOSCAN_INTERVAL"], L["SNIPE_AUTOSCAN_INTERVAL"], L["SNIPE_AUTOSCAN_INTERVAL_TIP"], -134)
+		sf.autoScanIntervalBox.placeholder:SetText("1 - 15")
 
 		local cbAutoScan = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
 		cbAutoScan:SetSize(22, 22)
-		cbAutoScan:SetPoint("TOPLEFT", 10, -128)
+		cbAutoScan:SetPoint("TOPLEFT", 10, -162)
 		cbAutoScan.text = cbAutoScan:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 4, 0)
 		cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
@@ -1672,14 +1819,14 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		cbAutoScan:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_TOP")
 			GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
-			GameTooltip:AddLine(L["SNIPE_AUTOSCAN_TIP"], 0.85, 0.85, 0.85, true)
+			GameTooltip:AddLine(string.format(L["SNIPE_AUTOSCAN_TIP"], ns:GetSnipeAutoScanInterval()), 0.85, 0.85, 0.85, true)
 			GameTooltip:Show()
 		end)
 		cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
 		sf.cbAutoScan = cbAutoScan
 
 		local hint = sf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-		hint:SetPoint("TOPLEFT", 12, -156)
+		hint:SetPoint("TOPLEFT", 12, -190)
 		hint:SetPoint("RIGHT", -12, 0)
 		hint:SetJustifyH("LEFT")
 		hint:SetText(L["SNIPE_LIMIT_HINT"])
@@ -1700,11 +1847,23 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns:Print(L["SNIPE_LIMIT_BAD_QTY"])
 				return
 			end
+			local interval = ParseAutoScanInterval(sf.autoScanIntervalBox:GetText())
+			if interval == nil then
+				ns:Print(L["SNIPE_AUTOSCAN_BAD_INTERVAL"])
+				return
+			end
+			local autoOn = cbAutoScan:GetChecked() and true or false
 			if ns.db and ns.db.options then
 				ns.db.options.snipeMaxSpend = maxSpend
 				ns.db.options.snipeMinReserve = minReserve
 				ns.db.options.snipeMaxQty = maxQty
-				ns.db.options.snipeAutoScan = cbAutoScan:GetChecked() and true or false
+				ns.db.options.snipeAutoScanInterval = interval
+				ns.db.options.snipeAutoScan = autoOn
+			end
+			if autoOn then
+				ScheduleNextSnipeAutoScan()
+			else
+				StopSnipeAutoScan()
 			end
 			sf:Hide()
 			ns:RefreshSnipeUI()
@@ -1713,10 +1872,12 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 
 		sf.maxSpendBox:SetScript("OnTabPressed", function() sf.minReserveBox:SetFocus() end)
 		sf.minReserveBox:SetScript("OnTabPressed", function() sf.maxQtyBox:SetFocus() end)
-		sf.maxQtyBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
+		sf.maxQtyBox:SetScript("OnTabPressed", function() sf.autoScanIntervalBox:SetFocus() end)
+		sf.autoScanIntervalBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
 		sf.maxSpendBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.minReserveBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.maxQtyBox:SetScript("OnEnterPressed", SaveLimits)
+		sf.autoScanIntervalBox:SetScript("OnEnterPressed", SaveLimits)
 
 		local saveBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
 		saveBtn:SetSize(158, 22)
@@ -1733,6 +1894,10 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns.db.options.snipeMaxSpend = DEFAULT_SNIPE_MAX_SPEND
 				ns.db.options.snipeMinReserve = DEFAULT_SNIPE_MIN_RESERVE
 				ns.db.options.snipeMaxQty = DEFAULT_SNIPE_MAX_QTY
+				ns.db.options.snipeAutoScanInterval = DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+			end
+			if ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
+				ScheduleNextSnipeAutoScan()
 			end
 			FillSniperSettingsInputs(sf)
 			ns:RefreshSnipeUI()
@@ -1755,7 +1920,11 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 	sniperSettingsAnchorKind = newKind
 	sf:ClearAllPoints()
 	if anchorBtn and anchorBtn.IsVisible and anchorBtn:IsVisible() then
-		sf:SetPoint("TOPRIGHT", anchorBtn, "BOTTOMRIGHT", 0, -4)
+		if newKind == "ah" and snipeBar and snipeBar._anchorPos == "bottom" then
+			sf:SetPoint("BOTTOMRIGHT", anchorBtn, "TOPRIGHT", 0, 4)
+		else
+			sf:SetPoint("TOPRIGHT", anchorBtn, "BOTTOMRIGHT", 0, -4)
+		end
 	else
 		sf:SetPoint("CENTER")
 	end
@@ -1808,7 +1977,12 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			C_Timer.After(0.15, function() ns:RefreshSnipeBar() end)
 			if #targets > 0 and ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
 				local tNow = GetTime and GetTime() or 0
-				if (tNow - lastAutoScanAt) >= 30 then
+				if C_AuctionHouse and C_AuctionHouse.SearchForItemKeys then
+					local interval = ns:GetSnipeAutoScanInterval()
+					local minOpenCd = math.min(5, interval)
+					local wait = (tNow - lastAutoScanAt >= minOpenCd) and 0.45 or math.max(0.45, minOpenCd - (tNow - lastAutoScanAt))
+					ScheduleNextSnipeAutoScan(wait)
+				elseif (tNow - lastAutoScanAt) >= 30 then
 					C_Timer.After(0.45, function()
 						local cbNow = GetTime and GetTime() or 0
 						if IsAuctionHouseOpen() and ns.IsModuleEnabled and ns:IsModuleEnabled("profit") and (cbNow - lastAutoScanAt) >= 30 then
@@ -1903,6 +2077,8 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" then
 		if activeSnipeBatch and activeSnipeBatch.waitingResults then
 			HandleSnipeBatchResults(C_AuctionHouse and C_AuctionHouse.GetBrowseResults and C_AuctionHouse.GetBrowseResults(), false)
+		else
+			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
 		end
 		if next(ns:GetSnipeTargets()) ~= nil then
 			ns:RefreshSnipeUI()
@@ -1910,11 +2086,21 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
 		if activeSnipeBatch and activeSnipeBatch.waitingResults then
 			HandleSnipeBatchResults(arg1, true)
+		else
+			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+		end
+		if next(ns:GetSnipeTargets()) ~= nil then
+			ns:RefreshSnipeUI()
+		end
+	elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "AUCTION_ITEM_LIST_UPDATE" then
+		if not pendingBuy then
+			lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
 		end
 		if next(ns:GetSnipeTargets()) ~= nil then
 			ns:RefreshSnipeUI()
 		end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
+		StopSnipeAutoScan()
 		CancelSnipeBatch(true)
 		pendingSnipeBid = nil
 		if pendingBuy then
