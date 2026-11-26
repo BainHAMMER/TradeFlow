@@ -298,16 +298,17 @@ function ProfitMod:CreateView(parent)
 	repriceBtn:SetText(L["SNIPE_REPRICE_BTN"])
 	repriceBtn:SetScript("OnClick", function()
 		if ns.RepriceSnipeTargets then
-			ns:RepriceSnipeTargets(0.80)
+			ns:RepriceSnipeTargets()
 		end
 	end)
 	repriceBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(L["SNIPE_REPRICE_BTN"], 1, 0.82, 0)
-		GameTooltip:AddLine(L["SNIPE_REPRICE_TIP"], 0.85, 0.85, 0.85, true)
+		GameTooltip:SetText(self:GetText() or L["SNIPE_REPRICE_BTN"], 1, 0.82, 0)
+		GameTooltip:AddLine(string.format(L["SNIPE_REPRICE_TIP"], ns.GetSnipeDiscountPct and ns:GetSnipeDiscountPct() or 20), 0.85, 0.85, 0.85, true)
 		GameTooltip:Show()
 	end)
 	repriceBtn:SetScript("OnLeave", GameTooltip_Hide)
+	f.repriceBtn = repriceBtn
 
 	local clearSnipeBtn = CreateFrame("Button", nil, sniperTop, "UIPanelButtonTemplate")
 	clearSnipeBtn:SetSize(72, 20)
@@ -349,14 +350,18 @@ function ProfitMod:CreateView(parent)
 	cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
 	cbAutoScan:SetHitRectInsets(0, -math.max(60, math.ceil((cbAutoScan.text:GetStringWidth() or 80) + 4)), 0, 0)
 	cbAutoScan:SetScript("OnClick", function(self)
-		if ns.db and ns.db.options then
-			ns.db.options.snipeAutoScan = self:GetChecked() and true or false
+		local on = self:GetChecked() and true or false
+		if ns.SetSnipeAutoScanEnabled then
+			ns:SetSnipeAutoScanEnabled(on)
+		elseif ns.db and ns.db.options then
+			ns.db.options.snipeAutoScan = on
 		end
 	end)
 	cbAutoScan:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText(L["SNIPE_AUTOSCAN_CB"], 1, 0.82, 0)
-		GameTooltip:AddLine(L["SNIPE_AUTOSCAN_TIP"], 0.85, 0.85, 0.85, true)
+		local iv = ns.GetSnipeAutoScanInterval and ns:GetSnipeAutoScanInterval() or 5
+		GameTooltip:AddLine(string.format(L["SNIPE_AUTOSCAN_TIP"], iv), 0.85, 0.85, 0.85, true)
 		GameTooltip:Show()
 	end)
 	cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
@@ -625,6 +630,23 @@ function ProfitMod:CreateView(parent)
 		row.hl = row:CreateTexture(nil, "HIGHLIGHT")
 		row.hl:SetAllPoints()
 		row.hl:SetColorTexture(1, 0.85, 0.3, 0.10)
+
+		row.enableCb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+		row.enableCb:SetSize(20, 20)
+		row.enableCb:SetPoint("LEFT", 2, 0)
+		row.enableCb:SetScript("OnClick", function(self)
+			local e = row.entryData
+			if e and e.itemID and ns.SetSnipeTargetEnabled then
+				ns:SetSnipeTargetEnabled(e.itemID, self:GetChecked() and true or false)
+			end
+		end)
+		row.enableCb:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_ITEM_ENABLE_TIP"], 0.9, 0.9, 0.9, true)
+			GameTooltip:Show()
+		end)
+		row.enableCb:SetScript("OnLeave", GameTooltip_Hide)
+		row.enableCb:Hide()
 
 		row.icon = row:CreateTexture(nil, "ARTWORK")
 		row.icon:SetSize(22, 22)
@@ -982,6 +1004,12 @@ function ProfitMod:RenderRows()
 					row.profitText:SetPoint("RIGHT", row, "RIGHT", -6, 0)
 					row.profitText:SetText(ns.FormatMoney(e.profit or 0, true))
 				end
+				row.enableCb:Hide()
+				row.icon:ClearAllPoints()
+				row.icon:SetPoint("LEFT", 4, 0)
+				row.icon:SetAlpha(1)
+				row.title:SetAlpha(1)
+				row.sub:SetAlpha(1)
 				row.marginText:SetText("")
 				row.snipeBtn:Hide()
 				row.queueBtn:Hide()
@@ -996,15 +1024,24 @@ function ProfitMod:RenderRows()
 				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
 				row.sub:SetPoint("RIGHT", row.profitText, "LEFT", -8, 0)
 			elseif isSniper then
+				local itemEnabled = (not ns.IsSnipeTargetEnabled) or ns:IsSnipeTargetEnabled(e)
+				row.enableCb:Show()
+				row.enableCb:SetChecked(itemEnabled)
+				row.icon:ClearAllPoints()
+				row.icon:SetPoint("LEFT", 24, 0)
+				local alpha = itemEnabled and 1 or 0.45
+				row.icon:SetAlpha(alpha)
+				row.title:SetAlpha(alpha)
+				row.sub:SetAlpha(alpha)
 				local name, icon, _, _, _, hex = ns:GetItemDisplay(e.itemID)
 				row.icon:SetTexture(icon)
-				local hit = ns.snipeHits and ns.snipeHits[e.itemID]
+				local hit = itemEnabled and ns.snipeHits and ns.snipeHits[e.itemID]
 				local qtyStr = hit and (ns.FormatSnipeHitQty and ns.FormatSnipeHitQty(hit) or L["SNIPE_LOT_ANY"]) or nil
 				local statusTag = hit
 					and string.format(" |cff40ff40[%s @ %s (-%d%%)]|r", qtyStr, ns.FormatMoney(hit.bestPrice), hit.discountPct or 0)
-					or ""
+					or (not itemEnabled and (" " .. L["SNIPE_PAUSED_TAG"]) or "")
 				row.title:SetText(string.format("%s%s|r%s", hex or "|cffffffff", name, statusTag))
-				local curP = ns:GetAuctionPrice(e.itemID)
+				local curP = (ns.GetSnipeLiveMarketPrice and ns:GetSnipeLiveMarketPrice(e.itemID)) or ns:GetAuctionPrice(e.itemID)
 				local curStr = curP and ns.FormatMoney(curP) or "|cff888888-|r"
 				if curP and curP > 0 and e.maxPrice and e.maxPrice > 0 then
 					local diffPct = math.floor((curP - e.maxPrice) / e.maxPrice * 100 + 0.5)
@@ -1014,7 +1051,8 @@ function ProfitMod:RenderRows()
 						curStr = curStr .. string.format(" |cffaaaaaa(+%d%%)|r", diffPct)
 					end
 				end
-				row.sub:SetText(string.format(L["SNIPE_ROW_SUB"], ns.FormatMoney(e.maxPrice), curStr))
+				local pinTag = e.manual and (" " .. L["SNIPE_MANUAL_TAG"]) or ""
+				row.sub:SetText(string.format(L["SNIPE_ROW_SUB"], ns.FormatMoney(e.maxPrice), curStr) .. pinTag)
 				row.profitText:SetText("")
 				row.marginText:SetText("")
 				row.snipeBtn:Hide()
@@ -1030,6 +1068,12 @@ function ProfitMod:RenderRows()
 				row.sub:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 6, 1)
 				row.sub:SetPoint("RIGHT", row.minusBtn, "LEFT", -6, 0)
 			else
+				row.enableCb:Hide()
+				row.icon:ClearAllPoints()
+				row.icon:SetPoint("LEFT", 4, 0)
+				row.icon:SetAlpha(1)
+				row.title:SetAlpha(1)
+				row.sub:SetAlpha(1)
 				row.icon:SetTexture(e.icon)
 				local profTag = string.format("|cff66ccff[%s]|r", GetShortProfName(e.skillLine))
 				local altTag = (e.isAlt and e.ownerName) and string.format(" |cffffa040[%s]|r", e.ownerName) or ""

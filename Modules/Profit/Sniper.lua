@@ -11,6 +11,13 @@ local DEFAULT_SNIPE_MIN_RESERVE = 0
 local DEFAULT_SNIPE_AUTOSCAN_INTERVAL = 5
 local MIN_SNIPE_AUTOSCAN_INTERVAL = 1
 local MAX_SNIPE_AUTOSCAN_INTERVAL = 15
+local DEFAULT_SNIPE_DISCOUNT_PCT = 20
+local MIN_SNIPE_DISCOUNT_PCT = 5
+local MAX_SNIPE_DISCOUNT_PCT = 80
+local EMA_SAMPLE_INTERVAL = 15
+local EMA_ALPHA = 0.25
+local EMA_LOW_STREAK_THRESHOLD = 4
+local EMA_MAX_UP_MULT = 1.5
 local EXTERNAL_AH_PAUSE_SEC = 6
 local snipeBar = nil
 local sniperSettingsFrame = nil
@@ -52,6 +59,118 @@ function ns:GetSnipeAutoScanInterval()
 	return v
 end
 
+function ns:GetSnipeDiscountPct()
+	local opts = self.db and self.db.options
+	local v = opts and tonumber(opts.snipeDiscountPct)
+	if not v then
+		return DEFAULT_SNIPE_DISCOUNT_PCT
+	end
+	v = math.floor(v + 0.5)
+	if v < MIN_SNIPE_DISCOUNT_PCT then
+		return MIN_SNIPE_DISCOUNT_PCT
+	elseif v > MAX_SNIPE_DISCOUNT_PCT then
+		return MAX_SNIPE_DISCOUNT_PCT
+	end
+	return v
+end
+
+function ns:GetSnipeDiscountRatio()
+	return (100 - self:GetSnipeDiscountPct()) / 100
+end
+
+local function ParseSnipeDiscountPct(text)
+	if text == nil then
+		return DEFAULT_SNIPE_DISCOUNT_PCT
+	end
+	local s = tostring(text):gsub("^%s+", ""):gsub("%s+$", ""):gsub("%%$", "")
+	if s == "" then
+		return DEFAULT_SNIPE_DISCOUNT_PCT
+	end
+	if not s:match("^%d+$") then
+		return nil
+	end
+	local n = tonumber(s)
+	if not n or n < MIN_SNIPE_DISCOUNT_PCT or n > MAX_SNIPE_DISCOUNT_PCT then
+		return nil
+	end
+	return n
+end
+
+function ns:IsSnipeTargetEnabled(target)
+	return target ~= nil and target.enabled ~= false
+end
+
+function ns:GetSnipeLiveMarketPrice(itemID)
+	if not itemID or itemID <= 0 then
+		return nil, nil
+	end
+	local stock = self.realmDB and self.realmDB.ahStock and self.realmDB.ahStock[itemID]
+	local now = time and time() or 0
+	if stock and stock.price and stock.price > 0 then
+		if not stock.ts or stock.ts <= 0 or now <= 0 or (now - stock.ts) <= MAX_SNIPE_STOCK_AGE then
+			return stock.price, "live"
+		end
+	end
+	local p, src = self:GetAuctionPrice(itemID)
+	return p, src
+end
+
+local function UpdateSnipeMarketEMA(target, livePrice, now)
+	if not (target and livePrice and livePrice > 0) then
+		return false
+	end
+	local opts = ns.db and ns.db.options
+	if opts and opts.snipeAutoReprice == false then
+		return false
+	end
+	if target.manual == true then
+		return false
+	end
+	local lastAt = target.lastEmaAt or 0
+	if now > 0 and lastAt > 0 and (now - lastAt) < EMA_SAMPLE_INTERVAL then
+		return false
+	end
+	local ratio = ns:GetSnipeDiscountRatio()
+	if not target.emaPrice or target.emaPrice <= 0 then
+		target.emaPrice = livePrice
+		target.lastEmaAt = now
+		target.lowStreak = 0
+		-- При первичной инициализации якоря не сбиваем уже сработавший хит вниз
+		if livePrice > (target.maxPrice or 0) then
+			local newMax = math.max(1, math.floor(target.emaPrice * ratio + 0.5))
+			if newMax ~= target.maxPrice then
+				target.maxPrice = newMax
+				target.ts = now
+				return true
+			end
+		end
+		return false
+	end
+
+	if livePrice <= (target.maxPrice or 0) then
+		-- Похоже на дешёвый лот: игнорируем разовые выбросы, тянем якорь вниз только при устойчивом падении рынка
+		target.lowStreak = (target.lowStreak or 0) + 1
+		target.lastEmaAt = now
+		if target.lowStreak < EMA_LOW_STREAK_THRESHOLD then
+			return false
+		end
+		target.emaPrice = math.max(1, math.floor(target.emaPrice * (1 - EMA_ALPHA) + livePrice * EMA_ALPHA + 0.5))
+	else
+		target.lowStreak = 0
+		target.lastEmaAt = now
+		local capped = math.min(livePrice, math.max(1, math.floor(target.emaPrice * EMA_MAX_UP_MULT + 0.5)))
+		target.emaPrice = math.max(1, math.floor(target.emaPrice * (1 - EMA_ALPHA) + capped * EMA_ALPHA + 0.5))
+	end
+
+	local newMax = math.max(1, math.floor(target.emaPrice * ratio + 0.5))
+	if newMax ~= target.maxPrice then
+		target.maxPrice = newMax
+		target.ts = now
+		return true
+	end
+	return false
+end
+
 local function ParseAutoScanInterval(text)
 	if text == nil then
 		return DEFAULT_SNIPE_AUTOSCAN_INTERVAL
@@ -74,7 +193,27 @@ local function StopSnipeAutoScan()
 	autoScanTimerToken = autoScanTimerToken + 1
 end
 
-local function ScheduleNextSnipeAutoScan(delayOverride)
+local ScheduleNextSnipeAutoScan
+
+function ns:SetSnipeAutoScanEnabled(on)
+	local enabled = (on == true)
+	if self.db and self.db.options then
+		self.db.options.snipeAutoScan = enabled
+	end
+	if snipeBar and snipeBar.autoScanCb then
+		snipeBar.autoScanCb:SetChecked(enabled)
+	end
+	if sniperSettingsFrame and sniperSettingsFrame.cbAutoScan then
+		sniperSettingsFrame.cbAutoScan:SetChecked(enabled)
+	end
+	if enabled then
+		ScheduleNextSnipeAutoScan(0.1)
+	else
+		StopSnipeAutoScan()
+	end
+end
+
+ScheduleNextSnipeAutoScan = function(delayOverride)
 	autoScanTimerToken = autoScanTimerToken + 1
 	local tok = autoScanTimerToken
 	if not (C_Timer and C_Timer.After) then
@@ -92,7 +231,7 @@ local function ScheduleNextSnipeAutoScan(delayOverride)
 	if not (ns.db and ns.db.options and ns.db.options.snipeAutoScan == true) then
 		return
 	end
-	if next(EnsureSnipeDB()) == nil then
+	if #ns:GetActiveSnipeTargetList() == 0 then
 		return
 	end
 	local delay = delayOverride or ns:GetSnipeAutoScanInterval()
@@ -112,7 +251,7 @@ local function ScheduleNextSnipeAutoScan(delayOverride)
 		if not (ns.db and ns.db.options and ns.db.options.snipeAutoScan == true) then
 			return
 		end
-		if next(EnsureSnipeDB()) == nil then
+		if #ns:GetActiveSnipeTargetList() == 0 then
 			return
 		end
 		if activeSnipeBatch then
@@ -175,16 +314,56 @@ function ns:GetSnipeTargetList()
 	return list
 end
 
-function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync)
+function ns:GetActiveSnipeTargetList()
+	local targets = EnsureSnipeDB()
+	local list = {}
+	for _, t in pairs(targets) do
+		if t and t.enabled ~= false then
+			list[#list + 1] = t
+		end
+	end
+	table.sort(list, function(a, b)
+		return (a.itemID or 0) < (b.itemID or 0)
+	end)
+	return list
+end
+
+function ns:SetSnipeTargetEnabled(itemID, enabled)
+	local targets = EnsureSnipeDB()
+	local t = targets[itemID]
+	if not t then
+		return
+	end
+	t.enabled = (enabled == true)
+	if not t.enabled then
+		if self.snipeHits then
+			self.snipeHits[itemID] = nil
+		end
+	else
+		self:EvaluateSnipeItem(itemID, true)
+	end
+	self:SyncSnipeShoppingList(true)
+	self:RefreshSnipeUI()
+end
+
+function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync, isManual)
 	if not itemID or itemID <= 0 or not maxPrice or maxPrice <= 0 then
 		return false
 	end
 	local targets = EnsureSnipeDB()
+	local prev = targets[itemID]
+	local now = time and time() or 0
+	local liveP = self:GetSnipeLiveMarketPrice(itemID)
 	targets[itemID] = {
 		itemID = itemID,
 		maxPrice = math.max(1, math.floor(maxPrice + 0.5)),
-		recipeID = recipeID,
-		ts = time and time() or 0,
+		recipeID = recipeID or (prev and prev.recipeID),
+		ts = now,
+		enabled = (prev and prev.enabled == false) and false or true,
+		manual = (isManual == true),
+		emaPrice = (liveP and liveP > 0) and liveP or (prev and prev.emaPrice) or nil,
+		lastEmaAt = (liveP and liveP > 0) and now or (prev and prev.lastEmaAt) or 0,
+		lowStreak = 0,
 	}
 	self:EvaluateSnipeItem(itemID, true)
 	if not deferSync then
@@ -464,9 +643,9 @@ function ns:AddManualSnipeTarget(itemInput, priceInput, explicitItemID)
 			return false
 		end
 	else
-		local curAh = self.GetAuctionPrice and self:GetAuctionPrice(itemID) or nil
+		local curAh = self:GetSnipeLiveMarketPrice(itemID)
 		if curAh and curAh > 0 then
-			maxPrice = math.max(1, math.floor(curAh * 0.80 + 0.5))
+			maxPrice = math.max(1, math.floor(curAh * self:GetSnipeDiscountRatio() + 0.5))
 		else
 			if self.Print then
 				self:Print(L["SNIPE_ADD_NEED_PRICE"])
@@ -474,7 +653,7 @@ function ns:AddManualSnipeTarget(itemInput, priceInput, explicitItemID)
 			return false
 		end
 	end
-	if not self:AddSnipeTarget(itemID, maxPrice, nil, false) then
+	if not self:AddSnipeTarget(itemID, maxPrice, nil, false, priceStr ~= "") then
 		return false
 	end
 	local name, _, _, link, _, hex = self:GetItemDisplay(itemID)
@@ -594,27 +773,34 @@ function ns:AdjustSnipeTarget(itemID, factor)
 		return
 	end
 	t.maxPrice = math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5))
+	t.manual = true
 	self:EvaluateSnipeItem(itemID, true)
 	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 end
 
 function ns:RepriceSnipeTargets(ratio)
-	local r = ratio or 0.80
+	local r = ratio or self:GetSnipeDiscountRatio()
+	local discPct = math.max(1, math.floor((1 - r) * 100 + 0.5))
 	local targets = EnsureSnipeDB()
+	local now = time and time() or 0
 	local updated = 0
 	for itemID, t in pairs(targets) do
-		local cur = self:GetAuctionPrice(itemID)
+		local cur = self:GetSnipeLiveMarketPrice(itemID)
 		if cur and cur > 0 then
 			t.maxPrice = math.max(1, math.floor(cur * r + 0.5))
-			t.ts = time and time() or 0
+			t.ts = now
+			t.emaPrice = cur
+			t.lastEmaAt = now
+			t.lowStreak = 0
+			t.manual = false
 			self:EvaluateSnipeItem(itemID, true)
 			updated = updated + 1
 		end
 	end
 	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
-	self:Print(string.format(L["SNIPE_REPRICED_MSG"], updated))
+	self:Print(string.format(L["SNIPE_REPRICED_MSG"], updated, discPct))
 	return updated
 end
 
@@ -658,7 +844,7 @@ function ns:EvaluateSnipeItem(itemID, silent)
 	end
 	local targets = EnsureSnipeDB()
 	local target = targets[itemID]
-	if not target then
+	if not target or target.enabled == false then
 		self.snipeHits[itemID] = nil
 		return nil
 	end
@@ -667,6 +853,9 @@ function ns:EvaluateSnipeItem(itemID, silent)
 	if not stock or (stock.ts and stock.ts > 0 and now > 0 and (now - stock.ts) > MAX_SNIPE_STOCK_AGE) then
 		self.snipeHits[itemID] = nil
 		return nil
+	end
+	if stock.price and stock.price > 0 and (not stock.ts or stock.ts <= 0 or now <= 0 or (now - stock.ts) <= 60) then
+		UpdateSnipeMarketEMA(target, stock.price, now)
 	end
 
 	local bestQty = nil
@@ -791,7 +980,7 @@ function ns:SyncSnipeShoppingList(silent)
 	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then
 		return
 	end
-	local targets = self:GetSnipeTargetList()
+	local targets = self:GetActiveSnipeTargetList()
 	local listName = L["SNIPE_LIST_NAME"]
 	local parts = {}
 	for _, t in ipairs(targets) do
@@ -1082,7 +1271,7 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 			items[1] = targets[targetOrFilter]
 		end
 	else
-		items = self:GetSnipeTargetList()
+		items = self:GetActiveSnipeTargetList()
 	end
 	if #items == 0 then
 		return
@@ -1435,7 +1624,7 @@ end
 function ns:RefreshSnipeBar()
 	local ah = GetActiveAuctionFrame()
 	local enabled = self.IsModuleEnabled and self:IsModuleEnabled("profit")
-	local targets = self:GetSnipeTargetList()
+	local targets = self:GetActiveSnipeTargetList()
 	local hits = self:GetSnipeHitList()
 	if not (ah and enabled and (#targets > 0 or pendingBuy)) then
 		if snipeBar then
@@ -1492,18 +1681,7 @@ function ns:RefreshSnipeBar()
 		snipeBar.autoScanCb.text:SetText(L["SNIPE_AUTOSCAN_SHORT"])
 		snipeBar.autoScanCb:SetHitRectInsets(0, -44, 0, 0)
 		snipeBar.autoScanCb:SetScript("OnClick", function(self)
-			local on = self:GetChecked() and true or false
-			if ns.db and ns.db.options then
-				ns.db.options.snipeAutoScan = on
-			end
-			if sniperSettingsFrame and sniperSettingsFrame.cbAutoScan then
-				sniperSettingsFrame.cbAutoScan:SetChecked(on)
-			end
-			if on then
-				ScheduleNextSnipeAutoScan(0.1)
-			else
-				StopSnipeAutoScan()
-			end
+			ns:SetSnipeAutoScanEnabled(self:GetChecked() and true or false)
 		end)
 		snipeBar.autoScanCb:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -1740,13 +1918,15 @@ local function FillSniperSettingsInputs(sf)
 	sf.minReserveBox:SetText((minReserve > 0) and ns.FormatMoneyPlain(minReserve) or "0")
 	sf.maxQtyBox:SetText(tostring(maxQty or 0))
 	sf.autoScanIntervalBox:SetText(tostring(ns:GetSnipeAutoScanInterval()))
+	sf.discountPctBox:SetText(tostring(ns:GetSnipeDiscountPct()))
 	sf.cbAutoScan:SetChecked(ns.db and ns.db.options and ns.db.options.snipeAutoScan == true)
+	sf.cbAutoReprice:SetChecked(not (ns.db and ns.db.options and ns.db.options.snipeAutoReprice == false))
 end
 
 function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 	if not sniperSettingsFrame then
 		local sf = CreateFrame("Frame", "TradeFlowSniperSettingsFrame", UIParent, "BackdropTemplate")
-		sf:SetSize(350, 248)
+		sf:SetSize(350, 304)
 		sf:SetFrameStrata("DIALOG")
 		sf:SetToplevel(true)
 		sf:SetClampedToScreen(true)
@@ -1808,10 +1988,12 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		sf.maxQtyBox = MakeLimitRow(L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY"], L["SNIPE_LIMIT_MAX_QTY_TIP"], -102)
 		sf.autoScanIntervalBox = MakeLimitRow(L["SNIPE_AUTOSCAN_INTERVAL"], L["SNIPE_AUTOSCAN_INTERVAL"], L["SNIPE_AUTOSCAN_INTERVAL_TIP"], -134)
 		sf.autoScanIntervalBox.placeholder:SetText("1 - 15")
+		sf.discountPctBox = MakeLimitRow(L["SNIPE_DISCOUNT_PCT"], L["SNIPE_DISCOUNT_PCT"], L["SNIPE_DISCOUNT_PCT_TIP"], -166)
+		sf.discountPctBox.placeholder:SetText("5 - 80")
 
 		local cbAutoScan = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
 		cbAutoScan:SetSize(22, 22)
-		cbAutoScan:SetPoint("TOPLEFT", 10, -162)
+		cbAutoScan:SetPoint("TOPLEFT", 10, -194)
 		cbAutoScan.text = cbAutoScan:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		cbAutoScan.text:SetPoint("LEFT", cbAutoScan, "RIGHT", 4, 0)
 		cbAutoScan.text:SetText(L["SNIPE_AUTOSCAN_CB"])
@@ -1825,8 +2007,24 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		cbAutoScan:SetScript("OnLeave", GameTooltip_Hide)
 		sf.cbAutoScan = cbAutoScan
 
+		local cbAutoReprice = CreateFrame("CheckButton", nil, sf, "UICheckButtonTemplate")
+		cbAutoReprice:SetSize(22, 22)
+		cbAutoReprice:SetPoint("TOPLEFT", 10, -220)
+		cbAutoReprice.text = cbAutoReprice:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		cbAutoReprice.text:SetPoint("LEFT", cbAutoReprice, "RIGHT", 4, 0)
+		cbAutoReprice.text:SetText(L["SNIPE_AUTOREPRICE_CB"])
+		cbAutoReprice:SetHitRectInsets(0, -240, 0, 0)
+		cbAutoReprice:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText(L["SNIPE_AUTOREPRICE_CB"], 1, 0.82, 0)
+			GameTooltip:AddLine(string.format(L["SNIPE_AUTOREPRICE_TIP"], ns:GetSnipeDiscountPct()), 0.85, 0.85, 0.85, true)
+			GameTooltip:Show()
+		end)
+		cbAutoReprice:SetScript("OnLeave", GameTooltip_Hide)
+		sf.cbAutoReprice = cbAutoReprice
+
 		local hint = sf:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-		hint:SetPoint("TOPLEFT", 12, -190)
+		hint:SetPoint("TOPLEFT", 12, -248)
 		hint:SetPoint("RIGHT", -12, 0)
 		hint:SetJustifyH("LEFT")
 		hint:SetText(L["SNIPE_LIMIT_HINT"])
@@ -1852,12 +2050,20 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns:Print(L["SNIPE_AUTOSCAN_BAD_INTERVAL"])
 				return
 			end
+			local discPct = ParseSnipeDiscountPct(sf.discountPctBox:GetText())
+			if discPct == nil then
+				ns:Print(L["SNIPE_DISCOUNT_BAD"])
+				return
+			end
 			local autoOn = cbAutoScan:GetChecked() and true or false
+			local autoReprice = cbAutoReprice:GetChecked() and true or false
 			if ns.db and ns.db.options then
 				ns.db.options.snipeMaxSpend = maxSpend
 				ns.db.options.snipeMinReserve = minReserve
 				ns.db.options.snipeMaxQty = maxQty
 				ns.db.options.snipeAutoScanInterval = interval
+				ns.db.options.snipeDiscountPct = discPct
+				ns.db.options.snipeAutoReprice = autoReprice
 				ns.db.options.snipeAutoScan = autoOn
 			end
 			if autoOn then
@@ -1873,11 +2079,13 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 		sf.maxSpendBox:SetScript("OnTabPressed", function() sf.minReserveBox:SetFocus() end)
 		sf.minReserveBox:SetScript("OnTabPressed", function() sf.maxQtyBox:SetFocus() end)
 		sf.maxQtyBox:SetScript("OnTabPressed", function() sf.autoScanIntervalBox:SetFocus() end)
-		sf.autoScanIntervalBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
+		sf.autoScanIntervalBox:SetScript("OnTabPressed", function() sf.discountPctBox:SetFocus() end)
+		sf.discountPctBox:SetScript("OnTabPressed", function() sf.maxSpendBox:SetFocus() end)
 		sf.maxSpendBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.minReserveBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.maxQtyBox:SetScript("OnEnterPressed", SaveLimits)
 		sf.autoScanIntervalBox:SetScript("OnEnterPressed", SaveLimits)
+		sf.discountPctBox:SetScript("OnEnterPressed", SaveLimits)
 
 		local saveBtn = CreateFrame("Button", nil, sf, "UIPanelButtonTemplate")
 		saveBtn:SetSize(158, 22)
@@ -1895,6 +2103,8 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns.db.options.snipeMinReserve = DEFAULT_SNIPE_MIN_RESERVE
 				ns.db.options.snipeMaxQty = DEFAULT_SNIPE_MAX_QTY
 				ns.db.options.snipeAutoScanInterval = DEFAULT_SNIPE_AUTOSCAN_INTERVAL
+				ns.db.options.snipeDiscountPct = DEFAULT_SNIPE_DISCOUNT_PCT
+				ns.db.options.snipeAutoReprice = true
 			end
 			if ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
 				ScheduleNextSnipeAutoScan()
@@ -1966,7 +2176,7 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 	if event == "AUCTION_HOUSE_SHOW" then
 		HookAuctionFrameShow(AuctionHouseFrame)
 		HookAuctionFrameShow(AuctionFrame)
-		local targets = ns:GetSnipeTargetList()
+		local targets = ns:GetActiveSnipeTargetList()
 		for _, t in ipairs(targets) do
 			ns:EvaluateSnipeItem(t.itemID, true)
 		end

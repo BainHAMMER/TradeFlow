@@ -1811,6 +1811,8 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			snipeMinReserve = 0,
 			snipeMaxQty = 200,
 			snipeAutoScanInterval = 5,
+			snipeAutoReprice = true,
+			snipeDiscountPct = 20,
 			uiScale = 1.0,
 			leftCollapsed = false,
 			windowMinimized = false,
