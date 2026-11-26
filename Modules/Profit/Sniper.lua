@@ -233,6 +233,7 @@ function ns:SetSnipeAutoScanEnabled(on)
 	else
 		StopSnipeAutoScan()
 	end
+	self:RefreshSnipeUI()
 end
 
 ScheduleNextSnipeAutoScan = function(delayOverride)
@@ -341,6 +342,9 @@ function ns:SetSnipeTargetEnabled(itemID, enabled)
 		end
 	else
 		self:EvaluateSnipeItem(itemID, true)
+		if not activeSnipeBatch then
+			ScheduleNextSnipeAutoScan()
+		end
 	end
 	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
@@ -369,6 +373,9 @@ function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync, isManual)
 	if not deferSync then
 		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
+		if not activeSnipeBatch then
+			ScheduleNextSnipeAutoScan()
+		end
 	end
 	return true
 end
@@ -1162,12 +1169,14 @@ SendNextSnipeBatchChunk = function()
 	batch.seen = {}
 	batch.waitingThrottle = false
 	batch.waitingResults = true
+	batch.gotInitialUpdate = false
 	batch.pendingMore = false
 
 	local ok = pcall(C_AuctionHouse.SearchForItemKeys, keys, {})
 	if not ok then
 		local fallbackItems = batch.items
 		CancelSnipeBatch(true)
+		ns:RefreshSnipeBar()
 		RunAuctionatorSnipeSearch(fallbackItems, false)
 		return
 	end
@@ -1188,11 +1197,15 @@ local function HandleSnipeBatchResults(results, isAdded)
 	if not (batch and batch.waitingResults and batch.chunkSet) then
 		return
 	end
+	if isAdded and not batch.gotInitialUpdate then
+		lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+		return
+	end
 	local chunkSet = batch.chunkSet
 	if type(results) == "table" then
 		-- Если пришёл непустой ответ, в котором нет ни одного itemID из нашего чанка —
 		-- это чужой browse-запрос, игнорируем его чтобы не сбросить свои хиты.
-		if not isAdded and #results > 0 then
+		if #results > 0 then
 			local matchedAny = false
 			for _, r in ipairs(results) do
 				local id = r and r.itemKey and r.itemKey.itemID
@@ -1206,12 +1219,17 @@ local function HandleSnipeBatchResults(results, isAdded)
 				return
 			end
 		end
+		if not isAdded then
+			batch.gotInitialUpdate = true
+		end
 		for _, r in ipairs(results) do
 			local id = r and r.itemKey and r.itemKey.itemID
 			if id and chunkSet[id] and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
 				batch.seen[id] = true
 			end
 		end
+	elseif not isAdded then
+		batch.gotInitialUpdate = true
 	end
 
 	local hasFull = (not (C_AuctionHouse and C_AuctionHouse.HasFullBrowseResults)) or C_AuctionHouse.HasFullBrowseResults()
@@ -1249,6 +1267,9 @@ local function HandleSnipeBatchResults(results, isAdded)
 end
 
 local function StartSnipeBatchScan(items)
+	if activeSnipeBatch then
+		return
+	end
 	local chunks = {}
 	local cur = {}
 	for _, t in ipairs(items) do
@@ -1318,6 +1339,9 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 		return
 	end
 
+	CancelSnipeBatch(true)
+	lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
+	self:RefreshSnipeBar()
 	RunAuctionatorSnipeSearch(items, skipPriceFilter)
 end
 

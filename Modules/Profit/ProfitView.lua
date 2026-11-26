@@ -785,9 +785,20 @@ function ProfitMod:CreateView(parent)
 		row.priceBox:SetSize(62, 20)
 		row.priceBox:SetPoint("RIGHT", row.resetPinBtn, "LEFT", -6, 0)
 		row.priceBox:SetAutoFocus(false)
+		row.priceBox:SetScript("OnEditFocusGained", function(self)
+			local e = row.entryData
+			self.editingItemID = e and e.itemID or nil
+		end)
+		row.priceBox:SetScript("OnEditFocusLost", function(self)
+			self.editingItemID = nil
+			local e = row.entryData
+			if e and e.maxPrice and ns.FormatMoneyPlain then
+				self:SetText(ns.FormatMoneyPlain(e.maxPrice))
+			end
+		end)
 		row.priceBox:SetScript("OnEnterPressed", function(self)
 			local e = row.entryData
-			if not (e and e.itemID) then
+			if not (e and e.itemID) or (self.editingItemID and self.editingItemID ~= e.itemID) then
 				self:ClearFocus()
 				return
 			end
@@ -798,6 +809,7 @@ function ProfitMod:CreateView(parent)
 				end
 				return
 			end
+			self.editingItemID = nil
 			self:ClearFocus()
 			if ns.SetSnipeTargetPrice then
 				ns:SetSnipeTargetPrice(e.itemID, p, true)
@@ -1094,6 +1106,9 @@ function ProfitMod:RenderRows()
 				row.snipeBtn:Hide()
 				row.queueBtn:Hide()
 				row.priceBox:Show()
+				if row.priceBox:HasFocus() and row.priceBox.editingItemID ~= e.itemID then
+					row.priceBox:ClearFocus()
+				end
 				if not row.priceBox:HasFocus() and ns.FormatMoneyPlain then
 					row.priceBox:SetText(ns.FormatMoneyPlain(e.maxPrice))
 				end
@@ -1185,6 +1200,9 @@ function ProfitMod:RenderRows()
 				row.sub:SetPoint("RIGHT", row.marginText, "LEFT", -8, 0)
 			end
 		else
+			if row.priceBox and row.priceBox:HasFocus() then
+				row.priceBox:ClearFocus()
+			end
 			row:Hide()
 		end
 	end
