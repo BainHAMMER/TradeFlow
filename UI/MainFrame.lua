@@ -1213,6 +1213,11 @@ function ns:CreateDetailsView(parent)
 	outBtn:SetScript("OnLeave", GameTooltip_Hide)
 	d.outBtn = outBtn
 
+	d.cooldownText = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	d.cooldownText:SetPoint("TOPRIGHT", d, "TOPRIGHT", -10, -8)
+	d.cooldownText:SetJustifyH("RIGHT")
+	d.cooldownText:SetWordWrap(false)
+
 	d.recipeTitle = d:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	d.recipeTitle:SetPoint("TOPLEFT", outBtn, "TOPRIGHT", 10, -2)
 	d.recipeTitle:SetPoint("RIGHT", -10, 0)
@@ -1221,8 +1226,10 @@ function ns:CreateDetailsView(parent)
 
 	d.thresholdLine = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	d.thresholdLine:SetPoint("TOPLEFT", d.recipeTitle, "BOTTOMLEFT", 0, -5)
-	d.thresholdLine:SetPoint("RIGHT", -10, 0)
+	d.thresholdLine:SetPoint("RIGHT", d, "RIGHT", -10, 0)
 	d.thresholdLine:SetJustifyH("LEFT")
+	d.thresholdLine:SetWordWrap(false)
+	if d.thresholdLine.SetMaxLines then d.thresholdLine:SetMaxLines(1) end
 
 	d.reagentsHeader = d:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	d.reagentsHeader:SetPoint("TOPLEFT", 10, -52)
@@ -1619,6 +1626,10 @@ function ns:RefreshDetailsView()
 		d.outBtn.icon:SetTexture(nil)
 		d.recipeTitle:SetText(L["NO_RECIPE_SELECTED"])
 		d.thresholdLine:SetText("")
+		if d.cooldownText then
+			d.cooldownText:SetText("")
+		end
+		d._lastCdText = ""
 		if d.sourceBtn then
 			d.sourceBtn.itemID = nil
 			d.sourceBtn.sourceDetail = nil
@@ -1763,15 +1774,26 @@ function ns:RefreshDetailsView()
 		end
 	end
 	local cdRem = (metrics.learned and self.GetRecipeCooldownRemaining and self:GetRecipeCooldownRemaining(recipeID)) or 0
+	local cdDisplay = ""
 	if cdRem > 0 then
 		local cdStr = ns.FormatCooldown(cdRem)
-		thParts[#thParts + 1] = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], cdStr) .. "|r"
+		cdDisplay = "|cffff6666" .. string.format(L["RECIPE_COOLDOWN_LABEL"], cdStr) .. "|r"
 		d._lastCdText = cdStr
 	else
 		d._lastCdText = ""
 		local baseCd = self.GetRecipeBaseCooldown and self:GetRecipeBaseCooldown(recipeID) or 0
 		if baseCd > 0 then
-			thParts[#thParts + 1] = "|cffffb84d" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(baseCd)) .. "|r"
+			cdDisplay = "|cffffb84d" .. string.format(L["RECIPE_COOLDOWN_LABEL"], ns.FormatCooldown(baseCd)) .. "|r"
+		end
+	end
+	if d.cooldownText then
+		d.cooldownText:SetText(cdDisplay)
+		d.recipeTitle:ClearAllPoints()
+		d.recipeTitle:SetPoint("TOPLEFT", d.outBtn, "TOPRIGHT", 10, -2)
+		if cdDisplay ~= "" then
+			d.recipeTitle:SetPoint("RIGHT", d.cooldownText, "LEFT", -8, 0)
+		else
+			d.recipeTitle:SetPoint("RIGHT", d, "RIGHT", -10, 0)
 		end
 	end
 	d.thresholdLine:SetText(table.concat(thParts, "   |   "))
