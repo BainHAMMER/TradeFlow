@@ -22,6 +22,14 @@ local hookedAuctionFrames = {}
 local pendingBuy = nil
 local pendingSnipeBid = nil
 local buyTokenCounter = 0
+local SNIPE_BATCH_CHUNK_SIZE = 100
+local SNIPE_BATCH_TIMEOUT = 6.0
+local activeSnipeBatch = nil
+local snipeBatchToken = 0
+
+function ns:GetActiveSnipeBatchSet()
+	return activeSnipeBatch and activeSnipeBatch.chunkSet or nil
+end
 
 local function EnsureSnipeDB()
 	if not ns.realmDB then
@@ -726,14 +734,224 @@ function ns:SyncSnipeShoppingList(silent)
 	end)
 end
 
+local function RunAuctionatorSnipeSearch(items, skipPriceFilter)
+	local api = Auctionator and Auctionator.API and Auctionator.API.v1
+	if not (api and (api.MultiSearchAdvanced or api.MultiSearchExact)) then
+		ns:Print(L["ATR_NOT_FOUND"])
+		return
+	end
+	ns:WithLoadedItems(items, function()
+		if not IsAuctionHouseOpen() then
+			return
+		end
+		local advanced, names = {}, {}
+		for _, t in ipairs(items) do
+			local name, _, _, _, loaded = ns:GetItemDisplay(t.itemID)
+			if loaded and name then
+				names[#names + 1] = name
+				local q = {
+					searchString = name,
+					isExact = true,
+				}
+				-- При общем скане передаём SafeAuctionatorMaxPrice; для уже найденных хитов открываем стакан целиком
+				if not skipPriceFilter and t.maxPrice and t.maxPrice > 0 then
+					q.maxPrice = SafeAuctionatorMaxPrice(t.maxPrice)
+				end
+				advanced[#advanced + 1] = q
+			end
+		end
+		local searched = false
+		if api.MultiSearchAdvanced and #advanced > 0 then
+			local ok = pcall(api.MultiSearchAdvanced, ADDON_NAME, advanced)
+			searched = ok
+		end
+		if not searched and api.MultiSearchExact and #names > 0 then
+			pcall(api.MultiSearchExact, ADDON_NAME, names)
+		end
+	end)
+end
+
+local function CancelSnipeBatch(silent)
+	if not activeSnipeBatch then
+		return
+	end
+	activeSnipeBatch = nil
+	if not silent then
+		ns:RefreshSnipeUI()
+	end
+end
+
+local SendNextSnipeBatchChunk
+
+SendNextSnipeBatchChunk = function()
+	local batch = activeSnipeBatch
+	if not batch then
+		return
+	end
+	if not IsAuctionHouseOpen() then
+		CancelSnipeBatch(true)
+		return
+	end
+	local chunk = batch.chunks[batch.index]
+	if not chunk or #chunk == 0 then
+		CancelSnipeBatch(false)
+		return
+	end
+	if C_AuctionHouse.IsThrottledMessageSystemReady and not C_AuctionHouse.IsThrottledMessageSystemReady() then
+		batch.throttleRetries = (batch.throttleRetries or 0) + 1
+		if batch.throttleRetries > 12 then
+			CancelSnipeBatch(false)
+			return
+		end
+		batch.waitingThrottle = true
+		if C_Timer and C_Timer.After then
+			local tok = batch.token
+			local idx = batch.index
+			C_Timer.After(0.35, function()
+				if activeSnipeBatch and activeSnipeBatch.token == tok and activeSnipeBatch.index == idx and activeSnipeBatch.waitingThrottle then
+					SendNextSnipeBatchChunk()
+				end
+			end)
+		end
+		return
+	end
+	batch.throttleRetries = 0
+
+	local keys = {}
+	local chunkSet = {}
+	for _, itemID in ipairs(chunk) do
+		chunkSet[itemID] = true
+		if C_AuctionHouse.MakeItemKey then
+			keys[#keys + 1] = C_AuctionHouse.MakeItemKey(itemID)
+		else
+			keys[#keys + 1] = { itemID = itemID }
+		end
+	end
+	batch.chunkSet = chunkSet
+	batch.seen = {}
+	batch.waitingThrottle = false
+	batch.waitingResults = true
+	batch.pendingMore = false
+
+	local ok = pcall(C_AuctionHouse.SearchForItemKeys, keys, {})
+	if not ok then
+		local fallbackItems = batch.items
+		CancelSnipeBatch(true)
+		RunAuctionatorSnipeSearch(fallbackItems, false)
+		return
+	end
+
+	if C_Timer and C_Timer.After then
+		local tok = batch.token
+		local idx = batch.index
+		C_Timer.After(SNIPE_BATCH_TIMEOUT, function()
+			if activeSnipeBatch and activeSnipeBatch.token == tok and activeSnipeBatch.index == idx then
+				CancelSnipeBatch(false)
+			end
+		end)
+	end
+end
+
+local function HandleSnipeBatchResults(results, isAdded)
+	local batch = activeSnipeBatch
+	if not (batch and batch.waitingResults and batch.chunkSet) then
+		return
+	end
+	local chunkSet = batch.chunkSet
+	if type(results) == "table" then
+		-- Если пришёл непустой ответ, в котором нет ни одного itemID из нашего чанка —
+		-- это чужой browse-запрос, игнорируем его чтобы не сбросить свои хиты.
+		if not isAdded and #results > 0 then
+			local matchedAny = false
+			for _, r in ipairs(results) do
+				local id = r and r.itemKey and r.itemKey.itemID
+				if id and chunkSet[id] then
+					matchedAny = true
+					break
+				end
+			end
+			if not matchedAny then
+				return
+			end
+		end
+		for _, r in ipairs(results) do
+			local id = r and r.itemKey and r.itemKey.itemID
+			if id and chunkSet[id] and (r.minPrice or 0) > 0 and (r.totalQuantity or 0) > 0 then
+				batch.seen[id] = true
+			end
+		end
+	end
+
+	local hasFull = (not (C_AuctionHouse and C_AuctionHouse.HasFullBrowseResults)) or C_AuctionHouse.HasFullBrowseResults()
+	if not hasFull then
+		if C_AuctionHouse and C_AuctionHouse.RequestMoreBrowseResults then
+			if (not C_AuctionHouse.IsThrottledMessageSystemReady) or C_AuctionHouse.IsThrottledMessageSystemReady() then
+				batch.pendingMore = false
+				pcall(C_AuctionHouse.RequestMoreBrowseResults)
+			else
+				batch.pendingMore = true
+			end
+		end
+		return
+	end
+
+	-- Чанк полностью получен: убираем устаревшие хиты по позициям, которых на AH больше нет (0 лотов)
+	for itemID in pairs(chunkSet) do
+		if not batch.seen[itemID] then
+			if ns.realmDB and ns.realmDB.ahStock then
+				ns.realmDB.ahStock[itemID] = nil
+			end
+			ns:EvaluateSnipeItem(itemID, true)
+		end
+	end
+
+	batch.waitingResults = false
+	batch.index = batch.index + 1
+	if batch.index <= #batch.chunks then
+		SendNextSnipeBatchChunk()
+	else
+		activeSnipeBatch = nil
+		ns:RefreshSnipeUI()
+	end
+end
+
+local function StartSnipeBatchScan(items)
+	local chunks = {}
+	local cur = {}
+	for _, t in ipairs(items) do
+		if t and t.itemID and t.itemID > 0 then
+			cur[#cur + 1] = t.itemID
+			if #cur >= SNIPE_BATCH_CHUNK_SIZE then
+				chunks[#chunks + 1] = cur
+				cur = {}
+			end
+		end
+	end
+	if #cur > 0 then
+		chunks[#chunks + 1] = cur
+	end
+	if #chunks == 0 then
+		return
+	end
+	snipeBatchToken = snipeBatchToken + 1
+	activeSnipeBatch = {
+		token = snipeBatchToken,
+		chunks = chunks,
+		index = 1,
+		items = items,
+		chunkSet = nil,
+		seen = nil,
+		waitingThrottle = false,
+		waitingResults = false,
+		pendingMore = false,
+	}
+	ns:RefreshSnipeBar()
+	SendNextSnipeBatchChunk()
+end
+
 function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 	if not IsAuctionHouseOpen() then
 		self:Print(L["AH_NOT_OPEN"])
-		return
-	end
-	local api = Auctionator and Auctionator.API and Auctionator.API.v1
-	if not (api and (api.MultiSearchAdvanced or api.MultiSearchExact)) then
-		self:Print(L["ATR_NOT_FOUND"])
 		return
 	end
 	if self.LogTrace then
@@ -761,35 +979,13 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 		return
 	end
 
-	self:WithLoadedItems(items, function()
-		if not IsAuctionHouseOpen() then
-			return
-		end
-		local advanced, names = {}, {}
-		for _, t in ipairs(items) do
-			local name, _, _, _, loaded = self:GetItemDisplay(t.itemID)
-			if loaded and name then
-				names[#names + 1] = name
-				local q = {
-					searchString = name,
-					isExact = true,
-				}
-				-- При общем скане передаём SafeAuctionatorMaxPrice; для уже найденных хитов открываем стакан целиком
-				if not skipPriceFilter and t.maxPrice and t.maxPrice > 0 then
-					q.maxPrice = SafeAuctionatorMaxPrice(t.maxPrice)
-				end
-				advanced[#advanced + 1] = q
-			end
-		end
-		local searched = false
-		if api.MultiSearchAdvanced and #advanced > 0 then
-			local ok = pcall(api.MultiSearchAdvanced, ADDON_NAME, advanced)
-			searched = ok
-		end
-		if not searched and api.MultiSearchExact and #names > 0 then
-			pcall(api.MultiSearchExact, ADDON_NAME, names)
-		end
-	end)
+	-- Общий скан снайпера: нативный батч-запрос C_AuctionHouse.SearchForItemKeys (до 100 позиций за 1 запрос)
+	if targetOrFilter == nil and C_AuctionHouse and C_AuctionHouse.SearchForItemKeys then
+		StartSnipeBatchScan(items)
+		return
+	end
+
+	RunAuctionatorSnipeSearch(items, skipPriceFilter)
 end
 
 local function HookAuctionFrameShow(ah)
@@ -1290,7 +1486,13 @@ function ns:RefreshSnipeBar()
 	end
 
 	snipeBar.settingsBtn:SetText(L["SNIPE_SETTINGS_BAR_BTN"])
-	snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
+	if activeSnipeBatch then
+		snipeBar.scanBtn:SetText(L["SNIPE_SCANNING_BTN"])
+		snipeBar.scanBtn:SetEnabled(false)
+	else
+		snipeBar.scanBtn:SetText(L["SNIPE_SCAN_BTN"])
+		snipeBar.scanBtn:SetEnabled(true)
+	end
 
 	snipeBar.openBtn:SetText(string.format(L["SNIPE_FIND_HIT_BTN"], #hits))
 	if #hits > 0 or pendingBuy then
@@ -1566,6 +1768,8 @@ for _, ev in ipairs({
 	"AUCTION_HOUSE_SHOW",
 	"AUCTION_HOUSE_CLOSED",
 	"AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
+	"AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
+	"AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
 	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"AUCTION_ITEM_LIST_UPDATE",
 	"COMMODITY_PRICE_UPDATED",
@@ -1687,7 +1891,31 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 				pendingSnipeBid = nil
 			end
 		end
+	elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+		if activeSnipeBatch then
+			if activeSnipeBatch.pendingMore and C_AuctionHouse and C_AuctionHouse.RequestMoreBrowseResults then
+				activeSnipeBatch.pendingMore = false
+				pcall(C_AuctionHouse.RequestMoreBrowseResults)
+			elseif activeSnipeBatch.waitingThrottle then
+				SendNextSnipeBatchChunk()
+			end
+		end
+	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" then
+		if activeSnipeBatch and activeSnipeBatch.waitingResults then
+			HandleSnipeBatchResults(C_AuctionHouse and C_AuctionHouse.GetBrowseResults and C_AuctionHouse.GetBrowseResults(), false)
+		end
+		if next(ns:GetSnipeTargets()) ~= nil then
+			ns:RefreshSnipeUI()
+		end
+	elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
+		if activeSnipeBatch and activeSnipeBatch.waitingResults then
+			HandleSnipeBatchResults(arg1, true)
+		end
+		if next(ns:GetSnipeTargets()) ~= nil then
+			ns:RefreshSnipeUI()
+		end
 	elseif event == "AUCTION_HOUSE_CLOSED" then
+		CancelSnipeBatch(true)
 		pendingSnipeBid = nil
 		if pendingBuy then
 			CancelPendingCommodity(nil, nil)
