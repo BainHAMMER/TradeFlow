@@ -756,11 +756,22 @@ for _, ev in ipairs({
 	"UNIT_SPELLCAST_FAILED",
 	"UNIT_SPELLCAST_INTERRUPTED",
 }) do
-	pcall(castFrame.RegisterEvent, castFrame, ev)
+	if castFrame.RegisterUnitEvent then
+		pcall(castFrame.RegisterUnitEvent, castFrame, ev, "player")
+	else
+		pcall(castFrame.RegisterEvent, castFrame, ev)
+	end
 end
 
-castFrame:SetScript("OnEvent", function(_, event, unit, _, spellID)
+castFrame:SetScript("OnEvent", function(_, event, unit, _, rawSpellID)
+	if issecretvalue and (issecretvalue(unit) or issecretvalue(rawSpellID)) then
+		return
+	end
 	if unit ~= "player" then
+		return
+	end
+	local spellID = tonumber(rawSpellID)
+	if not spellID then
 		return
 	end
 	if event == "UNIT_SPELLCAST_SUCCEEDED" and spellID then

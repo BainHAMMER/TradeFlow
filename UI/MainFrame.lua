@@ -2347,6 +2347,9 @@ function ns:RefreshVisibleUI()
 end
 
 function ns:OnCombatEnded()
+	if secureProfProxy and secureProfProxy:IsShown() and (not secureProfProxy.targetBtn or not (self.mainFrame and self.mainFrame:IsShown())) then
+		self:DetachSecureProfProxy()
+	end
 	if self.mainFrame and self.mainFrame:IsShown() then
 		self:RefreshMainWindow()
 	end

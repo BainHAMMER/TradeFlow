@@ -171,6 +171,15 @@ local function SafeNumber(v)
 	end
 	return (type(v) == "number") and v or nil
 end
+ns.SafeNumber = SafeNumber
+
+local function SafeString(v)
+	if issecretvalue and issecretvalue(v) then
+		return nil
+	end
+	return (type(v) == "string") and v or nil
+end
+ns.SafeString = SafeString
 
 -- Базовый кулдаун рецепта в секундах (0 если нет КД), по данным клиента
 function ns:GetRecipeBaseCooldown(recipeID)
@@ -694,8 +703,9 @@ end
 function ns:ScanPlayerProfessions()
 	local found = {}
 	if GetProfessions and GetProfessionInfo then
-		local p1, p2, p3, p4, p5, p6, p7 = GetProfessions()
-		for _, idx in ipairs({ p1, p2, p3, p4, p5, p6, p7 }) do
+		local slots = { GetProfessions() }
+		for i = 1, 7 do
+			local idx = slots[i]
 			if idx then
 				local name, icon, rank, maxRank, _, _, skillLine = GetProfessionInfo(idx)
 				local norm = ns.NormalizeSkillLine(skillLine, name)
@@ -1187,6 +1197,12 @@ function ns:GetActiveClientSkillLine()
 	if not frameShown then
 		return nil
 	end
+	if C_TradeSkillUI.IsTradeSkillLinked and C_TradeSkillUI.IsTradeSkillLinked() then
+		return nil
+	end
+	if C_TradeSkillUI.IsTradeSkillGuild and C_TradeSkillUI.IsTradeSkillGuild() then
+		return nil
+	end
 	if C_TradeSkillUI.IsTradeSkillReady then
 		local ok, ready = pcall(C_TradeSkillUI.IsTradeSkillReady)
 		if ok and ready == false then
@@ -1225,6 +1241,12 @@ function ns:IsClientRecipeReady(recipeID)
 	end
 	local frameShown = (ProfessionsFrame and ProfessionsFrame:IsShown()) or (TradeSkillFrame and TradeSkillFrame:IsShown())
 	if not frameShown then
+		return false
+	end
+	if C_TradeSkillUI.IsTradeSkillLinked and C_TradeSkillUI.IsTradeSkillLinked() then
+		return false
+	end
+	if C_TradeSkillUI.IsTradeSkillGuild and C_TradeSkillUI.IsTradeSkillGuild() then
 		return false
 	end
 	if C_TradeSkillUI.IsTradeSkillReady then
@@ -1824,6 +1846,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			snipeMaxSpend = 100000,
 			snipeMinReserve = 0,
 			snipeMaxQty = 200,
+			snipeAutoScan = false,
 			snipeAutoScanInterval = 5,
 			snipeAutoReprice = true,
 			snipeDiscountPct = 20,
@@ -1989,6 +2012,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			ns:DetachSecureProfProxy()
 		end
 	elseif event == "PLAYER_REGEN_ENABLED" then
+		ClearReplaceEnchantSpace()
+		if not ns.bypassIntercept and ProfessionsFrame and ProfessionsFrame:IsShown()
+			and ns.mainFrame and ns.mainFrame:IsShown()
+		then
+			ns:SuppressBlizzardFrame()
+		end
 		if ns.OnCombatEnded then
 			ns:OnCombatEnded()
 		end

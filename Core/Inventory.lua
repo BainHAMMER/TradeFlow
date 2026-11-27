@@ -450,6 +450,10 @@ invFrame:SetScript("OnEvent", function(_, event)
 	if event == "BANKFRAME_OPENED" then
 		bankOpen = true
 	elseif event == "BANKFRAME_CLOSED" then
+		-- Снимаем финальный снимок банка до сброса bankOpen, иначе дебаунс 0.08с пропустит очистку
+		if bankOpen then
+			ns:ScanBagsNow(true)
+		end
 		bankOpen = false
 	end
 	if bagScanPending then

@@ -119,7 +119,7 @@ function ns:GetSnipeLiveMarketPrice(itemID)
 	return p, src
 end
 
-local function UpdateSnipeMarketEMA(target, livePrice, now)
+local function UpdateSnipeMarketEMA(target, livePrice, now, stockTs)
 	if not (target and livePrice and livePrice > 0) then
 		return false
 	end
@@ -130,9 +130,15 @@ local function UpdateSnipeMarketEMA(target, livePrice, now)
 	if target.manual == true then
 		return false
 	end
+	if stockTs and stockTs > 0 and (target.lastEmaStockTs or 0) >= stockTs then
+		return false
+	end
 	local lastAt = target.lastEmaAt or 0
 	if now > 0 and lastAt > 0 and (now - lastAt) < EMA_SAMPLE_INTERVAL then
 		return false
+	end
+	if stockTs and stockTs > 0 then
+		target.lastEmaStockTs = stockTs
 	end
 	local ratio = ns:GetSnipeDiscountRatio()
 	if not target.emaPrice or target.emaPrice <= 0 then
@@ -286,6 +292,15 @@ ScheduleNextSnipeAutoScan = function(delayOverride)
 		end
 		if pendingBuy then
 			ScheduleNextSnipeAutoScan(2.0)
+			return
+		end
+		-- Пауза, если игрок на вкладке выставления лотов (Blizzard Sell или Auctionator Selling)
+		local onSellTab = (AuctionatorSellingFrame and AuctionatorSellingFrame:IsVisible())
+			or (AuctionHouseFrame and AuctionHouseFrame.displayMode and Enum and Enum.AuctionHouseDisplayMode
+				and (AuctionHouseFrame.displayMode == Enum.AuctionHouseDisplayMode.ItemSell
+					or AuctionHouseFrame.displayMode == Enum.AuctionHouseDisplayMode.CommoditiesSell))
+		if onSellTab then
+			ScheduleNextSnipeAutoScan(3.0)
 			return
 		end
 		local now = GetTime and GetTime() or 0
@@ -752,6 +767,9 @@ function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio, craftPlan)
 	if added > 0 then
 		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
+		if not activeSnipeBatch then
+			ScheduleNextSnipeAutoScan()
+		end
 	end
 	return added, #items
 end
@@ -773,6 +791,9 @@ function ns:ImportShoppingToSnipe(discountRatio)
 	if added > 0 then
 		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
+		if not activeSnipeBatch then
+			ScheduleNextSnipeAutoScan()
+		end
 	end
 	return added
 end
@@ -901,7 +922,7 @@ function ns:EvaluateSnipeItem(itemID, silent)
 		return nil
 	end
 	if stock.price and stock.price > 0 and (not stock.ts or stock.ts <= 0 or now <= 0 or (now - stock.ts) <= 60) then
-		UpdateSnipeMarketEMA(target, stock.price, now)
+		UpdateSnipeMarketEMA(target, stock.price, now, stock.ts)
 	end
 
 	local bestQty = nil
@@ -1601,21 +1622,21 @@ function ns:BuyFirstSnipeHit()
 			local confirmTok = buyTokenCounter
 			pendingBuy.token = confirmTok
 			pendingBuy.state = "buying"
+			if C_Timer and C_Timer.After then
+				C_Timer.After(6.0, function()
+					if pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "buying" then
+						CancelPendingCommodity(string.format(L["SNIPE_BUY_TIMEOUT"], pendingBuy.label), nil)
+					end
+				end)
+			end
 			buyApiBlocked = false
 			buyApiDepth = buyApiDepth + 1
 			C_AuctionHouse.ConfirmCommoditiesPurchase(pendingBuy.itemID, pendingBuy.qty)
-			buyApiDepth = buyApiDepth - 1
+			buyApiDepth = math.max(0, buyApiDepth - 1)
 			if buyApiBlocked then
 				CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], pendingBuy.label), pendingBuy.itemID, nil)
 			elseif pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "buying" then
 				self:RefreshSnipeBar()
-				if C_Timer and C_Timer.After then
-					C_Timer.After(6.0, function()
-						if pendingBuy and pendingBuy.token == confirmTok and pendingBuy.state == "buying" then
-							CancelPendingCommodity(string.format(L["SNIPE_BUY_TIMEOUT"], pendingBuy.label), nil)
-						end
-					end)
-				end
 			end
 		end
 		return
@@ -1666,25 +1687,25 @@ function ns:BuyFirstSnipeHit()
 			token = tok,
 			label = label,
 		}
-		-- Важно: вызываем StartCommoditiesPurchase напрямую (без pcall) ДО Disable/RefreshSnipeBar,
-		-- чтобы не сбивать активный hardware event клика в WoW 1.60.1 / 12.0.
-		buyApiBlocked = false
-		buyApiDepth = buyApiDepth + 1
-		C_AuctionHouse.StartCommoditiesPurchase(itemID, qty)
-		buyApiDepth = buyApiDepth - 1
-		if buyApiBlocked then
-			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), nil)
-			return
-		end
-		if pendingBuy and pendingBuy.token == tok and pendingBuy.state == "awaiting" then
-			self:RefreshSnipeBar()
-		end
 		if C_Timer and C_Timer.After then
 			C_Timer.After(4.0, function()
 				if pendingBuy and pendingBuy.token == tok and pendingBuy.state == "awaiting" then
 					CancelPendingCommodity(string.format(L["SNIPE_BUY_TIMEOUT"], label), nil)
 				end
 			end)
+		end
+		-- Важно: вызываем StartCommoditiesPurchase напрямую (без pcall) ДО Disable/RefreshSnipeBar,
+		-- чтобы не сбивать активный hardware event клика в WoW 1.60.1 / 12.0.
+		buyApiBlocked = false
+		buyApiDepth = buyApiDepth + 1
+		C_AuctionHouse.StartCommoditiesPurchase(itemID, qty)
+		buyApiDepth = math.max(0, buyApiDepth - 1)
+		if buyApiBlocked then
+			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), nil)
+			return
+		end
+		if pendingBuy and pendingBuy.token == tok and pendingBuy.state == "awaiting" then
+			self:RefreshSnipeBar()
 		end
 	elseif C_AuctionHouse and C_AuctionHouse.MakeItemKey and C_AuctionHouse.GetNumItemSearchResults and C_AuctionHouse.GetItemSearchResultInfo and C_AuctionHouse.PlaceBid then
 		local key = C_AuctionHouse.MakeItemKey(itemID)
@@ -2274,6 +2295,7 @@ for _, ev in ipairs({
 	"AUCTION_HOUSE_BROWSE_RESULTS_UPDATED",
 	"AUCTION_HOUSE_BROWSE_RESULTS_ADDED",
 	"AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
+	"AUCTION_HOUSE_AUCTION_CREATED",
 	"COMMODITY_SEARCH_RESULTS_UPDATED",
 	"AUCTION_ITEM_LIST_UPDATE",
 	"COMMODITY_PRICE_UPDATED",
@@ -2334,10 +2356,11 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			local totalP = tonumber(arg2)
 			local effUnit = (unitP and pendingBuy.qty > 0 and totalP) and math.ceil(totalP / pendingBuy.qty) or unitP
 			if not unitP or unitP <= 0 or unitP > pendingBuy.maxPrice or (effUnit and effUnit > pendingBuy.maxPrice) then
+				local shownP = math.max(unitP or 0, effUnit or 0)
 				CancelPendingCommodity(
-					string.format(L["SNIPE_BUY_GONE_PRICE"], pendingBuy.label, ns.FormatMoney(unitP or effUnit or 0), ns.FormatMoney(pendingBuy.maxPrice)),
+					string.format(L["SNIPE_BUY_GONE_PRICE"], pendingBuy.label, ns.FormatMoney(shownP), ns.FormatMoney(pendingBuy.maxPrice)),
 					pendingBuy.itemID,
-					unitP or effUnit
+					shownP
 				)
 			else
 				local money = (GetMoney and GetMoney()) or 0
@@ -2445,9 +2468,12 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		if next(ns:GetSnipeTargets()) ~= nil then
 			ns:RefreshSnipeUI()
 		end
+	elseif event == "AUCTION_HOUSE_AUCTION_CREATED" then
+		lastExternalAhActivityAt = GetTime and GetTime() or lastExternalAhActivityAt
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		StopSnipeAutoScan()
 		CancelSnipeBatch(true)
+		buyApiDepth = 0
 		pendingSnipeDetailItemID = nil
 		pendingSnipeDetailQueued = nil
 		pendingSnipeBid = nil

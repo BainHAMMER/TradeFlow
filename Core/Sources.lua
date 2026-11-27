@@ -174,7 +174,10 @@ local function DistanceToNpc(loc)
 		return math.huge
 	end
 	local px, py, _, pInst = UnitPosition("player")
-	if not px then
+	if issecretvalue and (issecretvalue(px) or issecretvalue(py) or issecretvalue(pInst)) then
+		return math.huge
+	end
+	if type(px) ~= "number" or type(py) ~= "number" then
 		return math.huge
 	end
 	local ok, inst, pos = pcall(C_Map.GetWorldPosFromMapPos, loc.map, CreateVector2D(loc.x, loc.y))
