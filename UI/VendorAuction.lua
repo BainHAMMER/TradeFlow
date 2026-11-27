@@ -22,11 +22,23 @@ local function IsAuctionHouseOpen()
 end
 
 local function IsPlayerCasting()
-	if UnitCastingInfo and UnitCastingInfo("player") then
-		return true
+	if UnitCastingInfo then
+		local name = UnitCastingInfo("player")
+		if issecretvalue and issecretvalue(name) then
+			return true
+		end
+		if name then
+			return true
+		end
 	end
-	if UnitChannelInfo and UnitChannelInfo("player") then
-		return true
+	if UnitChannelInfo then
+		local name = UnitChannelInfo("player")
+		if issecretvalue and issecretvalue(name) then
+			return true
+		end
+		if name then
+			return true
+		end
 	end
 	return false
 end
@@ -345,6 +357,7 @@ local function DistributeProRataSpend(actualSpent, items, getCost, onAlloc)
 end
 
 local vendorBuyInFlight = false
+local vendorBuyToken = 0
 
 function ns:BuyVendorShoppingList(onlyItemID)
 	if vendorBuyInFlight then
@@ -378,16 +391,19 @@ function ns:BuyVendorShoppingList(onlyItemID)
 	if #attempted == 0 then
 		return
 	end
+	vendorBuyToken = vendorBuyToken + 1
+	local myToken = vendorBuyToken
 	vendorBuyInFlight = true
 	if vendorBar and vendorBar.btn then
 		vendorBar.btn:SetEnabled(false)
 	end
+	local buyCalls = {}
 	for _, m in ipairs(matches) do
 		if not onlyItemID or m.itemID == onlyItemID then
 			if m.stackSize > 1 then
 				-- Для предметов, продающихся пачками (напр. по 5 шт), BuyMerchantItem(slot) без аргумента покупает 1 пачку
 				for _ = 1, m.batches do
-					BuyMerchantItem(m.slot)
+					buyCalls[#buyCalls + 1] = { slot = m.slot, itemID = m.itemID }
 				end
 			else
 				local remainingBatches = m.batches
@@ -395,19 +411,26 @@ function ns:BuyVendorShoppingList(onlyItemID)
 				maxBatch = math.max(1, maxBatch)
 				while remainingBatches > 0 do
 					local buyNow = math.min(remainingBatches, maxBatch)
-					BuyMerchantItem(m.slot, buyNow)
+					buyCalls[#buyCalls + 1] = { slot = m.slot, itemID = m.itemID, count = buyNow }
 					remainingBatches = remainingBatches - buyNow
 				end
 			end
 		end
 	end
 	local tries = 0
-	local function Finish()
+	local finished = false
+	local function Finish(aborted)
+		if finished then
+			return
+		end
+		if myToken ~= vendorBuyToken then
+			aborted = true
+		end
 		tries = tries + 1
 		if ns.ScanBagsNow then
 			ns:ScanBagsNow(true)
 		end
-		if tries < 5 and C_Timer and C_Timer.After then
+		if not aborted and tries < 5 and C_Timer and C_Timer.After then
 			local allArrived = true
 			for _, a in ipairs(attempted) do
 				local gained = math.max(0, ns:GetBagCount(a.itemID) - a.beforeBag)
@@ -417,13 +440,16 @@ function ns:BuyVendorShoppingList(onlyItemID)
 				end
 			end
 			if not allArrived then
-				C_Timer.After(0.25, Finish)
+				C_Timer.After(0.25, function() Finish(false) end)
 				return
 			end
 		end
-		vendorBuyInFlight = false
-		if vendorBar and vendorBar.btn then
-			vendorBar.btn:SetEnabled(true)
+		finished = true
+		if myToken == vendorBuyToken then
+			vendorBuyInFlight = false
+			if vendorBar and vendorBar.btn then
+				vendorBar.btn:SetEnabled(true)
+			end
 		end
 		if ns.ScanBagsNow then
 			ns:ScanBagsNow()
@@ -443,11 +469,44 @@ function ns:BuyVendorShoppingList(onlyItemID)
 			ns:RefreshQueueAndShoppingView()
 		end
 	end
-	if C_Timer and C_Timer.After then
-		C_Timer.After(0.25, Finish)
-	else
-		Finish()
+
+	-- Отправляем покупки небольшими порциями, чтобы сервер не отбрасывал вызовы BuyMerchantItem по burst-троттлингу
+	local BUY_CALLS_PER_TICK = 4
+	local callIdx = 1
+	local function PumpBuyCalls()
+		if myToken ~= vendorBuyToken or not (MerchantFrame and MerchantFrame:IsShown()) then
+			Finish(true)
+			return
+		end
+		local sent = 0
+		while callIdx <= #buyCalls and sent < BUY_CALLS_PER_TICK do
+			local c = buyCalls[callIdx]
+			callIdx = callIdx + 1
+			sent = sent + 1
+			if GetMerchantSlotItemID(c.slot) ~= c.itemID then
+				Finish(true)
+				return
+			end
+			local ok
+			if c.count then
+				ok = RunSafe("BuyMerchantItem", BuyMerchantItem, c.slot, c.count)
+			else
+				ok = RunSafe("BuyMerchantItem", BuyMerchantItem, c.slot)
+			end
+			if not ok then
+				Finish(true)
+				return
+			end
+		end
+		if callIdx <= #buyCalls and C_Timer and C_Timer.After then
+			C_Timer.After(0.15, PumpBuyCalls)
+		elseif C_Timer and C_Timer.After then
+			C_Timer.After(0.25, function() Finish(false) end)
+		else
+			Finish(false)
+		end
 	end
+	PumpBuyCalls()
 end
 
 function ns:RefreshVendorBar()
@@ -557,7 +616,12 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 			ns:ScheduleAuctionatorSync(true)
 		end
 	elseif event == "MERCHANT_CLOSED" then
+		vendorBuyToken = vendorBuyToken + 1
+		vendorBuyInFlight = false
 		if vendorBar then
+			if vendorBar.btn then
+				vendorBar.btn:SetEnabled(true)
+			end
 			vendorBar:Hide()
 		end
 		if ns.RefreshQueueAndShoppingView then
@@ -615,6 +679,13 @@ merchantEventFrame:SetScript("OnEvent", function(_, event)
 					ns:RefreshQueueAndShoppingView()
 				end
 			end)
+		end
+	elseif event == "BAG_UPDATE_DELAYED" then
+		if MerchantFrame and MerchantFrame:IsShown() then
+			ns:RefreshVendorBar()
+		end
+		if BankFrame and BankFrame:IsShown() then
+			ns:RefreshBankBar()
 		end
 	else
 		ns:OnMerchantShow()
@@ -771,13 +842,10 @@ local function FindFreePlayerBagSlot(itemID, reservedSlots)
 end
 
 local function FinishBankWithdraw(job)
-	if ns.bankWithdrawJob ~= job then
+	if ns.bankWithdrawJob ~= job or job.finishing then
 		return
 	end
-	ns.bankWithdrawJob = nil
-	if bankBar and bankBar.btn then
-		bankBar.btn:SetEnabled(true)
-	end
+	job.finishing = true
 	local tries = 0
 	local function ReportActual()
 		tries = tries + 1
@@ -794,6 +862,12 @@ local function FinishBankWithdraw(job)
 			if not allArrived then
 				C_Timer.After(0.25, ReportActual)
 				return
+			end
+		end
+		if ns.bankWithdrawJob == job then
+			ns.bankWithdrawJob = nil
+			if bankBar and bankBar.btn then
+				bankBar.btn:SetEnabled(true)
 			end
 		end
 		ns:ScanBagsNow()
@@ -929,8 +1003,10 @@ function ns:WithdrawBankShoppingList()
 		job.steps = job.steps + 1
 		local movedAny = false
 		if wantTake > 0 and wantTake < curCount and SplitItem and PickupItem then
+			local splitAttempted = false
 			local dstBag, dstSlot = FindFreePlayerBagSlot(s.itemID, job.reservedSlots)
 			if dstBag and dstSlot then
+				splitAttempted = true
 				local okSplit = RunSafe("BankSplitItem", SplitItem, s.bag, s.slot, wantTake)
 				if okSplit and (not CursorHasItem or CursorHasItem()) then
 					local okPickup = RunSafe("BankPickupItem", PickupItem, dstBag, dstSlot)
@@ -943,7 +1019,7 @@ function ns:WithdrawBankShoppingList()
 					ClearCursor()
 				end
 			end
-			if not movedAny then
+			if not movedAny and not splitAttempted then
 				movedAny = RunSafe("BankUseItem", UseItem, s.bag, s.slot)
 			end
 		else
@@ -1165,10 +1241,13 @@ function ns:LearnQueuedTrainerRecipes()
 				stillNotLearned[cm.recipeID] = true
 			end
 		end
+		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
+		local actualSpent = math.max(0, beforeMoney - afterMoney)
 		local learnedAny = false
 		local learnedPriced = {}
 		for _, m in ipairs(attempted) do
-			local learned = (ns.IsRecipeLearned and ns:IsRecipeLearned(m.recipeID)) or (trainerReadable and not stillNotLearned[m.recipeID])
+			local learned = (ns.IsRecipeLearned and ns:IsRecipeLearned(m.recipeID))
+				or (trainerReadable and not stillNotLearned[m.recipeID] and ((m.cost or 0) <= 0 or actualSpent > 0))
 			if learned then
 				learnedAny = true
 				if ns.charDB and ns.charDB.learned then
@@ -1183,8 +1262,6 @@ function ns:LearnQueuedTrainerRecipes()
 				end
 			end
 		end
-		local afterMoney = (GetMoney and GetMoney()) or beforeMoney
-		local actualSpent = math.max(0, beforeMoney - afterMoney)
 		if ns.RecordTrainerExpense then
 			DistributeProRataSpend(actualSpent, learnedPriced, function(m) return m.cost end, function(m, amt)
 				ns:RecordTrainerExpense(m.recipeID, m.name, amt)

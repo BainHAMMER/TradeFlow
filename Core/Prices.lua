@@ -927,8 +927,9 @@ priceFrame:SetScript("OnEvent", function(_, event, arg1)
 				local link = GetMerchantItemLink(i)
 				local itemID = link and tonumber(link:match("item:(%d+)"))
 				local _, _, price, quantity, numAvailable = GetMerchantItemInfo(i)
-				if itemID and price and price > 0 and (quantity or 1) > 0 and (numAvailable == -1 or (numAvailable or 0) > 0) then
-					local unit = math.floor(price / quantity + 0.5)
+				local qty = (type(quantity) == "number" and quantity > 0) and quantity or 1
+				if itemID and price and price > 0 and (numAvailable == -1 or (numAvailable or 0) > 0) then
+					local unit = math.floor(price / qty + 0.5)
 					if ns.VendorPrices and ns.VendorPrices[itemID] and ns.db and ns.db.vendorPrices and ns.db.vendorPrices[itemID] ~= unit then
 						ns.db.vendorPrices[itemID] = unit
 						changed = true

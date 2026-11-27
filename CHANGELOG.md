@@ -1,5 +1,20 @@
 # Changelog / Список изменений
 
+## v1.0.17
+### RU
+- **Исправлено переключение профессий и запуск крафта:** кнопки «Создать» / «Создать шаг» и переключение профессий в шапке больше не рассинхронизируются с клиентом после открытия аукциона или смены профессии; исправлено чтение рангов Кулинарии и Первой помощи.
+- **Стабильность в бою:** устранены Lua-ошибки секретных значений клиента в кулдаунах, очереди крафта, логе распыления и проверке кастов; исправлено зависание кнопки смены профессии и клавиши `Пробел` после выхода из боя.
+- **Снайпер и аукцион:** авто-скан теперь выключен по умолчанию и автоматически ставится на паузу при выставлении лотов (вкладка продажи Blizzard / Auctionator); исправлено сообщение отмены выкупа при росте средней цены; починена кнопка «Очистить лог заработка».
+- **Торговец, банк и тренер:** большие закупки у торговца идут порциями с проверкой слота (без потерь и случайных покупок при смене торговца); устранены дубли при быстром повторном клике «Забрать материалы» из банка и ложные пометки выученных рецептов у тренера.
+
+### EN
+- **Fixed profession switching & crafting launch:** Craft / Craft Next buttons and header switches no longer desync after visiting the Auction House or switching professions; fixed Cooking and First Aid rank reading.
+- **Combat stability:** guarded cooldowns, crafting queue casts, disenchant loot tracking, and cast checks against client secret values; fixed leftover secure proxy and Spacebar binding after combat ends.
+- **Sniper & Auction House:** auto-scan is now off by default and automatically pauses while on Sell / Auctionator Selling tabs; fixed buyout cancellation price message; fixed Clear Profit Log button crash.
+- **Vendor, Bank & Trainer:** large vendor purchases are paced with slot verification; prevented duplicate bank withdrawals on rapid double-click and false-positive learned marks at trainers.
+
+---
+
 ## v1.0.16
 ### RU
 - **Ускоренный Снайпер аукциона:** сканирование списка целей теперь занимает доли секунды и не блокирует вкладку покупок; добавлен автоматический опрос при открытом аукционе (интервал `1–15` сек в настройках + быстрая галка «Авто» на плашке).

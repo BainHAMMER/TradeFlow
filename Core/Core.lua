@@ -1,7 +1,7 @@
 local ADDON_NAME, ns = ...
 local L = ns.L
 
-ns.VERSION = "1.0.16"
+ns.VERSION = "1.0.17"
 ns.ICON = "Interface\\AddOns\\TradeFlow\\Media\\Icon"
 
 -- Сопоставление skillLine <-> базовое заклинание профессии для открытия окна
@@ -165,6 +165,22 @@ function ns.FormatCooldown(seconds)
 	return string.format("%d%s", s, L["TIME_SEC"])
 end
 
+local function SafeNumber(v)
+	if issecretvalue and issecretvalue(v) then
+		return nil
+	end
+	return (type(v) == "number") and v or nil
+end
+ns.SafeNumber = SafeNumber
+
+local function SafeString(v)
+	if issecretvalue and issecretvalue(v) then
+		return nil
+	end
+	return (type(v) == "string") and v or nil
+end
+ns.SafeString = SafeString
+
 -- Базовый кулдаун рецепта в секундах (0 если нет КД), по данным клиента
 function ns:GetRecipeBaseCooldown(recipeID)
 	if not recipeID or recipeID <= 0 then
@@ -174,15 +190,15 @@ function ns:GetRecipeBaseCooldown(recipeID)
 	if C_Spell and C_Spell.GetSpellBaseCooldown then
 		local ok, val = pcall(C_Spell.GetSpellBaseCooldown, recipeID)
 		if ok then
-			cdMs = val
+			cdMs = SafeNumber(val)
 		end
 	elseif GetSpellBaseCooldown then
 		local ok, val = pcall(GetSpellBaseCooldown, recipeID)
 		if ok then
-			cdMs = val
+			cdMs = SafeNumber(val)
 		end
 	end
-	if type(cdMs) == "number" and cdMs >= 5000 then
+	if cdMs and cdMs >= 5000 then
 		return cdMs / 1000
 	end
 	return 0
@@ -200,8 +216,9 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 	local isClientActive = (activeClientSL ~= nil and rec and rec.skillLine == activeClientSL)
 
 	if C_TradeSkillUI and C_TradeSkillUI.GetRecipeCooldown then
-		local ok, cd = pcall(C_TradeSkillUI.GetRecipeCooldown, recipeID)
-		if ok and type(cd) == "number" then
+		local ok, rawCd = pcall(C_TradeSkillUI.GetRecipeCooldown, recipeID)
+		local cd = ok and SafeNumber(rawCd) or nil
+		if cd then
 			if cd > 0 then
 				if cdMap and nowWall > 0 then
 					cdMap[recipeID] = nowWall + cd
@@ -218,16 +235,16 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 	if C_Spell and C_Spell.GetSpellCooldown then
 		local ok, info = pcall(C_Spell.GetSpellCooldown, recipeID)
 		if ok and type(info) == "table" then
-			start = info.startTime
-			duration = info.duration
+			start = SafeNumber(info.startTime)
+			duration = SafeNumber(info.duration)
 		end
 	elseif GetSpellCooldown then
 		local ok, st, dur = pcall(GetSpellCooldown, recipeID)
 		if ok then
-			start, duration = st, dur
+			start, duration = SafeNumber(st), SafeNumber(dur)
 		end
 	end
-	if type(start) == "number" and type(duration) == "number" and start > 0 and duration > 2 then
+	if start and duration and start > 0 and duration > 2 then
 		local rem = (start + duration) - (GetTime and GetTime() or 0)
 		if rem > 0 then
 			if cdMap and nowWall > 0 then
@@ -258,14 +275,14 @@ function ns:GetRecipeCastTime(recipeID)
 	if C_Spell and C_Spell.GetSpellInfo then
 		local info = C_Spell.GetSpellInfo(recipeID)
 		if info then
-			castMs = info.castTime
+			castMs = SafeNumber(info.castTime)
 		end
 	end
 	if castMs == nil and GetSpellInfo then
 		local _, _, _, ct = GetSpellInfo(recipeID)
-		castMs = ct
+		castMs = SafeNumber(ct)
 	end
-	if type(castMs) ~= "number" or castMs < 0 then
+	if not castMs or castMs < 0 then
 		if not requestedSpellLoads[recipeID] and C_Spell and C_Spell.RequestLoadSpellData then
 			requestedSpellLoads[recipeID] = true
 			pcall(C_Spell.RequestLoadSpellData, recipeID)
@@ -686,8 +703,9 @@ end
 function ns:ScanPlayerProfessions()
 	local found = {}
 	if GetProfessions and GetProfessionInfo then
-		local p1, p2, p3, p4, p5, p6, p7 = GetProfessions()
-		for _, idx in ipairs({ p1, p2, p3, p4, p5, p6, p7 }) do
+		local slots = { GetProfessions() }
+		for i = 1, 7 do
+			local idx = slots[i]
 			if idx then
 				local name, icon, rank, maxRank, _, _, skillLine = GetProfessionInfo(idx)
 				local norm = ns.NormalizeSkillLine(skillLine, name)
@@ -1179,6 +1197,18 @@ function ns:GetActiveClientSkillLine()
 	if not frameShown then
 		return nil
 	end
+	if C_TradeSkillUI.IsTradeSkillLinked and C_TradeSkillUI.IsTradeSkillLinked() then
+		return nil
+	end
+	if C_TradeSkillUI.IsTradeSkillGuild and C_TradeSkillUI.IsTradeSkillGuild() then
+		return nil
+	end
+	if C_TradeSkillUI.IsTradeSkillReady then
+		local ok, ready = pcall(C_TradeSkillUI.IsTradeSkillReady)
+		if ok and ready == false then
+			return nil
+		end
+	end
 	local baseInfo = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
 	local childInfo = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
 	local rawID = NonZero(childInfo and childInfo.parentProfessionID)
@@ -1211,6 +1241,12 @@ function ns:IsClientRecipeReady(recipeID)
 	end
 	local frameShown = (ProfessionsFrame and ProfessionsFrame:IsShown()) or (TradeSkillFrame and TradeSkillFrame:IsShown())
 	if not frameShown then
+		return false
+	end
+	if C_TradeSkillUI.IsTradeSkillLinked and C_TradeSkillUI.IsTradeSkillLinked() then
+		return false
+	end
+	if C_TradeSkillUI.IsTradeSkillGuild and C_TradeSkillUI.IsTradeSkillGuild() then
 		return false
 	end
 	if C_TradeSkillUI.IsTradeSkillReady then
@@ -1810,6 +1846,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			snipeMaxSpend = 100000,
 			snipeMinReserve = 0,
 			snipeMaxQty = 200,
+			snipeAutoScan = false,
 			snipeAutoScanInterval = 5,
 			snipeAutoReprice = true,
 			snipeDiscountPct = 20,
@@ -1975,6 +2012,12 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			ns:DetachSecureProfProxy()
 		end
 	elseif event == "PLAYER_REGEN_ENABLED" then
+		ClearReplaceEnchantSpace()
+		if not ns.bypassIntercept and ProfessionsFrame and ProfessionsFrame:IsShown()
+			and ns.mainFrame and ns.mainFrame:IsShown()
+		then
+			ns:SuppressBlizzardFrame()
+		end
 		if ns.OnCombatEnded then
 			ns:OnCombatEnded()
 		end

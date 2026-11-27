@@ -449,8 +449,16 @@ end
 invFrame:SetScript("OnEvent", function(_, event)
 	if event == "BANKFRAME_OPENED" then
 		bankOpen = true
+		ns:ScanBagsNow()
+		return
+	elseif event == "PLAYERBANKSLOTS_CHANGED" then
+		if bankOpen then
+			ns:ScanBagsNow()
+		end
+		return
 	elseif event == "BANKFRAME_CLOSED" then
 		bankOpen = false
+		return
 	end
 	if bagScanPending then
 		return

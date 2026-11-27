@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 -------------------------------------------------------------------------------
 -- Журнал заработка (режимы «Крафт» и «Касса») + трекинг реальных покупок/продаж
@@ -802,14 +803,14 @@ local function InstallAhHooks()
 	if C_AuctionHouse.StartCommoditiesPurchase then
 		hooksecurefunc(C_AuctionHouse, "StartCommoditiesPurchase", function(itemID, qty)
 			pendingAhComm = nil
-			if not IsProfitEnabled() or not HasAuctionator() then
-				return
-			end
 			if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
 				return
 			end
 			if ns.OnExternalCommodityPurchase then
 				ns:OnExternalCommodityPurchase()
+			end
+			if not IsProfitEnabled() or not HasAuctionator() then
+				return
 			end
 			if type(itemID) ~= "number" or not qty or qty <= 0 or not IsInTradeFlowAhScope(itemID) then
 				return
@@ -1513,13 +1514,25 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			ns:RecordTradeFlowPurchase("ah_buy", p.itemID, p.qty, p.totalPrice)
 		end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+		if issecretvalue and (issecretvalue(arg1) or issecretvalue(arg3)) then
+			return
+		end
 		if arg1 == "player" and tonumber(arg3) == 13262 then
 			lastDisenchantAt = now
 		end
 	elseif event == "CHAT_MSG_LOOT" then
+		if issecretvalue and issecretvalue(arg1) then
+			return
+		end
 		if lastDisenchantAt > 0 and (now - lastDisenchantAt) <= 3.0 and type(arg1) == "string" then
 			local lootGuid = select(12, ...)
+			if issecretvalue and issecretvalue(lootGuid) then
+				lootGuid = nil
+			end
 			local playerGuid = UnitGUID and UnitGUID("player")
+			if issecretvalue and issecretvalue(playerGuid) then
+				playerGuid = nil
+			end
 			if not (lootGuid and lootGuid ~= "" and playerGuid and playerGuid ~= "" and lootGuid ~= playerGuid) then
 				local itemID = tonumber(arg1:match("item:(%d+)"))
 				if itemID and itemID > 0 and ns.DisenchantMatIDs and ns.DisenchantMatIDs[itemID] then

@@ -2,6 +2,21 @@
 
 Detailed implementation notes for developers. End-user release notes live in [CHANGELOG.md](CHANGELOG.md).
 
+## v1.0.17
+### RU
+- **Синхронизация активной профессии, боя и прокси:** `GetActiveClientSkillLine()` и `IsClientRecipeReady()` проверяют `IsTradeSkillReady`/`IsTradeSkillLinked`/`IsTradeSkillGuild`; `TradeFlowSecureProfProxy` переведён на `DIALOG` с очисткой в `OnCombatEnded`; `PLAYER_REGEN_ENABLED` очищает `SPACE` override и дожимает `SuppressBlizzardFrame`; `ScanPlayerProfessions()` итерирует `1..7` вместо `ipairs` (исправляет `nil`-дырку `p3` для Кулинарии/Первой помощи).
+- **Защита от secret values (`issecretvalue`):** `ns.SafeNumber`/`ns.SafeString` в `Core.lua`, `RegisterUnitEvent(..., "player")` + `issecretvalue` в `Queue.lua` и `ProfitLog.lua` (`UNIT_SPELLCAST_*`, `CHAT_MSG_LOOT`), `IsPlayerCasting()` в `VendorAuction.lua`, `UnitPosition` в `Sources.lua`.
+- **Торговец, банк, тренер, цены:** `BuyVendorShoppingList` (`PumpBuyCalls`, `vendorBuyToken`, проверка `GetMerchantSlotItemID`, `RunSafe`, отмена на `MERCHANT_CLOSED`), `FinishBankWithdraw` держит лок до конца `ReportActual`, `splitAttempted` guard, `actualSpent` guard у тренера, `BAG_UPDATE_DELAYED` без лишнего `OnMerchantShow`, синхронный скан банка на `BANKFRAME_OPENED`/`PLAYERBANKSLOTS_CHANGED`, `price / qty` guard в `Prices.lua`.
+- **Снайпер и Профит:** `local L = ns.L` в `ProfitLog.lua`, `OnExternalCommodityPurchase` до `HasAuctionator`, `snipeAutoScan = false` по умолчанию + пауза на вкладках продажи и `AUCTION_HOUSE_AUCTION_CREATED`, `lastEmaStockTs` дедупликация EMA, таймауты до вызовов `C_AuctionHouse` и сброс `buyApiDepth`, `shownP = max(unitP, effUnit)`.
+
+### EN
+- **Profession Sync, Combat & Proxy:** `IsTradeSkillReady`/`Linked`/`Guild` checks in `GetActiveClientSkillLine` & `IsClientRecipeReady`; `TradeFlowSecureProfProxy` on `DIALOG` with `OnCombatEnded` cleanup; `PLAYER_REGEN_ENABLED` retries `ClearReplaceEnchantSpace` and `SuppressBlizzardFrame`; `ScanPlayerProfessions()` loops `1..7` instead of `ipairs`.
+- **Secret Value Guards:** `ns.SafeNumber`/`ns.SafeString`, `RegisterUnitEvent` + `issecretvalue` in `Queue.lua`, `ProfitLog.lua`, `VendorAuction.lua`, and `Sources.lua`.
+- **Vendor, Bank, Trainer & Prices:** Paced `BuyVendorShoppingList` with token/slot/pcall/close guards; `FinishBankWithdraw` lock held until `ReportActual`; `splitAttempted` & trainer `actualSpent` guards; synchronous bank scan on `BANKFRAME_OPENED`/`PLAYERBANKSLOTS_CHANGED`; `Prices.lua` `qty` guard.
+- **Sniper & Profit:** Fixed missing `local L = ns.L` in `ProfitLog.lua`; `OnExternalCommodityPurchase` without Auctionator; `snipeAutoScan = false` default + Sell-tab/`AUCTION_HOUSE_AUCTION_CREATED` pause; `lastEmaStockTs` EMA dedup; timeout-before-call & `buyApiDepth` reset; `shownP` fix.
+
+---
+
 ## v1.0.16
 ### RU
 - **Быстрый батч-скан Снайпера:** `C_AuctionHouse.SearchForItemKeys` (чанки по 100, `AUCTION_HOUSE_BROWSE_RESULTS_UPDATED`/`ADDED`, `HasFullBrowseResults`/`RequestMoreBrowseResults`, фолбэк на `Auctionator.API.v1.MultiSearchAdvanced`), обход 5с троттлинга в `Core/Prices.lua` (`ProcessBrowseResults`) для активного батча и очистка пропавших хитов.
