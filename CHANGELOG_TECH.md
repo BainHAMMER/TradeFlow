@@ -4,14 +4,16 @@ Detailed implementation notes for developers. End-user release notes live in [CH
 
 ## v1.0.17
 ### RU
-- **Синхронизация активной профессии и прокси:** `GetActiveClientSkillLine()` проверяет `C_TradeSkillUI.IsTradeSkillReady()` (устраняет рассинхрон с `IsClientRecipeReady()` при закрытии серверной сессии); `TradeFlowSecureProfProxy` переведён на стратум `DIALOG` (`FrameLevel 50`) поверх `TradeFlowMainFrame` (`HIGH` + `SetToplevel(true)`).
-- **Защита от secret values:** добавлен `SafeNumber(v)` с проверкой `issecretvalue(v)` в `GetRecipeCooldownRemaining`, `GetRecipeBaseCooldown` и `GetRecipeCastTime` (`Core/Core.lua`).
-- **Порционная закупка у торговца:** `BuyVendorShoppingList` в `UI/VendorAuction.lua` отправляет `BuyMerchantItem` через `PumpBuyCalls()` порциями по 4 вызова каждые `0.15с` с проверкой `MerchantFrame:IsShown()`.
+- **Синхронизация активной профессии, боя и прокси:** `GetActiveClientSkillLine()` и `IsClientRecipeReady()` проверяют `IsTradeSkillReady`/`IsTradeSkillLinked`/`IsTradeSkillGuild`; `TradeFlowSecureProfProxy` переведён на `DIALOG` с очисткой в `OnCombatEnded`; `PLAYER_REGEN_ENABLED` очищает `SPACE` override и дожимает `SuppressBlizzardFrame`; `ScanPlayerProfessions()` итерирует `1..7` вместо `ipairs` (исправляет `nil`-дырку `p3` для Кулинарии/Первой помощи).
+- **Защита от secret values (`issecretvalue`):** `ns.SafeNumber`/`ns.SafeString` в `Core.lua`, `RegisterUnitEvent(..., "player")` + `issecretvalue` в `Queue.lua` и `ProfitLog.lua` (`UNIT_SPELLCAST_*`, `CHAT_MSG_LOOT`), `IsPlayerCasting()` в `VendorAuction.lua`, `UnitPosition` в `Sources.lua`.
+- **Торговец, банк, тренер, цены:** `BuyVendorShoppingList` (`PumpBuyCalls`, `vendorBuyToken`, проверка `GetMerchantSlotItemID`, `RunSafe`, отмена на `MERCHANT_CLOSED`), `FinishBankWithdraw` держит лок до конца `ReportActual`, `splitAttempted` guard, `actualSpent` guard у тренера, `BAG_UPDATE_DELAYED` без лишнего `OnMerchantShow`, синхронный скан банка на `BANKFRAME_OPENED`/`PLAYERBANKSLOTS_CHANGED`, `price / qty` guard в `Prices.lua`.
+- **Снайпер и Профит:** `local L = ns.L` в `ProfitLog.lua`, `OnExternalCommodityPurchase` до `HasAuctionator`, `snipeAutoScan = false` по умолчанию + пауза на вкладках продажи и `AUCTION_HOUSE_AUCTION_CREATED`, `lastEmaStockTs` дедупликация EMA, таймауты до вызовов `C_AuctionHouse` и сброс `buyApiDepth`, `shownP = max(unitP, effUnit)`.
 
 ### EN
-- **Active Profession Sync & Proxy Strata:** `GetActiveClientSkillLine()` now checks `C_TradeSkillUI.IsTradeSkillReady()` to stay aligned with `IsClientRecipeReady()`; `TradeFlowSecureProfProxy` moved to `DIALOG` strata above `TradeFlowMainFrame` (`HIGH` + `SetToplevel(true)`).
-- **Secret Value Guard:** Added `SafeNumber(v)` using `issecretvalue(v)` across `GetRecipeCooldownRemaining`, `GetRecipeBaseCooldown`, and `GetRecipeCastTime`.
-- **Paced Vendor Restocking:** `BuyVendorShoppingList` paces `BuyMerchantItem` calls via `PumpBuyCalls()` (4 calls per `0.15s` tick, guarded by `MerchantFrame:IsShown()`).
+- **Profession Sync, Combat & Proxy:** `IsTradeSkillReady`/`Linked`/`Guild` checks in `GetActiveClientSkillLine` & `IsClientRecipeReady`; `TradeFlowSecureProfProxy` on `DIALOG` with `OnCombatEnded` cleanup; `PLAYER_REGEN_ENABLED` retries `ClearReplaceEnchantSpace` and `SuppressBlizzardFrame`; `ScanPlayerProfessions()` loops `1..7` instead of `ipairs`.
+- **Secret Value Guards:** `ns.SafeNumber`/`ns.SafeString`, `RegisterUnitEvent` + `issecretvalue` in `Queue.lua`, `ProfitLog.lua`, `VendorAuction.lua`, and `Sources.lua`.
+- **Vendor, Bank, Trainer & Prices:** Paced `BuyVendorShoppingList` with token/slot/pcall/close guards; `FinishBankWithdraw` lock held until `ReportActual`; `splitAttempted` & trainer `actualSpent` guards; synchronous bank scan on `BANKFRAME_OPENED`/`PLAYERBANKSLOTS_CHANGED`; `Prices.lua` `qty` guard.
+- **Sniper & Profit:** Fixed missing `local L = ns.L` in `ProfitLog.lua`; `OnExternalCommodityPurchase` without Auctionator; `snipeAutoScan = false` default + Sell-tab/`AUCTION_HOUSE_AUCTION_CREATED` pause; `lastEmaStockTs` EMA dedup; timeout-before-call & `buyApiDepth` reset; `shownP` fix.
 
 ---
 

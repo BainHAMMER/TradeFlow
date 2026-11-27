@@ -449,12 +449,16 @@ end
 invFrame:SetScript("OnEvent", function(_, event)
 	if event == "BANKFRAME_OPENED" then
 		bankOpen = true
-	elseif event == "BANKFRAME_CLOSED" then
-		-- Снимаем финальный снимок банка до сброса bankOpen, иначе дебаунс 0.08с пропустит очистку
+		ns:ScanBagsNow()
+		return
+	elseif event == "PLAYERBANKSLOTS_CHANGED" then
 		if bankOpen then
-			ns:ScanBagsNow(true)
+			ns:ScanBagsNow()
 		end
+		return
+	elseif event == "BANKFRAME_CLOSED" then
 		bankOpen = false
+		return
 	end
 	if bagScanPending then
 		return

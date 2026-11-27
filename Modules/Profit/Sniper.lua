@@ -1411,6 +1411,7 @@ local function CancelPendingCommodity(reasonText, dropItemID, newMinPrice)
 	if C_AuctionHouse and C_AuctionHouse.CancelCommoditiesPurchase then
 		pcall(C_AuctionHouse.CancelCommoditiesPurchase)
 	end
+	buyApiDepth = 0
 	pendingBuy = nil
 	if dropItemID then
 		ClearStaleSnipeHit(dropItemID, newMinPrice)
