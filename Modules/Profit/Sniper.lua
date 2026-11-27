@@ -1407,6 +1407,9 @@ local function ClearStaleSnipeHit(itemID, newMinPrice)
 	end
 end
 
+local buyApiDepth = 0
+local buyApiBlocked = false
+
 local function CancelPendingCommodity(reasonText, dropItemID, newMinPrice)
 	if C_AuctionHouse and C_AuctionHouse.CancelCommoditiesPurchase then
 		pcall(C_AuctionHouse.CancelCommoditiesPurchase)
@@ -1596,9 +1599,6 @@ local function ComputeCommodityBuyQty(itemID, maxPrice, hit)
 	return 0, "gone", nil
 end
 
-local buyApiDepth = 0
-local buyApiBlocked = false
-
 function ns:BuyFirstSnipeHit()
 	if not IsAuctionHouseOpen() then
 		return
@@ -1746,7 +1746,7 @@ function ns:BuyFirstSnipeHit()
 		buyApiBlocked = false
 		buyApiDepth = buyApiDepth + 1
 		C_AuctionHouse.PlaceBid(bestAuction.auctionID, bestAuction.buyoutAmount)
-		buyApiDepth = buyApiDepth - 1
+		buyApiDepth = math.max(0, buyApiDepth - 1)
 		if buyApiBlocked then
 			pendingSnipeBid = nil
 			CancelPendingCommodity(string.format(L["SNIPE_BUY_FAILED"], label), itemID, nil)
