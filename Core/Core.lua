@@ -165,6 +165,13 @@ function ns.FormatCooldown(seconds)
 	return string.format("%d%s", s, L["TIME_SEC"])
 end
 
+local function SafeNumber(v)
+	if issecretvalue and issecretvalue(v) then
+		return nil
+	end
+	return (type(v) == "number") and v or nil
+end
+
 -- Базовый кулдаун рецепта в секундах (0 если нет КД), по данным клиента
 function ns:GetRecipeBaseCooldown(recipeID)
 	if not recipeID or recipeID <= 0 then
@@ -174,15 +181,15 @@ function ns:GetRecipeBaseCooldown(recipeID)
 	if C_Spell and C_Spell.GetSpellBaseCooldown then
 		local ok, val = pcall(C_Spell.GetSpellBaseCooldown, recipeID)
 		if ok then
-			cdMs = val
+			cdMs = SafeNumber(val)
 		end
 	elseif GetSpellBaseCooldown then
 		local ok, val = pcall(GetSpellBaseCooldown, recipeID)
 		if ok then
-			cdMs = val
+			cdMs = SafeNumber(val)
 		end
 	end
-	if type(cdMs) == "number" and cdMs >= 5000 then
+	if cdMs and cdMs >= 5000 then
 		return cdMs / 1000
 	end
 	return 0
@@ -200,8 +207,9 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 	local isClientActive = (activeClientSL ~= nil and rec and rec.skillLine == activeClientSL)
 
 	if C_TradeSkillUI and C_TradeSkillUI.GetRecipeCooldown then
-		local ok, cd = pcall(C_TradeSkillUI.GetRecipeCooldown, recipeID)
-		if ok and type(cd) == "number" then
+		local ok, rawCd = pcall(C_TradeSkillUI.GetRecipeCooldown, recipeID)
+		local cd = ok and SafeNumber(rawCd) or nil
+		if cd then
 			if cd > 0 then
 				if cdMap and nowWall > 0 then
 					cdMap[recipeID] = nowWall + cd
@@ -218,16 +226,16 @@ function ns:GetRecipeCooldownRemaining(recipeID)
 	if C_Spell and C_Spell.GetSpellCooldown then
 		local ok, info = pcall(C_Spell.GetSpellCooldown, recipeID)
 		if ok and type(info) == "table" then
-			start = info.startTime
-			duration = info.duration
+			start = SafeNumber(info.startTime)
+			duration = SafeNumber(info.duration)
 		end
 	elseif GetSpellCooldown then
 		local ok, st, dur = pcall(GetSpellCooldown, recipeID)
 		if ok then
-			start, duration = st, dur
+			start, duration = SafeNumber(st), SafeNumber(dur)
 		end
 	end
-	if type(start) == "number" and type(duration) == "number" and start > 0 and duration > 2 then
+	if start and duration and start > 0 and duration > 2 then
 		local rem = (start + duration) - (GetTime and GetTime() or 0)
 		if rem > 0 then
 			if cdMap and nowWall > 0 then
@@ -258,14 +266,14 @@ function ns:GetRecipeCastTime(recipeID)
 	if C_Spell and C_Spell.GetSpellInfo then
 		local info = C_Spell.GetSpellInfo(recipeID)
 		if info then
-			castMs = info.castTime
+			castMs = SafeNumber(info.castTime)
 		end
 	end
 	if castMs == nil and GetSpellInfo then
 		local _, _, _, ct = GetSpellInfo(recipeID)
-		castMs = ct
+		castMs = SafeNumber(ct)
 	end
-	if type(castMs) ~= "number" or castMs < 0 then
+	if not castMs or castMs < 0 then
 		if not requestedSpellLoads[recipeID] and C_Spell and C_Spell.RequestLoadSpellData then
 			requestedSpellLoads[recipeID] = true
 			pcall(C_Spell.RequestLoadSpellData, recipeID)
