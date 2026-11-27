@@ -2,6 +2,19 @@
 
 Detailed implementation notes for developers. End-user release notes live in [CHANGELOG.md](CHANGELOG.md).
 
+## v1.0.17
+### RU
+- **Синхронизация активной профессии и прокси:** `GetActiveClientSkillLine()` проверяет `C_TradeSkillUI.IsTradeSkillReady()` (устраняет рассинхрон с `IsClientRecipeReady()` при закрытии серверной сессии); `TradeFlowSecureProfProxy` переведён на стратум `DIALOG` (`FrameLevel 50`) поверх `TradeFlowMainFrame` (`HIGH` + `SetToplevel(true)`).
+- **Защита от secret values:** добавлен `SafeNumber(v)` с проверкой `issecretvalue(v)` в `GetRecipeCooldownRemaining`, `GetRecipeBaseCooldown` и `GetRecipeCastTime` (`Core/Core.lua`).
+- **Порционная закупка у торговца:** `BuyVendorShoppingList` в `UI/VendorAuction.lua` отправляет `BuyMerchantItem` через `PumpBuyCalls()` порциями по 4 вызова каждые `0.15с` с проверкой `MerchantFrame:IsShown()`.
+
+### EN
+- **Active Profession Sync & Proxy Strata:** `GetActiveClientSkillLine()` now checks `C_TradeSkillUI.IsTradeSkillReady()` to stay aligned with `IsClientRecipeReady()`; `TradeFlowSecureProfProxy` moved to `DIALOG` strata above `TradeFlowMainFrame` (`HIGH` + `SetToplevel(true)`).
+- **Secret Value Guard:** Added `SafeNumber(v)` using `issecretvalue(v)` across `GetRecipeCooldownRemaining`, `GetRecipeBaseCooldown`, and `GetRecipeCastTime`.
+- **Paced Vendor Restocking:** `BuyVendorShoppingList` paces `BuyMerchantItem` calls via `PumpBuyCalls()` (4 calls per `0.15s` tick, guarded by `MerchantFrame:IsShown()`).
+
+---
+
 ## v1.0.16
 ### RU
 - **Быстрый батч-скан Снайпера:** `C_AuctionHouse.SearchForItemKeys` (чанки по 100, `AUCTION_HOUSE_BROWSE_RESULTS_UPDATED`/`ADDED`, `HasFullBrowseResults`/`RequestMoreBrowseResults`, фолбэк на `Auctionator.API.v1.MultiSearchAdvanced`), обход 5с троттлинга в `Core/Prices.lua` (`ProcessBrowseResults`) для активного батча и очистка пропавших хитов.

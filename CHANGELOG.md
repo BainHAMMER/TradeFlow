@@ -1,5 +1,18 @@
 # Changelog / Список изменений
 
+## v1.0.17
+### RU
+- **Исправлено переключение профессий и запуск крафта:** кнопки «Создать» / «Создать шаг» и переключение профессий в шапке больше не рассинхронизируются с клиентом после открытия аукциона или смены профессии.
+- **Исправлена ошибка кулдаунов в бою:** устранена Lua-ошибка сравнения секретных значений клиента при открытии профессии в бою.
+- **Надёжная докупка у торговца:** большие закупки реагентов (включая пачки колб и нитей) теперь отправляются небольшими порциями, чтобы сервер не отбрасывал часть покупок.
+
+### EN
+- **Fixed profession switching & crafting launch:** Craft / Craft Next buttons and header profession switches no longer desync from the client after visiting the Auction House or switching professions.
+- **Fixed combat cooldown Lua error:** guarded spell cooldown and cast-time reads against client secret number values.
+- **Reliable vendor restocking:** large vendor purchases (including multi-pack vials and threads) are now paced in small batches so the server does not drop excess calls.
+
+---
+
 ## v1.0.16
 ### RU
 - **Ускоренный Снайпер аукциона:** сканирование списка целей теперь занимает доли секунды и не блокирует вкладку покупок; добавлен автоматический опрос при открытом аукционе (интервал `1–15` сек в настройках + быстрая галка «Авто» на плашке).
