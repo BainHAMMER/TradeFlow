@@ -1187,6 +1187,12 @@ function ns:GetActiveClientSkillLine()
 	if not frameShown then
 		return nil
 	end
+	if C_TradeSkillUI.IsTradeSkillReady then
+		local ok, ready = pcall(C_TradeSkillUI.IsTradeSkillReady)
+		if ok and ready == false then
+			return nil
+		end
+	end
 	local baseInfo = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
 	local childInfo = C_TradeSkillUI.GetChildProfessionInfo and C_TradeSkillUI.GetChildProfessionInfo()
 	local rawID = NonZero(childInfo and childInfo.parentProfessionID)
