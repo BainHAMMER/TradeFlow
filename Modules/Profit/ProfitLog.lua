@@ -6,6 +6,7 @@ local L = ns.L
 -------------------------------------------------------------------------------
 local MAX_LOG_ENTRIES = 500
 local MAX_CASHFLOW_ENTRIES = 1000
+local CASHFLOW_RETENTION_SECONDS = 86400
 local MAX_LOT_ENTRIES = 120
 local MAX_CRAFTED_TRACK = 200
 local LOT_MAX_AGE = 7 * 86400
@@ -112,8 +113,10 @@ local function TrimCraftLog(log)
 	end
 end
 
-local function TrimCashflowLog(log)
-	while #log > MAX_CASHFLOW_ENTRIES do
+local function TrimCashflowLog(log, now)
+	local cur = (now and now > 0) and now or (time and time() or 0)
+	local cutoff = (cur > CASHFLOW_RETENTION_SECONDS) and (cur - CASHFLOW_RETENTION_SECONDS) or 0
+	while #log > 0 and (#log > MAX_CASHFLOW_ENTRIES or (cutoff > 0 and (log[#log].ts or 0) < cutoff)) do
 		local evicted = table.remove(log)
 		if type(evicted) == "table" then
 			local arch = EnsureCashflowArchiveDB()
@@ -291,21 +294,12 @@ local function GetVendorScrollSet()
 	return vendorScrollSet
 end
 
-local function GetTodayStartTimestamp()
-	if time and date then
-		local ok, dt = pcall(date, "*t")
-		if ok and type(dt) == "table" then
-			dt.hour = 0
-			dt.min = 0
-			dt.sec = 0
-			dt.isdst = nil
-			local ts = time(dt)
-			if ts then
-				return ts
-			end
-		end
+local function GetRolling24hTimestamp()
+	local now = time and time() or 0
+	if now > CASHFLOW_RETENTION_SECONDS then
+		return now - CASHFLOW_RETENTION_SECONDS
 	end
-	return (time and time() or 0) - 86400
+	return 0
 end
 
 local function RefreshProfitLogUI()
@@ -407,7 +401,7 @@ local function AppendCashflowEntry(kind, itemID, recipeID, name, qty, amount, ch
 			count = qty or 1,
 			amount = amount,
 		})
-		TrimCashflowLog(log)
+		TrimCashflowLog(log, now)
 	end
 end
 
@@ -656,11 +650,12 @@ end
 
 function ns:GetProfitLogSummary(period, mode)
 	mode = mode or self:GetProfitLogMode()
-	local minTs = (period == "today") and GetTodayStartTimestamp() or 0
+	local minTs = (period == "today") and GetRolling24hTimestamp() or 0
 	local entries = {}
 
 	if mode == "cashflow" then
 		local log = EnsureCashflowLogDB()
+		TrimCashflowLog(log)
 		local spent = 0
 		local earned = 0
 		local opsTotal = 0
