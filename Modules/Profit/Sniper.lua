@@ -1027,11 +1027,11 @@ local function CleanupLegacySnipeShoppingList()
 	if legacySnipeListCleaned then
 		return
 	end
-	legacySnipeListCleaned = true
 	local api = Auctionator and Auctionator.API and Auctionator.API.v1
 	if not (api and api.GetShoppingListItems and api.DeleteShoppingList) then
 		return
 	end
+	legacySnipeListCleaned = true
 	for _, listName in ipairs({ "TradeFlow: Снайпер", "TradeFlow: Sniper" }) do
 		local ok, existing = pcall(api.GetShoppingListItems, ADDON_NAME, listName)
 		if ok and existing then
@@ -2202,10 +2202,9 @@ function ns:ToggleSniperSettingsFrame(anchorBtn, anchorKind)
 				ns.db.options.snipeAutoScanInterval = DEFAULT_SNIPE_AUTOSCAN_INTERVAL
 				ns.db.options.snipeDiscountPct = DEFAULT_SNIPE_DISCOUNT_PCT
 				ns.db.options.snipeAutoReprice = true
+				ns.db.options.snipeAutoScan = false
 			end
-			if ns.db and ns.db.options and ns.db.options.snipeAutoScan == true then
-				ScheduleNextSnipeAutoScan()
-			end
+			StopSnipeAutoScan()
 			FillSniperSettingsInputs(sf)
 			ns:RefreshSnipeUI()
 			ns:Print(string.format(L["SNIPE_LIMIT_SAVED"], ns:FormatSnipeLimitsSummary()))

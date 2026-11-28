@@ -900,6 +900,7 @@ local function InstallAhHooks()
 	end
 	if C_AuctionHouse.ConfirmCommoditiesPurchase then
 		hooksecurefunc(C_AuctionHouse, "ConfirmCommoditiesPurchase", function(itemID, qty)
+			confirmingAhComm = nil
 			if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
 				return
 			end

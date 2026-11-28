@@ -1835,6 +1835,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 			leftCollapsed = false,
 			windowMinimized = false,
 		}
+		if not ns.db.options._migratedSnipeAutoScanOff then
+			ns.db.options.snipeAutoScan = false
+			ns.db.options._migratedSnipeAutoScanOff = true
+		end
 		ns.db.vendorPrices = ns.db.vendorPrices or {}
 		ns.db.trainerFees = ns.db.trainerFees or {}
 		ns.db.realms = ns.db.realms or {}
