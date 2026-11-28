@@ -4,7 +4,8 @@ local L = ns.L
 -------------------------------------------------------------------------------
 -- Журнал заработка (режимы «Крафт» и «Касса») + трекинг реальных покупок/продаж
 -------------------------------------------------------------------------------
-local MAX_LOG_ENTRIES = 200
+local MAX_LOG_ENTRIES = 500
+local MAX_CASHFLOW_ENTRIES = 1000
 local MAX_LOT_ENTRIES = 120
 local MAX_CRAFTED_TRACK = 200
 local LOT_MAX_AGE = 7 * 86400
@@ -65,6 +66,68 @@ local function EnsureCashflowLogDB()
 	end
 	ns.realmDB.cashflowLog = ns.realmDB.cashflowLog or {}
 	return ns.realmDB.cashflowLog
+end
+
+local function EnsureCraftArchiveDB()
+	if not ns.realmDB then
+		return nil
+	end
+	ns.realmDB.profitArchive = ns.realmDB.profitArchive or {
+		opsTotal = 0,
+		craftsTotal = 0,
+		cost = 0,
+		revenue = 0,
+		profit = 0,
+	}
+	return ns.realmDB.profitArchive
+end
+
+local function EnsureCashflowArchiveDB()
+	if not ns.realmDB then
+		return nil
+	end
+	ns.realmDB.cashflowArchive = ns.realmDB.cashflowArchive or {
+		opsTotal = 0,
+		spent = 0,
+		earned = 0,
+	}
+	return ns.realmDB.cashflowArchive
+end
+
+local function TrimCraftLog(log)
+	while #log > MAX_LOG_ENTRIES do
+		local evicted = table.remove(log)
+		if type(evicted) == "table" then
+			local arch = EnsureCraftArchiveDB()
+			if arch then
+				arch.opsTotal = (arch.opsTotal or 0) + 1
+				if (evicted.kind or "craft") == "craft" then
+					arch.craftsTotal = (arch.craftsTotal or 0) + (evicted.count or 1)
+				end
+				arch.cost = (arch.cost or 0) + (evicted.cost or 0)
+				arch.revenue = (arch.revenue or 0) + (evicted.revenue or 0)
+				arch.profit = (arch.profit or 0) + (evicted.profit or 0)
+			end
+		end
+	end
+end
+
+local function TrimCashflowLog(log)
+	while #log > MAX_CASHFLOW_ENTRIES do
+		local evicted = table.remove(log)
+		if type(evicted) == "table" then
+			local arch = EnsureCashflowArchiveDB()
+			if arch then
+				arch.opsTotal = (arch.opsTotal or 0) + 1
+				local amt = evicted.amount or 0
+				if amt < 0 then
+					arch.spent = (arch.spent or 0) + (-amt)
+				elseif amt > 0 then
+					arch.earned = (arch.earned or 0) + amt
+				end
+			end
+		end
+	end
 end
 
 local function EnsurePurchaseLotsDB()
@@ -344,9 +407,7 @@ local function AppendCashflowEntry(kind, itemID, recipeID, name, qty, amount, ch
 			count = qty or 1,
 			amount = amount,
 		})
-		while #log > MAX_LOG_ENTRIES do
-			table.remove(log)
-		end
+		TrimCashflowLog(log)
 	end
 end
 
@@ -391,9 +452,7 @@ function ns:RecordTrainerExpense(recipeID, name, cost)
 		profit = -cost,
 		source = "trainer",
 	})
-	while #craftLog > MAX_LOG_ENTRIES do
-		table.remove(craftLog)
-	end
+	TrimCraftLog(craftLog)
 
 	AppendCashflowEntry("trainer", nil, recipeID, name, 1, -cost, charKey, dayKey, now)
 	RefreshProfitLogUI()
@@ -589,9 +648,7 @@ function ns:RecordCraftProfit(spellID, isSubcraft)
 			source = src,
 			usedRealCost = usedRealCost or nil,
 		})
-		while #log > MAX_LOG_ENTRIES do
-			table.remove(log)
-		end
+		TrimCraftLog(log)
 	end
 
 	RefreshProfitLogUI()
@@ -606,9 +663,11 @@ function ns:GetProfitLogSummary(period, mode)
 		local log = EnsureCashflowLogDB()
 		local spent = 0
 		local earned = 0
+		local opsTotal = 0
 		for _, e in ipairs(log) do
 			if (e.ts or 0) >= minTs then
 				entries[#entries + 1] = e
+				opsTotal = opsTotal + 1
 				local amt = e.amount or 0
 				if amt < 0 then
 					spent = spent + (-amt)
@@ -617,11 +676,17 @@ function ns:GetProfitLogSummary(period, mode)
 				end
 			end
 		end
+		if minTs == 0 and self.realmDB and type(self.realmDB.cashflowArchive) == "table" then
+			local arch = self.realmDB.cashflowArchive
+			opsTotal = opsTotal + (arch.opsTotal or 0)
+			spent = spent + (arch.spent or 0)
+			earned = earned + (arch.earned or 0)
+		end
 		return {
 			mode = "cashflow",
 			entries = entries,
 			craftsTotal = 0,
-			opsTotal = #entries,
+			opsTotal = opsTotal,
 			spent = spent,
 			earned = earned,
 			profit = earned - spent,
@@ -630,6 +695,7 @@ function ns:GetProfitLogSummary(period, mode)
 
 	local log = EnsureCraftLogDB()
 	local craftsTotal = 0
+	local opsTotal = 0
 	local totalCost = 0
 	local totalRev = 0
 	local totalProfit = 0
@@ -637,6 +703,7 @@ function ns:GetProfitLogSummary(period, mode)
 	for _, e in ipairs(log) do
 		if (e.ts or 0) >= minTs then
 			entries[#entries + 1] = e
+			opsTotal = opsTotal + 1
 			if (e.kind or "craft") == "craft" then
 				craftsTotal = craftsTotal + (e.count or 1)
 			end
@@ -645,12 +712,20 @@ function ns:GetProfitLogSummary(period, mode)
 			totalProfit = totalProfit + (e.profit or 0)
 		end
 	end
+	if minTs == 0 and self.realmDB and type(self.realmDB.profitArchive) == "table" then
+		local arch = self.realmDB.profitArchive
+		opsTotal = opsTotal + (arch.opsTotal or 0)
+		craftsTotal = craftsTotal + (arch.craftsTotal or 0)
+		totalCost = totalCost + (arch.cost or 0)
+		totalRev = totalRev + (arch.revenue or 0)
+		totalProfit = totalProfit + (arch.profit or 0)
+	end
 
 	return {
 		mode = "craft",
 		entries = entries,
 		craftsTotal = (craftsTotal > 0) and math.max(1, math.floor(craftsTotal + 0.5)) or 0,
-		opsTotal = #entries,
+		opsTotal = opsTotal,
 		cost = totalCost,
 		revenue = totalRev,
 		spent = totalCost,
@@ -664,11 +739,15 @@ function ns:ClearProfitLog(mode)
 	if self.realmDB then
 		if mode == "all" then
 			self.realmDB.cashflowLog = {}
+			self.realmDB.cashflowArchive = nil
 			self.realmDB.profitLog = {}
+			self.realmDB.profitArchive = nil
 		elseif mode == "cashflow" then
 			self.realmDB.cashflowLog = {}
+			self.realmDB.cashflowArchive = nil
 		else
 			self.realmDB.profitLog = {}
+			self.realmDB.profitArchive = nil
 		end
 	end
 	RefreshProfitLogUI()
