@@ -1267,25 +1267,6 @@ function ns:IsClientRecipeReady(recipeID)
 	return activeSL ~= nil
 end
 
-function ns:FindFirstLearnedRecipe(skillLine)
-	local list = self.RecipesBySkill and self.RecipesBySkill[skillLine]
-	if list then
-		for _, rID in ipairs(list) do
-			if self:IsRecipeLearned(rID) then
-				return rID
-			end
-		end
-		return list[1]
-	end
-	return nil
-end
-
-function ns:OpenClientTradeSkill(skillLine, recipeID)
-	-- В WoW 1.60.1 вызов OpenTradeSkill / CastSpellByName из обычного скрипта блокируется Blizzard (ADDON_ACTION_BLOCKED).
-	-- Переключение профессии в клиенте выполняется только через SecureActionButtonTemplate.
-	return self:GetActiveClientSkillLine() == skillLine
-end
-
 function ns:GetProfessionSpellAttr(skillLine)
 	if not skillLine then
 		return nil

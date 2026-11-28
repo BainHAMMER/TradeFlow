@@ -28,8 +28,7 @@ local lastAutoScanAt = -30
 local lastExternalAhActivityAt = -30
 local autoScanTimerToken = 0
 local lastChatHitAt = {}
-local lastSnipeListSig = nil
-local snipeSyncToken = 0
+local legacySnipeListCleaned = false
 local pendingUiRefresh = false
 local hookedAuctionFrames = {}
 local pendingBuy = nil
@@ -365,7 +364,6 @@ function ns:SetSnipeTargetEnabled(itemID, enabled)
 			ScheduleNextSnipeAutoScan()
 		end
 	end
-	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 end
 
@@ -390,7 +388,6 @@ function ns:AddSnipeTarget(itemID, maxPrice, recipeID, deferSync, isManual)
 	}
 	self:EvaluateSnipeItem(itemID, true)
 	if not deferSync then
-		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
 		if not activeSnipeBatch then
 			ScheduleNextSnipeAutoScan()
@@ -765,7 +762,6 @@ function ns:AddRecipeReagentsToSnipe(recipeID, discountRatio, craftPlan)
 		end
 	end
 	if added > 0 then
-		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
 		if not activeSnipeBatch then
 			ScheduleNextSnipeAutoScan()
@@ -789,7 +785,6 @@ function ns:ImportShoppingToSnipe(discountRatio)
 		end
 	end
 	if added > 0 then
-		self:SyncSnipeShoppingList(true)
 		self:RefreshSnipeUI()
 		if not activeSnipeBatch then
 			ScheduleNextSnipeAutoScan()
@@ -809,7 +804,6 @@ function ns:SetSnipeTargetPrice(itemID, maxPrice, isManual)
 	t.ts = time and time() or 0
 	t.lowStreak = 0
 	self:EvaluateSnipeItem(itemID, true)
-	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 	return true
 end
@@ -831,18 +825,8 @@ function ns:ResetSnipeTargetPin(itemID)
 		t.ts = now
 	end
 	self:EvaluateSnipeItem(itemID, true)
-	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 	return true
-end
-
-function ns:AdjustSnipeTarget(itemID, factor)
-	local targets = EnsureSnipeDB()
-	local t = targets[itemID]
-	if not t then
-		return
-	end
-	self:SetSnipeTargetPrice(itemID, math.max(1, math.floor((t.maxPrice or 1) * factor + 0.5)), true)
 end
 
 function ns:RepriceSnipeTargets(ratio)
@@ -865,7 +849,6 @@ function ns:RepriceSnipeTargets(ratio)
 			end
 		end
 	end
-	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 	self:Print(string.format(L["SNIPE_REPRICED_MSG"], updated, discPct))
 	return updated
@@ -878,7 +861,6 @@ function ns:RemoveSnipeTarget(itemID)
 		self.snipeHits[itemID] = nil
 	end
 	lastChatHitAt[itemID] = nil
-	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 end
 
@@ -888,7 +870,6 @@ function ns:ClearSnipeTargets()
 	end
 	self.snipeHits = {}
 	wipe(lastChatHitAt)
-	self:SyncSnipeShoppingList(true)
 	self:RefreshSnipeUI()
 end
 
@@ -1042,58 +1023,21 @@ local function SafeAuctionatorMaxPrice(target)
 	return q
 end
 
-function ns:SyncSnipeShoppingList(silent)
+local function CleanupLegacySnipeShoppingList()
+	if legacySnipeListCleaned then
+		return
+	end
+	legacySnipeListCleaned = true
 	local api = Auctionator and Auctionator.API and Auctionator.API.v1
-	if not (api and api.CreateShoppingList and api.ConvertToSearchString) then
+	if not (api and api.GetShoppingListItems and api.DeleteShoppingList) then
 		return
 	end
-	local targets = self:GetActiveSnipeTargetList()
-	local listName = L["SNIPE_LIST_NAME"]
-	local parts = {}
-	for _, t in ipairs(targets) do
-		parts[#parts + 1] = (t.itemID or 0) .. ":" .. (t.maxPrice or 0)
+	for _, listName in ipairs({ "TradeFlow: Снайпер", "TradeFlow: Sniper" }) do
+		local ok, existing = pcall(api.GetShoppingListItems, ADDON_NAME, listName)
+		if ok and existing then
+			pcall(api.DeleteShoppingList, ADDON_NAME, listName)
+		end
 	end
-	local sig = listName .. "|" .. table.concat(parts, ",")
-	snipeSyncToken = snipeSyncToken + 1
-	local token = snipeSyncToken
-	if silent and sig == lastSnipeListSig then
-		return
-	end
-
-	if #targets == 0 then
-		lastSnipeListSig = sig
-		if api.GetShoppingListItems and api.DeleteShoppingList then
-			local ok, existing = pcall(api.GetShoppingListItems, ADDON_NAME, listName)
-			if ok and existing then
-				pcall(api.DeleteShoppingList, ADDON_NAME, listName)
-			end
-		end
-		return
-	end
-
-	self:WithLoadedItems(targets, function()
-		if token ~= snipeSyncToken then
-			return
-		end
-		local searches = {}
-		for _, t in ipairs(targets) do
-			local name, _, _, _, loaded = self:GetItemDisplay(t.itemID)
-			if loaded and name then
-				local ok, str = pcall(api.ConvertToSearchString, ADDON_NAME, {
-					searchString = name,
-					isExact = true,
-					maxPrice = SafeAuctionatorMaxPrice(t.maxPrice),
-				})
-				if ok and str then
-					searches[#searches + 1] = str
-				end
-			end
-		end
-		if #searches > 0 then
-			lastSnipeListSig = sig
-			pcall(api.CreateShoppingList, ADDON_NAME, listName, searches)
-		end
-	end)
 end
 
 local function RunAuctionatorSnipeSearch(items, skipPriceFilter)
@@ -1341,7 +1285,6 @@ function ns:SearchSnipeTargetsOnAH(targetOrFilter, ignorePrice)
 		self:LogTrace("SnipeSearchAH", tostring(targetOrFilter or "all"))
 	end
 
-	self:SyncSnipeShoppingList(true)
 	local targets = EnsureSnipeDB()
 	local items = {}
 	local skipPriceFilter = (ignorePrice == true) or (targetOrFilter == "hits")
@@ -2335,7 +2278,7 @@ snipeEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
 		for _, t in ipairs(targets) do
 			ns:EvaluateSnipeItem(t.itemID, true)
 		end
-		ns:SyncSnipeShoppingList(true)
+		CleanupLegacySnipeShoppingList()
 		ns:RefreshSnipeBar()
 		if C_Timer and C_Timer.After then
 			C_Timer.After(0, function() ns:RefreshSnipeBar() end)

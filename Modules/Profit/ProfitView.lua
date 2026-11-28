@@ -1374,9 +1374,6 @@ function ProfitMod:OnLanguageChanged()
 	if ns.InvalidateProfitCache then
 		ns.InvalidateProfitCache()
 	end
-	if ns.SyncSnipeShoppingList then
-		ns:SyncSnipeShoppingList(true)
-	end
 	if ns.RefreshSnipeBar then
 		ns:RefreshSnipeBar()
 	end
