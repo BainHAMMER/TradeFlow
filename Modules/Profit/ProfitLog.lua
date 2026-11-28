@@ -24,6 +24,7 @@ local ahHooksInstalled = false
 local merchantHooksInstalled = false
 local lastDisenchantAt = 0
 local pendingAhComm = nil
+local confirmingAhComm = nil
 local pendingAhBid = nil
 local ahMoney = nil
 local pendingAhPosts = {}
@@ -869,8 +870,9 @@ local function InstallAhHooks()
 	if ahHooksInstalled or not C_AuctionHouse then
 		return
 	end
-	if C_AuctionHouse.StartCommoditiesPurchase or C_AuctionHouse.CancelCommoditiesPurchase
-		or C_AuctionHouse.PlaceBid or C_AuctionHouse.PostItem or C_AuctionHouse.PostCommodity
+	if C_AuctionHouse.StartCommoditiesPurchase or C_AuctionHouse.ConfirmCommoditiesPurchase
+		or C_AuctionHouse.CancelCommoditiesPurchase or C_AuctionHouse.PlaceBid
+		or C_AuctionHouse.PostItem or C_AuctionHouse.PostCommodity
 	then
 		ahHooksInstalled = true
 	end
@@ -892,6 +894,43 @@ local function InstallAhHooks()
 			pendingAhComm = {
 				itemID = itemID,
 				qty = qty,
+				ts = GetTime and GetTime() or 0,
+			}
+		end)
+	end
+	if C_AuctionHouse.ConfirmCommoditiesPurchase then
+		hooksecurefunc(C_AuctionHouse, "ConfirmCommoditiesPurchase", function(itemID, qty)
+			if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
+				return
+			end
+			local snipeTotal = nil
+			if ns.GetPendingSnipeCommodityQuote then
+				local sItem, sQty, sTotal = ns:GetPendingSnipeCommodityQuote()
+				if sItem == itemID and sQty == qty and sTotal and sTotal > 0 then
+					snipeTotal = sTotal
+				end
+			end
+			if ns.OnExternalCommodityPurchase then
+				ns:OnExternalCommodityPurchase()
+			end
+			if not IsProfitEnabled() or not HasAuctionator() then
+				return
+			end
+			if type(itemID) ~= "number" or not qty or qty <= 0 or not IsInTradeFlowAhScope(itemID) then
+				return
+			end
+			local quotedTotal = nil
+			if pendingAhComm and pendingAhComm.itemID == itemID and pendingAhComm.qty == qty and (pendingAhComm.totalPrice or 0) > 0 then
+				quotedTotal = pendingAhComm.totalPrice
+			elseif snipeTotal then
+				quotedTotal = snipeTotal
+			end
+			confirmingAhComm = {
+				itemID = itemID,
+				qty = qty,
+				totalPrice = quotedTotal,
+				moneyBefore = GetMoney and GetMoney() or 0,
+				spentMoney = 0,
 				ts = GetTime and GetTime() or 0,
 			}
 		end)
@@ -1532,6 +1571,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 	end
 	if not IsProfitEnabled() then
 		pendingAhComm = nil
+		confirmingAhComm = nil
 		pendingAhBid = nil
 		ahMoney = nil
 		pendingAhPosts = {}
@@ -1555,6 +1595,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 		return
 	elseif event == "AUCTION_HOUSE_CLOSED" then
 		pendingAhComm = nil
+		confirmingAhComm = nil
 		pendingAhBid = nil
 		ahMoney = nil
 		pendingAhPosts = {}
@@ -1566,7 +1607,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			lastViewedAhItemKey = arg1
 		end
 	elseif event == "COMMODITY_PRICE_UPDATED" then
-		if pendingAhComm and (now - (pendingAhComm.ts or 0)) <= 10 then
+		if pendingAhComm and (now - (pendingAhComm.ts or 0)) <= 30 then
 			local unitP = tonumber(arg1) or 0
 			local totalP = tonumber(arg2) or (unitP * pendingAhComm.qty)
 			if totalP > 0 then
@@ -1576,15 +1617,33 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 		else
 			pendingAhComm = nil
 		end
-	elseif event == "COMMODITY_PRICE_UNAVAILABLE" or event == "COMMODITY_PURCHASE_FAILED" then
+	elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
 		pendingAhComm = nil
+	elseif event == "COMMODITY_PURCHASE_FAILED" then
+		pendingAhComm = nil
+		confirmingAhComm = nil
 	elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
+		local c = confirmingAhComm
+		confirmingAhComm = nil
 		local p = pendingAhComm
 		pendingAhComm = nil
 		if ns.IsSnipePurchaseActive and ns:IsSnipePurchaseActive() then
 			return
 		end
-		if p and (now - (p.ts or 0)) <= 15 and (p.totalPrice or 0) > 0 then
+		if c and (now - (c.ts or 0)) <= 15 then
+			local cost = (c.spentMoney and c.spentMoney > 0) and c.spentMoney or (c.totalPrice or 0)
+			if cost <= 0 and c.moneyBefore and GetMoney then
+				local diff = c.moneyBefore - (GetMoney() or 0)
+				if diff > 0 then
+					cost = diff
+				end
+			end
+			if cost > 0 then
+				ns:RecordTradeFlowPurchase("ah_buy", c.itemID, c.qty, cost)
+				return
+			end
+		end
+		if p and (now - (p.ts or 0)) <= 60 and (p.totalPrice or 0) > 0 then
 			ns:RecordTradeFlowPurchase("ah_buy", p.itemID, p.qty, p.totalPrice)
 		end
 	elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
@@ -1664,6 +1723,18 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 		end
 	elseif event == "PLAYER_MONEY" then
 		local curM = GetMoney and GetMoney() or 0
+		local commSpentAmt = 0
+		if confirmingAhComm then
+			if (now - (confirmingAhComm.ts or 0)) > 15 then
+				confirmingAhComm = nil
+			elseif curM < (confirmingAhComm.moneyBefore or 0) then
+				local diff = confirmingAhComm.moneyBefore - curM
+				if diff > (confirmingAhComm.spentMoney or 0) then
+					commSpentAmt = diff - (confirmingAhComm.spentMoney or 0)
+					confirmingAhComm.spentMoney = diff
+				end
+			end
+		end
 		local bidMatchedAmt = 0
 		if pendingAhBid then
 			local b = pendingAhBid
@@ -1676,7 +1747,7 @@ txFrame:SetScript("OnEvent", function(_, event, ...)
 			end
 		end
 		if AuctionHouseFrame and AuctionHouseFrame:IsShown() then
-			local ahSpent = (ahMoney ~= nil and ahMoney > curM) and (ahMoney - curM - bidMatchedAmt) or 0
+			local ahSpent = (ahMoney ~= nil and ahMoney > curM) and (ahMoney - curM - bidMatchedAmt - commSpentAmt) or 0
 			ahMoney = curM
 			if ahSpent > 0 and #pendingAhPosts > 0 then
 				FlushPendingAhDeposits(ahSpent, now)

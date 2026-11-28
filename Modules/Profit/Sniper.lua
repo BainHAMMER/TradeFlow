@@ -1754,6 +1754,13 @@ function ns:BuyFirstSnipeHit()
 	end
 end
 
+function ns:GetPendingSnipeCommodityQuote()
+	if pendingBuy and pendingBuy.state == "confirm" then
+		return pendingBuy.itemID, pendingBuy.qty, pendingBuy.totalPrice
+	end
+	return nil
+end
+
 function ns:OnExternalCommodityPurchase()
 	if pendingBuy and pendingBuy.state == "confirm" then
 		pendingBuy = nil
