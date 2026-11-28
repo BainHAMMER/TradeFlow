@@ -2,6 +2,17 @@
 
 Detailed implementation notes for developers. End-user release notes live in [CHANGELOG.md](CHANGELOG.md).
 
+## v1.0.18
+### RU
+- **Надёжный трекинг покупок товаров АХ (`ProfitLog.lua`, `Sniper.lua`):** добавлен хук `C_AuctionHouse.ConfirmCommoditiesPurchase` с отдельной структурой `confirmingAhComm` (не сбрасывается хуком `CancelCommoditiesPurchase`) и замером реального списания голды через `PLAYER_MONEY` (`moneyBefore - curM`, вычитается из `ahSpent` для депозитов); добавлен `ns:GetPendingSnipeCommodityQuote()` в `Sniper.lua` для подхвата квоты снайпера при подтверждении через внешний попап Blizzard; увеличены окна `COMMODITY_PRICE_UPDATED` (30с) и фолбэка `pendingAhComm` (60с).
+- **24ч окно подробной Кассы + архив итогов (`ProfitLog.lua`, `Locales/ruRU.lua`, `Locales/enUS.lua`):** `CASHFLOW_RETENTION_SECONDS = 86400`, `GetRolling24hTimestamp()`, `TrimCashflowLog` (свёртывает записи старше 24ч или сверх `MAX_CASHFLOW_ENTRIES = 1000` в `realmDB.cashflowArchive`) и `TrimCraftLog` (свёртывает записи сверх `MAX_LOG_ENTRIES = 500` в `realmDB.profitArchive`); `GetProfitLogSummary` добавляет архивные суммы в режим «Всё время», `ClearProfitLog` сбрасывает архивы; `PROFIT_LOG_TODAY` обновлён на «За 24ч» / «Last 24h».
+
+### EN
+- **Reliable AH Commodity Purchase Tracking (`ProfitLog.lua`, `Sniper.lua`):** hooked `C_AuctionHouse.ConfirmCommoditiesPurchase` into a separate `confirmingAhComm` queue (immune to `CancelCommoditiesPurchase`) with exact wallet delta tracking via `PLAYER_MONEY` (`moneyBefore - curM`, excluded from deposit `ahSpent`); added `ns:GetPendingSnipeCommodityQuote()` in `Sniper.lua` so sniper quotes confirmed via Blizzard's BuyDialog are captured; widened `COMMODITY_PRICE_UPDATED` (30s) and fallback `pendingAhComm` (60s) windows.
+- **24h Rolling Cashflow Retention & All-Time Archive (`ProfitLog.lua`, `Locales/ruRU.lua`, `Locales/enUS.lua`):** added `CASHFLOW_RETENTION_SECONDS = 86400`, `GetRolling24hTimestamp()`, `TrimCashflowLog` (rolls entries older than 24h or past `MAX_CASHFLOW_ENTRIES = 1000` into `realmDB.cashflowArchive`), and `TrimCraftLog` (rolls entries past `MAX_LOG_ENTRIES = 500` into `realmDB.profitArchive`); `GetProfitLogSummary` merges archives for All-Time totals, `ClearProfitLog` clears archives, and `PROFIT_LOG_TODAY` updated to "За 24ч" / "Last 24h".
+
+---
+
 ## v1.0.17
 ### RU
 - **Синхронизация активной профессии, боя и прокси:** `GetActiveClientSkillLine()` и `IsClientRecipeReady()` проверяют `IsTradeSkillReady`/`IsTradeSkillLinked`/`IsTradeSkillGuild`; `TradeFlowSecureProfProxy` переведён на `DIALOG` с очисткой в `OnCombatEnded`; `PLAYER_REGEN_ENABLED` очищает `SPACE` override и дожимает `SuppressBlizzardFrame`; `ScanPlayerProfessions()` итерирует `1..7` вместо `ipairs` (исправляет `nil`-дырку `p3` для Кулинарии/Первой помощи).

@@ -1,5 +1,16 @@
 # Changelog / Список изменений
 
+## v1.0.18
+### RU
+- **Точный учёт покупок на аукционе (Касса и `(факт)`):** устранены пропуски закупок товаров с аукциона при паузе >15 сек перед подтверждением, закрытии окна подтверждения или выкупе через стандартный попап Blizzard после старта снайпером — реальная сумма списания теперь надёжно фиксируется в Кассе и себестоимости крафта.
+- **Хранение подробной Кассы за 24 часа + архив за всё время:** детальные операции Кассы хранятся за последние 24 часа (фильтр «Сегодня» заменён на «За 24ч»), а все более старые записи и записи сверх лимита журнала автоматически суммируются в архив «Всё время», не переполняя SavedVariables и не теряя общую статистику.
+
+### EN
+- **Accurate Auction House Purchase Tracking (Cashflow & Actual Cost):** fixed missed commodity purchases when pausing >15s before confirming, when the confirmation dialog closes before the server response, or when confirming via Blizzard's popup after starting from the Sniper bar — actual gold spent is now reliably recorded in Cashflow and crafting cost lots.
+- **Rolling 24-Hour Cashflow Detail + All-Time Archive:** detailed Cashflow entries are now retained for the last 24 hours ("Today" filter replaced with "Last 24h"), while older and evicted entries are automatically rolled into an All-Time archive so totals stay accurate without bloating SavedVariables.
+
+---
+
 ## v1.0.17
 ### RU
 - **Исправлено переключение профессий и запуск крафта:** кнопки «Создать» / «Создать шаг» и переключение профессий в шапке больше не рассинхронизируются с клиентом после открытия аукциона или смены профессии; исправлено чтение рангов Кулинарии и Первой помощи.
